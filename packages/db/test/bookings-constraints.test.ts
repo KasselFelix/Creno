@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../src/client.js';
+import { retryOnDeadlock, sqlState } from '../src/errors.js';
 import { bookings, providers, resources, toPoint, toRange, users } from '../src/schema/index.js';
 import { testDatabaseUrl } from './global-setup.js';
 
@@ -23,16 +24,6 @@ function insertBooking(
     expiresAt: values.expiresAt ?? null,
     priceCents: 4500,
   });
-}
-
-/** Code SQLSTATE d'une erreur pg, qu'elle soit brute ou enveloppée par Drizzle (`cause`). */
-function sqlState(error: unknown): string | undefined {
-  let current: unknown = error;
-  while (current && typeof current === 'object') {
-    if ('code' in current && typeof current.code === 'string') return current.code;
-    current = 'cause' in current ? current.cause : undefined;
-  }
-  return undefined;
 }
 
 async function expectSqlState(promise: Promise<unknown>, code: string) {
@@ -107,25 +98,39 @@ describe('bookings_no_overlap', () => {
     await expectSqlState(insertBooking(db, { start: at(10), end: at(11), status: 'pending' }), '23514');
   });
 
-  it('ne laisse passer qu’une réservation sur deux insertions concurrentes', async () => {
-    // Deux connexions distinctes qui insèrent en même temps, chacune dans sa transaction.
+  // Deux connexions distinctes qui insèrent le même créneau en même temps, chacune dans sa transaction.
+  async function raceTwoInserts(wrap: <T>(fn: () => Promise<T>) => Promise<T>) {
     const a = createDb(testDatabaseUrl(), { max: 1 });
     const b = createDb(testDatabaseUrl(), { max: 1 });
     try {
       const attempt = (handle: typeof a) =>
-        handle.db.transaction(async (tx) => {
-          await tx.execute(sql`SELECT pg_sleep(0.05)`);
-          await insertBooking(tx as unknown as Database, { start: at(10), end: at(11), status: 'confirmed' });
-        });
-
+        wrap(() =>
+          handle.db.transaction(async (tx) => {
+            await tx.execute(sql`SELECT pg_sleep(0.05)`);
+            await insertBooking(tx as unknown as Database, { start: at(10), end: at(11), status: 'confirmed' });
+          }),
+        );
       const results = await Promise.allSettled([attempt(a), attempt(b)]);
-
-      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      expect(rejected).toHaveLength(1);
-      expect(sqlState(rejected[0]!.reason)).toBe('23P01');
+      return { fulfilled: results.length - rejected.length, codes: rejected.map((r) => sqlState(r.reason)) };
     } finally {
       await Promise.all([a.pool.end(), b.pool.end()]);
+    }
+  }
+
+  it('ne laisse passer qu’une insertion sur deux concurrentes (le perdant : 23P01 ou deadlock 40P01)', async () => {
+    const { fulfilled, codes } = await raceTwoInserts((fn) => fn());
+    expect(fulfilled).toBe(1);
+    expect(codes).toHaveLength(1);
+    expect(['23P01', '40P01']).toContain(codes[0]);
+  });
+
+  it('avec retryOnDeadlock, le perdant reçoit toujours 23P01', async () => {
+    for (let run = 0; run < 5; run++) {
+      await db.execute(sql`DELETE FROM bookings`);
+      const { fulfilled, codes } = await raceTwoInserts(retryOnDeadlock);
+      expect(fulfilled).toBe(1);
+      expect(codes).toEqual(['23P01']);
     }
   });
 });

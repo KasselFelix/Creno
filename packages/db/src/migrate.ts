@@ -9,7 +9,7 @@ async function main(): Promise<void> {
 
   const { db, pool } = createDb(url, { max: 1 });
   try {
-    await migrate(db, { migrationsFolder: path.resolve(__dirname, '../migrations') });
+    await migrate(db, { migrationsFolder: path.resolve(import.meta.dirname, '../migrations') });
     process.stdout.write(`${JSON.stringify({ level: 'info', event: 'db.migrated' })}\n`);
   } finally {
     await pool.end();

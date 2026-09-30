@@ -12,7 +12,7 @@ export function testDatabaseUrl(): string {
 export default async function setup(): Promise<void> {
   const { db, pool } = createDb(testDatabaseUrl(), { max: 1 });
   try {
-    await migrate(db, { migrationsFolder: path.resolve(__dirname, '../migrations') });
+    await migrate(db, { migrationsFolder: path.resolve(import.meta.dirname, '../migrations') });
   } finally {
     await pool.end();
   }
