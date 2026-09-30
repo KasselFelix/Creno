@@ -117,6 +117,15 @@ describe('bookings_no_overlap', () => {
     ).resolves.toBeDefined();
   });
 
+  it('refuse un créneau qui n’est pas de la forme [début, fin) (23514)', async () => {
+    const insertRaw = (range: string) =>
+      db
+        .insert(bookings)
+        .values({ resourceId, customerId, during: range, status: 'confirmed', priceCents: 4500 });
+    await expectSqlState(insertRaw(`(${at(10).toISOString()},${at(11).toISOString()}]`), '23514');
+    await expectSqlState(insertRaw(`[${at(10).toISOString()},)`), '23514');
+  });
+
   it('exige expires_at pour une réservation pending (23514)', async () => {
     await expectSqlState(
       insertBooking(db, { start: at(10), end: at(11), status: 'pending' }),
@@ -151,7 +160,7 @@ describe('bookings_no_overlap', () => {
     }
   }
 
-  it('ne laisse passer qu’une insertion sur deux concurrentes (le perdant : 23P01 ou deadlock 40P01)', async () => {
+  it('documente le comportement brut : une seule insertion passe, le perdant reçoit 23P01 ou un deadlock 40P01', async () => {
     const { fulfilled, codes } = await raceTwoInserts((fn) => fn());
     expect(fulfilled).toBe(1);
     expect(codes).toHaveLength(1);

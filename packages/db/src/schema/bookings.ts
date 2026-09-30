@@ -34,9 +34,14 @@ export const bookings = pgTable(
   },
   (t) => [
     index('bookings_customer_id_idx').on(t.customerId),
+    // L'index de l'EXCLUDE est partiel (pending/confirmed) : celui-ci couvre la clé étrangère et
+    // les requêtes par ressource sur tous les statuts (historique, dashboard, occupation).
+    index('bookings_resource_id_during_gix').using('gist', t.resourceId, t.during),
+    check('bookings_currency_format', sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    // Créneau non vide, borné, et toujours [début, fin) : 10h-11h et 11h-12h ne se chevauchent pas.
     check(
       'bookings_during_valid',
-      sql`NOT isempty(${t.during}) AND NOT upper_inf(${t.during}) AND NOT lower_inf(${t.during})`,
+      sql`NOT isempty(${t.during}) AND NOT lower_inf(${t.during}) AND NOT upper_inf(${t.during}) AND lower_inc(${t.during}) AND NOT upper_inc(${t.during})`,
     ),
     check(
       'bookings_pending_has_expiry',

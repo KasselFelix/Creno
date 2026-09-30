@@ -73,6 +73,8 @@ const providerSeeds = [
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL manquante');
+  // Le seed vide les tables métier : jamais en production.
+  if (process.env.NODE_ENV === 'production') throw new Error('Seed interdit en production');
   const { db, pool } = createDb(url, { max: 1 });
 
   try {

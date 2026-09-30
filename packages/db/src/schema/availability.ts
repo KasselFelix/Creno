@@ -35,6 +35,9 @@ export const availabilityExceptions = pgTable(
   },
   (t) => [
     index('availability_exceptions_resource_during_gix').using('gist', t.resourceId, t.during),
-    check('availability_exceptions_during_not_empty', sql`NOT isempty(${t.during})`),
+    check(
+      'availability_exceptions_during_valid',
+      sql`NOT isempty(${t.during}) AND NOT lower_inf(${t.during}) AND NOT upper_inf(${t.during}) AND lower_inc(${t.during}) AND NOT upper_inc(${t.during})`,
+    ),
   ],
 );

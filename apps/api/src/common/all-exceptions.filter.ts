@@ -7,14 +7,33 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { sqlState } from '@creno/db';
 import { type ApiError, type ErrorCode, healthResponseSchema } from '@creno/shared';
 import { DomainError } from './domain-error.js';
 import { mapPgError } from './pg-errors.js';
 
 const codeByStatus: Partial<Record<number, ErrorCode>> = {
+  [HttpStatus.BAD_REQUEST]: 'BAD_REQUEST',
+  [HttpStatus.UNAUTHORIZED]: 'UNAUTHORIZED',
+  [HttpStatus.FORBIDDEN]: 'FORBIDDEN',
   [HttpStatus.NOT_FOUND]: 'NOT_FOUND',
-  [HttpStatus.BAD_REQUEST]: 'VALIDATION_FAILED',
 };
+
+const GENERIC_SERVER_ERROR = 'Erreur interne.';
+
+/**
+ * Résumé loggable d'une exception. On ne loggue jamais l'objet brut : une erreur Drizzle/pg porte
+ * les paramètres de la requête et la ligne fautive (email, téléphone…).
+ */
+export function describeError(exception: unknown) {
+  if (!(exception instanceof Error)) return { name: typeof exception };
+  return {
+    name: exception.name,
+    message: exception.message,
+    code: sqlState(exception),
+    stack: exception.stack,
+  };
+}
 
 /** Donne à toutes les erreurs le format `{ statusCode, code, message, details? }`. */
 @Catch()
@@ -35,7 +54,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const body = this.toApiError(exception);
     if (body.statusCode >= 500) {
-      this.logger.error({ event: 'http.unhandled_error', err: exception }, 'Erreur non gérée');
+      this.logger.error(
+        { event: 'http.unhandled_error', err: describeError(exception) },
+        'Erreur non gérée',
+      );
     }
     res.status(body.statusCode).json(body);
   }
@@ -50,15 +72,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ...(domain.details === undefined ? {} : { details: domain.details }),
       };
     }
-    if (exception instanceof HttpException) {
+    if (exception instanceof HttpException && exception.getStatus() < 500) {
       const statusCode = exception.getStatus();
       return {
         statusCode,
-        code:
-          codeByStatus[statusCode] ?? (statusCode >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_FAILED'),
+        code: codeByStatus[statusCode] ?? 'BAD_REQUEST',
         message: exception.message,
       };
     }
-    return { statusCode: 500, code: 'INTERNAL_ERROR', message: 'Erreur interne.' };
+    // 5xx : message générique, le détail reste dans les logs.
+    const statusCode = exception instanceof HttpException ? exception.getStatus() : 500;
+    return { statusCode, code: 'INTERNAL_ERROR', message: GENERIC_SERVER_ERROR };
   }
 }

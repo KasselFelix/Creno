@@ -4,7 +4,6 @@ import { mapPgError } from './pg-errors.js';
 describe('mapPgError', () => {
   it.each([
     ['23P01', 'SLOT_UNAVAILABLE'],
-    ['40P01', 'SLOT_UNAVAILABLE'],
     ['23505', 'ALREADY_EXISTS'],
     ['23503', 'INVALID_REFERENCE'],
   ])('traduit %s en %s (409)', (code, expected) => {
@@ -22,5 +21,6 @@ describe('mapPgError', () => {
   it('ignore les autres erreurs', () => {
     expect(mapPgError(new Error('boom'))).toBeUndefined();
     expect(mapPgError({ code: '42P01' })).toBeUndefined();
+    expect(mapPgError({ code: '40P01' })).toBeUndefined();
   });
 });

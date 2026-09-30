@@ -24,5 +24,6 @@ export const resources = pgTable(
     index('resources_provider_id_idx').on(t.providerId),
     check('resources_slot_minutes_range', sql`${t.slotMinutes} BETWEEN 5 AND 1440`),
     check('resources_price_cents_positive', sql`${t.priceCents} >= 0`),
+    check('resources_currency_format', sql`${t.currency} ~ '^[A-Z]{3}$'`),
   ],
 );

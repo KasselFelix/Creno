@@ -12,6 +12,7 @@ export function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
+      className="size-11"
       aria-label="Changer de thème"
       onClick={() => setTheme(next)}
     >

@@ -51,7 +51,10 @@ export async function ApiStatusCard() {
 export function ApiStatusCardSkeleton() {
   return (
     <StatusCard>
-      <Skeleton className="h-6 w-32" />
+      <div role="status" aria-busy="true">
+        <Skeleton className="h-6 w-32" />
+        <span className="sr-only">Vérification de l&apos;API…</span>
+      </div>
     </StatusCard>
   );
 }

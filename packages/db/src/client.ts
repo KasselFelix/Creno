@@ -23,7 +23,15 @@ export function createDb(
   connectionString: string,
   { onIdleClientError, ...options }: CreateDbOptions = {},
 ): DbHandle {
-  const pool = new Pool({ connectionString, max: 10, ...options });
+  const pool = new Pool({
+    connectionString,
+    max: 10,
+    // Sans timeout, pg attend indéfiniment une base qui ne répond pas (réseau muet) :
+    // la sonde /health/ready resterait pendante au lieu de répondre 503.
+    connectionTimeoutMillis: 5_000,
+    statement_timeout: 10_000,
+    ...options,
+  });
   pool.on('error', (error) => onIdleClientError?.(error));
   return { db: drizzle(pool, { schema }), pool };
 }

@@ -63,11 +63,12 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 
 ## Migrations
 
-| Fichier                                 | Contenu                                        |
-| --------------------------------------- | ---------------------------------------------- |
-| `0000_extensions.sql` (custom)          | `postgis`, `btree_gist`, `citext`              |
-| `0001_initial_schema.sql` (générée)     | tables, enums, clés étrangères, CHECK, index   |
-| `0002_bookings_no_overlap.sql` (custom) | contrainte d'exclusion anti double réservation |
+| Fichier                                             | Contenu                                                                                               |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                     |
+| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                          |
+| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                        |
+| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises |
 
 ## La contrainte `bookings_no_overlap`
 
@@ -92,6 +93,7 @@ ALTER TABLE bookings ADD CONSTRAINT bookings_no_overlap
 ## Autres contraintes
 
 - `bookings_pending_has_expiry` : un `pending` a toujours un `expires_at`.
-- `bookings_during_valid` : créneau non vide et borné.
+- `bookings_during_valid` / `availability_exceptions_during_valid` : créneau non vide, borné, et toujours `[début, fin)` (même en SQL direct).
+- `bookings_currency_format`, `resources_currency_format` : code ISO 4217 (3 majuscules).
 - `resources_slot_minutes_range`, `*_price_cents_positive`, `availability_rules_weekday_range`, `availability_rules_time_order`.
-- Index GiST : `providers_location_gix` (recherche par rayon), `availability_exceptions_resource_during_gix`.
+- Index GiST : `providers_location_gix` (recherche par rayon), `availability_exceptions_resource_during_gix`, `bookings_resource_id_during_gix`. Ce dernier complète l'index de l'EXCLUDE, qui est partiel (`pending`/`confirmed`) : il sert la clé étrangère vers `resources` et les requêtes par ressource sur tous les statuts (historique, dashboard, occupation).

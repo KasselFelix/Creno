@@ -3,12 +3,12 @@ import { DomainError } from './domain-error.js';
 
 /**
  * Traduit une violation de contrainte Postgres en erreur métier, ou renvoie `undefined`.
- * 40P01 (deadlock) n'arrive qu'après épuisement de `retryOnDeadlock` sur une course de réservation.
+ * 40P01 (deadlock) n'est pas traduit ici : seul le service de réservation sait qu'un deadlock
+ * résiduel (après `retryOnDeadlock`) signifie « créneau pris ». Ailleurs, c'est une 500.
  */
 export function mapPgError(error: unknown): DomainError | undefined {
   switch (sqlState(error)) {
     case '23P01':
-    case '40P01':
       return new DomainError('SLOT_UNAVAILABLE', 409, "Ce créneau n'est plus disponible.");
     case '23505':
       return new DomainError('ALREADY_EXISTS', 409, 'Cette ressource existe déjà.');

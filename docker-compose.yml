@@ -2,6 +2,7 @@ name: creno
 
 # `docker compose up` suffit sur un clone frais : les valeurs par défaut ci-dessous permettent de
 # démarrer sans .env (cp .env.example .env pour les personnaliser).
+# Les ports ne sont publiés que sur 127.0.0.1 : identifiants de dev, jamais exposés au réseau local.
 x-env: &env
   env_file:
     - path: .env
@@ -15,7 +16,7 @@ services:
       POSTGRES_PASSWORD: creno
       POSTGRES_DB: creno
     ports:
-      - '${DB_PORT:-5432}:5432'
+      - '127.0.0.1:${DB_PORT:-5432}:5432'
     volumes:
       - db-data:/var/lib/postgresql/data
       - ./docker/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
@@ -35,7 +36,7 @@ services:
       DATABASE_URL_TEST: postgres://creno:creno@db:5432/creno_test
       WEB_ORIGIN: http://localhost:3000
     ports:
-      - '4000:4000'
+      - '127.0.0.1:4000:4000'
     volumes:
       - .:/app
       # Les node_modules (binaires Linux) restent ceux de l'image, pas ceux de l'hôte.
@@ -60,7 +61,7 @@ services:
     environment:
       API_INTERNAL_URL: http://api:4000
     ports:
-      - '3000:3000'
+      - '127.0.0.1:3000:3000'
     volumes:
       - .:/app
       - /app/node_modules

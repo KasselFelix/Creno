@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 /** Codes d'erreur métier partagés entre l'API et le front. */
 export const errorCodes = [
+  'BAD_REQUEST',
+  'UNAUTHORIZED',
+  'FORBIDDEN',
   'NOT_FOUND',
   'VALIDATION_FAILED',
   'INTERNAL_ERROR',
