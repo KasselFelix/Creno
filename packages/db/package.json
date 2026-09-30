@@ -1,0 +1,42 @@
+{
+  "name": "@creno/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts",
+    "seed": "tsx --env-file-if-exists=../../.env src/seed.ts",
+    "migrate:prod": "node dist/migrate.js"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@creno/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^10.11.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.3"
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ]
+}

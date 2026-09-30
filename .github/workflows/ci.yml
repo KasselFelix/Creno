@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: creno
+          POSTGRES_PASSWORD: creno
+          POSTGRES_DB: creno_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U creno -d creno_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Base éphémère du job : identifiants factices, aucun secret.
+      DATABASE_URL: postgres://creno:creno@localhost:5432/creno_test
+      DATABASE_URL_TEST: postgres://creno:creno@localhost:5432/creno_test
+      TURBO_TELEMETRY_DISABLED: 1
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - name: Migrations (base de test)
+        run: pnpm db:migrate
+      - run: pnpm test
+      - name: Cohérence du schéma et des migrations
+        run: pnpm --filter @creno/db exec drizzle-kit check
+      - run: pnpm build
+
+  secrets-scan:
+    name: Secrets scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

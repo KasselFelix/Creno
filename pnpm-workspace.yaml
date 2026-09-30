@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+onlyBuiltDependencies:
+  - '@swc/core'
+  - esbuild
+  - sharp
+
+# Télémétrie de swagger-ui-dist : volontairement non exécutée.
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+  - unrs-resolver # binaire natif fourni par une dépendance optionnelle

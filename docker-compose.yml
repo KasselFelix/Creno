@@ -1,0 +1,78 @@
+name: creno
+
+# `docker compose up` suffit sur un clone frais : les valeurs par défaut ci-dessous permettent de
+# démarrer sans .env (cp .env.example .env pour les personnaliser).
+# Les ports ne sont publiés que sur 127.0.0.1 : identifiants de dev, jamais exposés au réseau local.
+x-env: &env
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: creno
+      POSTGRES_PASSWORD: creno
+      POSTGRES_DB: creno
+    ports:
+      - '127.0.0.1:${DB_PORT:-5432}:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./docker/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U creno -d creno']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    <<: *env
+    build: { context: ., dockerfile: apps/api/Dockerfile, target: dev }
+    command: sh -c "pnpm db:migrate && pnpm db:seed && pnpm turbo run dev --filter=api"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://creno:creno@db:5432/creno
+      DATABASE_URL_TEST: postgres://creno:creno@db:5432/creno_test
+      WEB_ORIGIN: http://localhost:3000
+    ports:
+      - '127.0.0.1:4000:4000'
+    volumes:
+      - .:/app
+      # Les node_modules (binaires Linux) restent ceux de l'image, pas ceux de l'hôte.
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/web/node_modules
+      - /app/packages/config/node_modules
+      - /app/packages/db/node_modules
+      - /app/packages/shared/node_modules
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:4000/health || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 90s
+
+  web:
+    <<: *env
+    build: { context: ., dockerfile: apps/web/Dockerfile, target: dev }
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/web/.next
+      - /app/packages/config/node_modules
+      - /app/packages/db/node_modules
+      - /app/packages/shared/node_modules
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  db-data:
