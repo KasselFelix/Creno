@@ -28,7 +28,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const health = healthResponseSchema.safeParse(exception.getResponse());
       if (health.success) {
-        res.status(exception.getStatus()).json(health.data);
+        res.status(exception.getStatus()).json(exception.getResponse());
         return;
       }
     }
