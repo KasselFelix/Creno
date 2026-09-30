@@ -1,0 +1,5 @@
+{
+  "extends": "@creno/config/tsconfig/node.json",
+  "compilerOptions": { "rootDir": ".", "outDir": "dist" },
+  "include": ["src", "test", "*.ts", "*.mts"]
+}

@@ -1,0 +1,22 @@
+name: creno
+
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: creno
+      POSTGRES_PASSWORD: creno
+      POSTGRES_DB: creno
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./docker/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U creno -d creno']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db-data:
