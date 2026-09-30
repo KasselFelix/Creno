@@ -1,0 +1,25 @@
+{
+  "name": "creno",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test --concurrency=1",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter @creno/db exec drizzle-kit generate",
+    "db:custom": "pnpm --filter @creno/db exec drizzle-kit generate --custom --name",
+    "db:migrate": "pnpm --filter @creno/db migrate",
+    "db:seed": "pnpm --filter @creno/db seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.0",
+    "turbo": "^2.11.5"
+  }
+}
