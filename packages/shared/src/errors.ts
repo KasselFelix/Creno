@@ -12,6 +12,10 @@ export const errorCodes = [
   'ALREADY_EXISTS',
   'INVALID_REFERENCE',
   'FORBIDDEN_OWNERSHIP',
+  'EMAIL_TAKEN',
+  'INVALID_CREDENTIALS',
+  'SESSION_EXPIRED',
+  'TOO_MANY_REQUESTS',
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);

@@ -1,4 +1,5 @@
 // Données de démo. Idempotent : vide les tables métier puis réinsère le même jeu de données.
+import { hash } from '@node-rs/argon2';
 import { sql } from 'drizzle-orm';
 import { createDb } from './client.js';
 import {
@@ -13,6 +14,9 @@ import {
 } from './schema/index.js';
 
 const HOUR = 60 * 60 * 1000;
+
+/** Mot de passe de tous les comptes de démo (développement uniquement, documenté dans le README). */
+export const DEMO_PASSWORD = 'creno-demo-2026';
 
 /** Demain à `hour`:00 UTC, décalé de `days` jours. */
 function dayAt(days: number, hour: number, minutes = 0): Date {
@@ -76,21 +80,22 @@ async function main(): Promise<void> {
   // Le seed vide les tables métier : jamais en production.
   if (process.env.NODE_ENV === 'production') throw new Error('Seed interdit en production');
   const { db, pool } = createDb(url, { max: 1 });
+  const passwordHash = await hash(DEMO_PASSWORD);
 
   try {
     await db.transaction(async (tx) => {
       await tx.execute(
-        sql`TRUNCATE bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+        sql`TRUNCATE sessions, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
       );
 
       await tx
         .insert(users)
-        .values({ email: 'admin@creno.dev', fullName: 'Admin Creno', role: 'admin' });
+        .values({ email: 'admin@creno.dev', fullName: 'Admin Creno', role: 'admin', passwordHash });
       const customers = await tx
         .insert(users)
         .values([
-          { email: 'lea.petit@example.com', fullName: 'Léa Petit' },
-          { email: 'tom.moreau@example.com', fullName: 'Tom Moreau' },
+          { email: 'lea.petit@example.com', fullName: 'Léa Petit', passwordHash },
+          { email: 'tom.moreau@example.com', fullName: 'Tom Moreau', passwordHash },
         ])
         .returning({ id: users.id });
 
@@ -98,7 +103,7 @@ async function main(): Promise<void> {
       for (const p of providerSeeds) {
         const [owner] = await tx
           .insert(users)
-          .values({ email: p.email, fullName: p.fullName, role: 'provider' })
+          .values({ email: p.email, fullName: p.fullName, role: 'provider', passwordHash })
           .returning({ id: users.id });
         const [provider] = await tx
           .insert(providers)
