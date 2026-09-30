@@ -28,7 +28,9 @@ describe('health', () => {
   it('renvoie un x-request-id, et réutilise celui du client', async () => {
     const generated = await request(app.getHttpServer()).get('/health');
     expect(generated.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
-    const forwarded = await request(app.getHttpServer()).get('/health').set('x-request-id', 'trace-123');
+    const forwarded = await request(app.getHttpServer())
+      .get('/health')
+      .set('x-request-id', 'trace-123');
     expect(forwarded.headers['x-request-id']).toBe('trace-123');
   });
 

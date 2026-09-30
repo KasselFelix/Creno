@@ -6,7 +6,10 @@ import { testDatabaseUrl } from './global-setup.js';
 describe('createDb', () => {
   it("survit à la coupure d'une connexion inactive et en rouvre une", async () => {
     const errors: Error[] = [];
-    const { db, pool } = createDb(testDatabaseUrl(), { max: 1, onIdleClientError: (e) => errors.push(e) });
+    const { db, pool } = createDb(testDatabaseUrl(), {
+      max: 1,
+      onIdleClientError: (e) => errors.push(e),
+    });
     const admin = createDb(testDatabaseUrl(), { max: 1 });
     try {
       const { rows } = await db.execute<{ pid: number }>(sql`SELECT pg_backend_pid() AS pid`);

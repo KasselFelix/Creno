@@ -81,7 +81,9 @@ async function main(): Promise<void> {
         sql`TRUNCATE bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
       );
 
-      await tx.insert(users).values({ email: 'admin@creno.dev', fullName: 'Admin Creno', role: 'admin' });
+      await tx
+        .insert(users)
+        .values({ email: 'admin@creno.dev', fullName: 'Admin Creno', role: 'admin' });
       const customers = await tx
         .insert(users)
         .values([
@@ -171,6 +173,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`${JSON.stringify({ level: 'error', event: 'db.seed_failed', error: String(error) })}\n`);
+  process.stderr.write(
+    `${JSON.stringify({ level: 'error', event: 'db.seed_failed', error: String(error) })}\n`,
+  );
   process.exit(1);
 });

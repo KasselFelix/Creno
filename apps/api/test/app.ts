@@ -8,7 +8,9 @@ import { DB } from '../src/database/database.module.js';
 import { setupApp } from '../src/setup-app.js';
 
 /** Démarre l'application complète sur la base de test (jamais de base mockée). */
-export async function createTestApp(options: { databaseUrl?: string } = {}): Promise<INestApplication> {
+export async function createTestApp(
+  options: { databaseUrl?: string } = {},
+): Promise<INestApplication> {
   const testUrl = process.env.DATABASE_URL_TEST;
   if (!testUrl) throw new Error('DATABASE_URL_TEST manquante (voir .env.example)');
   process.env.NODE_ENV = 'test';
@@ -16,7 +18,9 @@ export async function createTestApp(options: { databaseUrl?: string } = {}): Pro
 
   const builder = Test.createTestingModule({ imports: [AppModule] });
   if (options.databaseUrl) {
-    builder.overrideProvider(DB).useValue(createDb(options.databaseUrl, { connectionTimeoutMillis: 500 }));
+    builder
+      .overrideProvider(DB)
+      .useValue(createDb(options.databaseUrl, { connectionTimeoutMillis: 500 }));
   }
   const moduleRef = await builder.compile();
 

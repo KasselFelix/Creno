@@ -34,8 +34,14 @@ export const bookings = pgTable(
   },
   (t) => [
     index('bookings_customer_id_idx').on(t.customerId),
-    check('bookings_during_valid', sql`NOT isempty(${t.during}) AND NOT upper_inf(${t.during}) AND NOT lower_inf(${t.during})`),
-    check('bookings_pending_has_expiry', sql`${t.status} <> 'pending' OR ${t.expiresAt} IS NOT NULL`),
+    check(
+      'bookings_during_valid',
+      sql`NOT isempty(${t.during}) AND NOT upper_inf(${t.during}) AND NOT lower_inf(${t.during})`,
+    ),
+    check(
+      'bookings_pending_has_expiry',
+      sql`${t.status} <> 'pending' OR ${t.expiresAt} IS NOT NULL`,
+    ),
     check('bookings_price_cents_positive', sql`${t.priceCents} >= 0`),
   ],
 );

@@ -14,7 +14,12 @@ const inFifteenMinutes = () => new Date(Date.now() + 15 * 60 * 1000);
 
 function insertBooking(
   database: Database,
-  values: { start: Date; end: Date; status: 'pending' | 'confirmed' | 'cancelled' | 'expired'; expiresAt?: Date | null },
+  values: {
+    start: Date;
+    end: Date;
+    status: 'pending' | 'confirmed' | 'cancelled' | 'expired';
+    expiresAt?: Date | null;
+  },
 ) {
   return database.insert(bookings).values({
     resourceId,
@@ -59,7 +64,13 @@ beforeEach(async () => {
     .returning({ id: providers.id });
   const [resource] = await db
     .insert(resources)
-    .values({ providerId: provider!.id, name: 'Studio A', timezone: 'Europe/Paris', slotMinutes: 60, priceCents: 4500 })
+    .values({
+      providerId: provider!.id,
+      name: 'Studio A',
+      timezone: 'Europe/Paris',
+      slotMinutes: 60,
+      priceCents: 4500,
+    })
     .returning({ id: resources.id });
   resourceId = resource!.id;
   customerId = customer!.id;
@@ -72,13 +83,21 @@ afterAll(async () => {
 describe('bookings_no_overlap', () => {
   it('refuse deux réservations confirmées qui se chevauchent sur la même ressource (23P01)', async () => {
     await insertBooking(db, { start: at(10), end: at(11), status: 'confirmed' });
-    await expectSqlState(insertBooking(db, { start: at(10, 30), end: at(11, 30), status: 'confirmed' }), '23P01');
+    await expectSqlState(
+      insertBooking(db, { start: at(10, 30), end: at(11, 30), status: 'confirmed' }),
+      '23P01',
+    );
   });
 
   it('refuse un hold de paiement sur un créneau déjà confirmé', async () => {
     await insertBooking(db, { start: at(10), end: at(11), status: 'confirmed' });
     await expectSqlState(
-      insertBooking(db, { start: at(10), end: at(11), status: 'pending', expiresAt: inFifteenMinutes() }),
+      insertBooking(db, {
+        start: at(10),
+        end: at(11),
+        status: 'pending',
+        expiresAt: inFifteenMinutes(),
+      }),
       '23P01',
     );
   });
@@ -86,16 +105,23 @@ describe('bookings_no_overlap', () => {
   it('autorise un chevauchement avec une réservation annulée ou expirée', async () => {
     await insertBooking(db, { start: at(10), end: at(11), status: 'cancelled' });
     await insertBooking(db, { start: at(10), end: at(11), status: 'expired' });
-    await expect(insertBooking(db, { start: at(10), end: at(11), status: 'confirmed' })).resolves.toBeDefined();
+    await expect(
+      insertBooking(db, { start: at(10), end: at(11), status: 'confirmed' }),
+    ).resolves.toBeDefined();
   });
 
   it('autorise des créneaux adjacents grâce aux bornes [début, fin)', async () => {
     await insertBooking(db, { start: at(10), end: at(11), status: 'confirmed' });
-    await expect(insertBooking(db, { start: at(11), end: at(12), status: 'confirmed' })).resolves.toBeDefined();
+    await expect(
+      insertBooking(db, { start: at(11), end: at(12), status: 'confirmed' }),
+    ).resolves.toBeDefined();
   });
 
   it('exige expires_at pour une réservation pending (23514)', async () => {
-    await expectSqlState(insertBooking(db, { start: at(10), end: at(11), status: 'pending' }), '23514');
+    await expectSqlState(
+      insertBooking(db, { start: at(10), end: at(11), status: 'pending' }),
+      '23514',
+    );
   });
 
   // Deux connexions distinctes qui insèrent le même créneau en même temps, chacune dans sa transaction.
@@ -107,12 +133,19 @@ describe('bookings_no_overlap', () => {
         wrap(() =>
           handle.db.transaction(async (tx) => {
             await tx.execute(sql`SELECT pg_sleep(0.05)`);
-            await insertBooking(tx as unknown as Database, { start: at(10), end: at(11), status: 'confirmed' });
+            await insertBooking(tx as unknown as Database, {
+              start: at(10),
+              end: at(11),
+              status: 'confirmed',
+            });
           }),
         );
       const results = await Promise.allSettled([attempt(a), attempt(b)]);
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      return { fulfilled: results.length - rejected.length, codes: rejected.map((r) => sqlState(r.reason)) };
+      return {
+        fulfilled: results.length - rejected.length,
+        codes: rejected.map((r) => sqlState(r.reason)),
+      };
     } finally {
       await Promise.all([a.pool.end(), b.pool.end()]);
     }

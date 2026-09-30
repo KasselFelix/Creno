@@ -9,7 +9,12 @@ export function ThemeToggle() {
   const next = resolvedTheme === 'dark' ? 'light' : 'dark';
 
   return (
-    <Button variant="ghost" size="icon" aria-label="Changer de thème" onClick={() => setTheme(next)}>
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="Changer de thème"
+      onClick={() => setTheme(next)}
+    >
       <Sun aria-hidden className="size-5 dark:hidden" />
       <Moon aria-hidden className="hidden size-5 dark:block" />
     </Button>

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const indicatorSchema = z.looseObject({ status: z.enum(["up", "down"]) });
+const indicatorSchema = z.looseObject({ status: z.enum(['up', 'down']) });
 
 /** Réponse de `GET /health/ready` (format @nestjs/terminus). */
 export const healthResponseSchema = z.object({

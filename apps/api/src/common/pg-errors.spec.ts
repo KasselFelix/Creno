@@ -14,7 +14,9 @@ describe('mapPgError', () => {
   });
 
   it("lit le code dans la cause quand Drizzle enveloppe l'erreur pg", () => {
-    expect(mapPgError(new Error('query failed', { cause: { code: '23P01' } }))?.code).toBe('SLOT_UNAVAILABLE');
+    expect(mapPgError(new Error('query failed', { cause: { code: '23P01' } }))?.code).toBe(
+      'SLOT_UNAVAILABLE',
+    );
   });
 
   it('ignore les autres erreurs', () => {

@@ -7,7 +7,9 @@ describe('toApiStatus', () => {
   });
 
   it('down sur un 503 terminus', () => {
-    expect(toApiStatus(503, { status: 'error', error: { database: { status: 'down' } } })).toBe('down');
+    expect(toApiStatus(503, { status: 'error', error: { database: { status: 'down' } } })).toBe(
+      'down',
+    );
   });
 
   it('down quand la réponse est invalide', () => {

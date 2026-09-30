@@ -15,7 +15,10 @@ export const DB = Symbol('DB');
         const logger = new Logger('Database');
         return createDb(config.DATABASE_URL, {
           onIdleClientError: (error) =>
-            logger.warn({ event: 'db.idle_client_error', err: error.message }, 'Connexion Postgres coupée'),
+            logger.warn(
+              { event: 'db.idle_client_error', err: error.message },
+              'Connexion Postgres coupée',
+            ),
         });
       },
     },

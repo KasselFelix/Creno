@@ -17,6 +17,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`${JSON.stringify({ level: 'error', event: 'db.migrate_failed', error: String(error) })}\n`);
+  process.stderr.write(
+    `${JSON.stringify({ level: 'error', event: 'db.migrate_failed', error: String(error) })}\n`,
+  );
   process.exit(1);
 });

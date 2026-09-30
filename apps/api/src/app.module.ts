@@ -11,7 +11,10 @@ import { HealthModule } from './health/health.module.js';
 @Module({
   imports: [
     ConfigModule,
-    LoggerModule.forRootAsync({ inject: [APP_CONFIG], useFactory: (config: AppConfig) => loggerParams(config) }),
+    LoggerModule.forRootAsync({
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) => loggerParams(config),
+    }),
     DatabaseModule,
     HealthModule,
   ],

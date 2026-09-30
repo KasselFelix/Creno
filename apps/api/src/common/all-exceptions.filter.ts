@@ -54,7 +54,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const statusCode = exception.getStatus();
       return {
         statusCode,
-        code: codeByStatus[statusCode] ?? (statusCode >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_FAILED'),
+        code:
+          codeByStatus[statusCode] ?? (statusCode >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_FAILED'),
         message: exception.message,
       };
     }

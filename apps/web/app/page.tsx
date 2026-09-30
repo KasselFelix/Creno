@@ -17,8 +17,8 @@ export default function HomePage() {
             Réservez le bon créneau, au bon endroit.
           </h1>
           <p className="text-muted-foreground text-lg">
-            Salles, coiffeurs, terrains, photographes : trouvez un prestataire sur la carte, choisissez un
-            créneau libre et payez en ligne.
+            Salles, coiffeurs, terrains, photographes : trouvez un prestataire sur la carte,
+            choisissez un créneau libre et payez en ligne.
           </p>
         </div>
         <Suspense fallback={<ApiStatusCardSkeleton />}>
