@@ -1,0 +1,11 @@
+{
+  "extends": "@creno/config/tsconfig/node.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false
+  },
+  "include": ["src", "test", "*.ts", "*.mts"]
+}
