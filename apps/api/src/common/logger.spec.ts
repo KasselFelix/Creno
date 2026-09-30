@@ -1,4 +1,5 @@
 import { Writable } from 'node:stream';
+import { DrizzleQueryError } from 'drizzle-orm';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { describeError } from './all-exceptions.filter.js';
@@ -38,6 +39,29 @@ describe('redaction des logs', () => {
       },
     });
     expect(line).not.toContain('lea@example.com');
+  });
+
+  it('describeError retire les valeurs du message et de la pile d’une DrizzleQueryError', () => {
+    const pgError = Object.assign(
+      new Error('new row for relation "users" violates check constraint'),
+      {
+        code: '23514',
+        detail: 'Failing row contains (lea@example.com, 0600000000)',
+      },
+    );
+    const error = new DrizzleQueryError(
+      'insert into "users" ("email", "phone") values ($1, $2)',
+      ['lea@example.com', '0600000000'],
+      pgError,
+    );
+
+    const serialized = JSON.stringify(describeError(error));
+
+    expect(serialized).not.toContain('lea@example.com');
+    expect(serialized).not.toContain('0600000000');
+    expect(serialized).toContain('insert into');
+    expect(serialized).toContain('23514');
+    expect(serialized).toContain('violates check constraint');
   });
 
   it('describeError ne garde que nom, message, code SQL et pile', () => {

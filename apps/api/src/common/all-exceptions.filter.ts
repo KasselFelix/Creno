@@ -21,17 +21,25 @@ const codeByStatus: Partial<Record<number, ErrorCode>> = {
 
 const GENERIC_SERVER_ERROR = 'Erreur interne.';
 
+/** Drizzle écrit les valeurs de la requête dans le message : `Failed query: …\nparams: …`. */
+function withoutQueryParams(text: string | undefined): string | undefined {
+  return text?.replace(/\nparams:[^\n]*/g, '\nparams: [redacted]');
+}
+
 /**
  * Résumé loggable d'une exception. On ne loggue jamais l'objet brut : une erreur Drizzle/pg porte
- * les paramètres de la requête et la ligne fautive (email, téléphone…).
+ * les paramètres de la requête et la ligne fautive (email, téléphone…), y compris dans son message.
  */
 export function describeError(exception: unknown) {
   if (!(exception instanceof Error)) return { name: typeof exception };
+  const cause = exception.cause instanceof Error ? exception.cause : undefined;
   return {
     name: exception.name,
-    message: exception.message,
+    message: withoutQueryParams(exception.message),
     code: sqlState(exception),
-    stack: exception.stack,
+    // Le message de l'erreur pg d'origine (ex. « violates check constraint … ») ne contient pas de valeur.
+    cause: cause?.message,
+    stack: withoutQueryParams(exception.stack),
   };
 }
 
