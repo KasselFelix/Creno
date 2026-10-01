@@ -15,6 +15,7 @@ const messages: Partial<Record<ErrorCode, string>> = {
   PROVIDER_PROFILE_REQUIRED: "Créez d'abord votre profil prestataire.",
   SLOT_UNAVAILABLE: "Ce créneau vient d'être pris. Choisissez-en un autre.",
   SLOT_NOT_OFFERED: "Ce créneau n'est plus proposé.",
+  LIMIT_REACHED: "Limite atteinte. Supprimez des éléments avant d'en ajouter.",
   HOLD_LIMIT_REACHED: 'Vous avez trop de réservations en attente de paiement.',
 };
 

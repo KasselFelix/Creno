@@ -1,8 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { addMinutes } from 'date-fns';
+import { addDays, addMinutes } from 'date-fns';
 import { type DbHandle, PG_DEADLOCK_DETECTED, retryOnDeadlock, sqlState } from '@creno/db';
 import {
   type Booking,
+  BOOKING_HORIZON_DAYS,
   type CreateBookingInput,
   HOLD_MINUTES,
   MAX_ACTIVE_HOLDS,
@@ -49,29 +50,29 @@ export class BookingsService {
     const start = new Date(input.start);
     const slot = { start, end: addMinutes(start, resource.slotMinutes) };
 
+    const notOffered = () =>
+      new DomainError('SLOT_NOT_OFFERED', 422, "Ce créneau n'est pas proposé par cette ressource.");
+    // Écarte tout de suite une date passée ou lointaine, avant le moindre calcul (dates extrêmes).
+    const now = new Date();
+    if (start <= now || start > addDays(now, BOOKING_HORIZON_DAYS + 1)) throw notOffered();
     // Distingue « ce créneau n'existe pas » (422) de « ce créneau est pris » (409, plus bas).
-    if (!(await this.availability.isOffered(resource, start))) {
-      throw new DomainError(
-        'SLOT_NOT_OFFERED',
-        422,
-        "Ce créneau n'est pas proposé par cette ressource.",
-      );
-    }
-    // Frein au blocage gratuit d'un agenda. Contrôle applicatif assumé : deux requêtes simultanées
-    // peuvent dépasser la limite d'une unité, ce qui est sans conséquence.
-    if ((await this.bookings.countActiveHolds(current.id)) >= MAX_ACTIVE_HOLDS) {
-      throw new DomainError(
-        'HOLD_LIMIT_REACHED',
-        409,
-        `Vous avez déjà ${MAX_ACTIVE_HOLDS} réservations en attente de paiement.`,
-      );
-    }
+    if (!(await this.availability.isOffered(resource, start, now))) throw notOffered();
 
     let attempts = 0;
     try {
       const { row, released } = await retryOnDeadlock(() => {
         attempts += 1;
         return this.handle.db.transaction(async (tx) => {
+          // Frein au blocage gratuit d'un agenda. Le verrou par client sérialise ses demandes :
+          // des requêtes parallèles ne peuvent pas toutes passer sous la limite avant d'insérer.
+          await this.bookings.lockCustomer(current.id, tx);
+          if ((await this.bookings.countActiveHolds(current.id, tx)) >= MAX_ACTIVE_HOLDS) {
+            throw new DomainError(
+              'HOLD_LIMIT_REACHED',
+              409,
+              `Vous avez déjà ${MAX_ACTIVE_HOLDS} réservations en attente de paiement.`,
+            );
+          }
           const released = await this.bookings.expireOverlappingHolds(resource.id, slot, tx);
           const row = await this.bookings.insertHold(
             {
@@ -98,6 +99,7 @@ export class BookingsService {
       return toBooking(row);
     } catch (error) {
       if (attempts > 1) this.logDeadlockRetry(resource.id, attempts);
+      if (error instanceof DomainError) throw error;
       const state = sqlState(error);
       // Un deadlock qui persiste après les rejeux signifie qu'une autre transaction tient le créneau.
       if (state === '23P01' || state === PG_DEADLOCK_DETECTED) {

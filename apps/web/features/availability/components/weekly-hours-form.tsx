@@ -12,14 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/lib/api/errors';
 import { useReplaceRules, useRules } from '../api';
+import { toApi, toForm } from '../hours';
 
 const WEEKDAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-
-// Un champ `time` ne sait pas afficher 24:00 : à l'écran, une fin à minuit s'écrit 00:00.
-const toForm = (rules: AvailabilityRule[]) =>
-  rules.map((rule) => ({ ...rule, endTime: rule.endTime === '24:00' ? '00:00' : rule.endTime }));
-const toApi = (rules: AvailabilityRule[]) =>
-  rules.map((rule) => ({ ...rule, endTime: rule.endTime === '00:00' ? '24:00' : rule.endTime }));
 
 export function WeeklyHoursForm({ resourceId }: { resourceId: string }) {
   const rules = useRules(resourceId);

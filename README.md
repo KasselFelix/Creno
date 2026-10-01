@@ -83,6 +83,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - Un prestataire crée son profil, ses ressources, leurs **horaires hebdomadaires en heure locale** (plusieurs plages par jour) et ses fermetures exceptionnelles.
 - `GET /v1/resources/:id/slots?from=&to=` renvoie les créneaux par jour local de la ressource ; un créneau occupé est marqué `available: false`.
 - `POST /v1/bookings` pose un **hold de 15 minutes** (booking `pending`) : 409 si le créneau est pris, 422 s'il n'est pas proposé. Un hold expiré ne bloque plus rien, sans attendre de tâche de nettoyage.
+- Garde-fous : 5 holds actifs par client (verrou par client, la limite tient face à des demandes simultanées), 200 fermetures à venir par ressource, limites de débit par IP sur les lectures publiques et sur les réservations.
 - Le paiement et la confirmation arrivent à l'étape suivante ; la fiche publique affiche la grille sans bouton de réservation.
 
 ## Authentification et autorisations
@@ -106,20 +107,22 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 
 ## Variables d'environnement
 
-| Variable                     | Utilisée par   | Défaut / exemple                                   | Rôle                                                                                                         |
-| ---------------------------- | -------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `NODE_ENV`                   | api, web       | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                            |
-| `DB_PORT`                    | docker compose | `5432`                                             | port exposé de Postgres                                                                                      |
-| `DATABASE_URL`               | api, db        | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                              |
-| `DATABASE_URL_TEST`          | tests          | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                 |
-| `API_PORT`                   | api            | `4000`                                             | port HTTP de l'API                                                                                           |
-| `LOG_LEVEL`                  | api            | `info`                                             | niveau des logs pino                                                                                         |
-| `WEB_ORIGIN`                 | api            | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                     |
-| `API_INTERNAL_URL`           | web (serveur)  | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                               |
-| `JWT_ACCESS_SECRET`          | api            | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production |
-| `ACCESS_TOKEN_TTL_MINUTES`   | api            | `15`                                               | durée de vie de l'access token                                                                               |
-| `REFRESH_TOKEN_TTL_DAYS`     | api            | `30`                                               | durée de vie (glissante) d'une session                                                                       |
-| `AUTH_RATE_LIMIT_PER_MINUTE` | api            | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
-| `TRUST_PROXY`                | api            | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
+| Variable                        | Utilisée par   | Défaut / exemple                                   | Rôle                                                                                                         |
+| ------------------------------- | -------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `NODE_ENV`                      | api, web       | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                            |
+| `DB_PORT`                       | docker compose | `5432`                                             | port exposé de Postgres                                                                                      |
+| `DATABASE_URL`                  | api, db        | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                              |
+| `DATABASE_URL_TEST`             | tests          | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                 |
+| `API_PORT`                      | api            | `4000`                                             | port HTTP de l'API                                                                                           |
+| `LOG_LEVEL`                     | api            | `info`                                             | niveau des logs pino                                                                                         |
+| `WEB_ORIGIN`                    | api            | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                     |
+| `API_INTERNAL_URL`              | web (serveur)  | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                               |
+| `JWT_ACCESS_SECRET`             | api            | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production |
+| `ACCESS_TOKEN_TTL_MINUTES`      | api            | `15`                                               | durée de vie de l'access token                                                                               |
+| `REFRESH_TOKEN_TTL_DAYS`        | api            | `30`                                               | durée de vie (glissante) d'une session                                                                       |
+| `AUTH_RATE_LIMIT_PER_MINUTE`    | api            | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
+| `PUBLIC_RATE_LIMIT_PER_MINUTE`  | api            | `120`                                              | lectures publiques (fiche, ressource, créneaux) par minute et par IP                                         |
+| `BOOKING_RATE_LIMIT_PER_MINUTE` | api            | `20`                                               | demandes de réservation par minute et par IP                                                                 |
+| `TRUST_PROXY`                   | api            | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
 
 La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Aucun secret n'est versionné.

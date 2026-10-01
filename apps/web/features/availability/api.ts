@@ -1,6 +1,6 @@
 'use client';
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   availabilityExceptionSchema,
   type CreateExceptionInput,
@@ -82,7 +82,5 @@ export function useSlots(resourceId: string, from: string, to: string) {
       apiFetch(`/v1/resources/${resourceId}/slots?from=${from}&to=${to}`, {
         schema: slotsResponseSchema,
       }),
-    // En changeant de semaine, on garde l'ancienne grille à l'écran pendant le chargement.
-    placeholderData: keepPreviousData,
   });
 }

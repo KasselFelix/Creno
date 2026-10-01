@@ -34,7 +34,7 @@ export function SlotPicker({ resources }: { resources: Resource[] }) {
             role="radio"
             aria-checked={item.id === resource.id}
             onClick={() => setResourceId(item.id)}
-            className="bg-card hover:bg-muted/50 focus-visible:ring-ring/50 aria-checked:border-primary aria-checked:ring-primary flex min-h-11 flex-col gap-1 rounded-lg border p-3 text-left outline-none focus-visible:ring-3 aria-checked:ring-1"
+            className="bg-card hover:bg-muted/50 focus-visible:ring-ring aria-checked:border-primary aria-checked:ring-primary flex min-h-11 flex-col gap-1 rounded-lg border p-3 text-left outline-none focus-visible:ring-3 aria-checked:ring-1"
           >
             <span className="font-medium">{item.name}</span>
             <span className="text-muted-foreground text-sm">
@@ -55,17 +55,20 @@ export function SlotPicker({ resources }: { resources: Resource[] }) {
 function ResourceSlots({ resource }: { resource: Resource }) {
   const today = todayInZone(resource.timezone);
   const [weekStart, setWeekStart] = useState(today);
-  const [selectedDate, setSelectedDate] = useState(today);
+  // `null` : aucun jour choisi à la main, on montre le premier jour qui a un créneau libre.
+  const [pickedDate, setPickedDate] = useState<string | null>(null);
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
   const slots = useSlots(resource.id, weekStart, addDays(weekStart, WEEK - 1));
 
   function showWeek(start: string) {
     setWeekStart(start);
-    setSelectedDate(start);
+    setPickedDate(null);
     setSelectedStart(null);
   }
 
   const days = slots.data?.days ?? [];
+  const firstFreeDay = days.find((item) => item.slots.some((slot) => slot.available));
+  const selectedDate = pickedDate ?? firstFreeDay?.date ?? weekStart;
   const day = days.find((item) => item.date === selectedDate);
   const selected = day?.slots.find((slot) => slot.start === selectedStart && slot.available);
 
@@ -129,10 +132,10 @@ function ResourceSlots({ resource }: { resource: Resource }) {
                   aria-pressed={item.date === selectedDate}
                   aria-label={`${formatLocalDate(item.date, { weekday: 'long', day: 'numeric', month: 'long' })}, ${free === 0 ? 'aucun créneau libre' : `${free} créneau${free > 1 ? 'x' : ''} libre${free > 1 ? 's' : ''}`}`}
                   onClick={() => {
-                    setSelectedDate(item.date);
+                    setPickedDate(item.date);
                     setSelectedStart(null);
                   }}
-                  className="hover:bg-muted focus-visible:ring-ring/50 aria-pressed:bg-primary aria-pressed:text-primary-foreground flex h-16 flex-col items-center justify-center rounded-lg border outline-none focus-visible:ring-3 aria-pressed:border-transparent"
+                  className="hover:bg-muted focus-visible:ring-ring aria-pressed:bg-primary aria-pressed:text-primary-foreground flex h-16 flex-col items-center justify-center rounded-lg border outline-none focus-visible:ring-3 aria-pressed:border-transparent"
                 >
                   <span className="text-xs capitalize">
                     {formatLocalDate(item.date, { weekday: 'short' })}
@@ -227,7 +230,7 @@ function SlotGrid({
             {slot.available ? (
               <Button
                 variant={slot.start === selectedStart ? 'default' : 'outline'}
-                className="h-11 w-full"
+                className="focus-visible:ring-ring h-11 w-full"
                 aria-pressed={slot.start === selectedStart}
                 onClick={() => onSelect(slot.start)}
               >

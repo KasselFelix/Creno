@@ -2,11 +2,12 @@ import type { INestApplication } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { availabilityRules, bookings, sqlState, toRange } from '@creno/db';
+import { availabilityExceptions, availabilityRules, bookings, sqlState, toRange } from '@creno/db';
 import {
   apiErrorSchema,
   availabilityExceptionSchema,
   exceptionListSchema,
+  MAX_UPCOMING_EXCEPTIONS,
   rulesResponseSchema,
   slotsResponseSchema,
 } from '@creno/shared';
@@ -82,9 +83,7 @@ describe('availability', () => {
         .expect(200);
       expect(rulesResponseSchema.parse(res.body).rules).toEqual([rules[2], rules[1], rules[0]]);
 
-      const read = await anonymous()
-        .get(`/v1/resources/${resource.id}/availability-rules`)
-        .expect(200);
+      const read = await agent.get(`/v1/resources/${resource.id}/availability-rules`).expect(200);
       expect(rulesResponseSchema.parse(read.body).rules).toHaveLength(3);
     });
 
@@ -110,7 +109,7 @@ describe('availability', () => {
         })
         .expect(400);
       expect(apiErrorSchema.parse(res.body).code).toBe('VALIDATION_FAILED');
-      const read = await anonymous().get(`/v1/resources/${resource.id}/availability-rules`);
+      const read = await agent.get(`/v1/resources/${resource.id}/availability-rules`);
       expect(rulesResponseSchema.parse(read.body).rules).toHaveLength(7);
     });
 
@@ -140,6 +139,8 @@ describe('availability', () => {
         .send({ rules: [] })
         .expect(403);
       expect(apiErrorSchema.parse(put.body).code).toBe('FORBIDDEN_OWNERSHIP');
+      await intruder.agent.get(`${url}/availability-rules`).expect(403);
+      await anonymous().get(`${url}/availability-rules`).expect(401);
       await intruder.agent.get(`${url}/availability-exceptions`).expect(403);
       await intruder.agent
         .post(`${url}/availability-exceptions`)
@@ -150,7 +151,7 @@ describe('availability', () => {
         .expect(403);
       await anonymous().put(`${url}/availability-rules`).send({ rules: [] }).expect(401);
 
-      const read = await anonymous().get(`${url}/availability-rules`);
+      const read = await owner.agent.get(`${url}/availability-rules`);
       expect(rulesResponseSchema.parse(read.body).rules).toHaveLength(7);
     });
   });
@@ -189,6 +190,25 @@ describe('availability', () => {
         .post(`/v1/resources/${resource.id}/availability-exceptions`)
         .send({ startLocal: `${date}T11:00`, endLocal: `${date}T10:00` })
         .expect(400);
+    });
+
+    it(`409 LIMIT_REACHED au-delà de ${MAX_UPCOMING_EXCEPTIONS} fermetures à venir`, async () => {
+      const { agent, resource } = await createProviderWithResource(app);
+      const start = instantIn(DAY, '00:00');
+      await dbOf(app)
+        .db.insert(availabilityExceptions)
+        .values(
+          Array.from({ length: MAX_UPCOMING_EXCEPTIONS }, () => ({
+            resourceId: resource.id,
+            during: toRange(start, new Date(start.getTime() + 60_000)),
+          })),
+        );
+      const date = localDateIn(DAY);
+      const res = await agent
+        .post(`/v1/resources/${resource.id}/availability-exceptions`)
+        .send({ startLocal: `${date}T10:00`, endLocal: `${date}T11:00` })
+        .expect(409);
+      expect(apiErrorSchema.parse(res.body).code).toBe('LIMIT_REACHED');
     });
 
     it('la fermeture d’une ressource ne se supprime pas via une autre ressource', async () => {
@@ -289,11 +309,27 @@ describe('availability', () => {
       ['plage inversée', `from=${localDateIn(2)}&to=${localDateIn(1)}`],
       ['plus de 31 jours', `from=${localDateIn(0)}&to=${localDateIn(31)}`],
       ['date mal formée', 'from=demain&to=demain'],
+      ['année extrême', 'from=9999-12-31&to=9999-12-31'],
       ['paramètre manquant', `from=${localDateIn(1)}`],
     ])('400 VALIDATION_FAILED : %s', async (_label, query) => {
       const { resource } = await createProviderWithResource(app);
       const res = await anonymous().get(`/v1/resources/${resource.id}/slots?${query}`).expect(400);
       expect(apiErrorSchema.parse(res.body).code).toBe('VALIDATION_FAILED');
+    });
+  });
+
+  describe('limite de débit des lectures publiques', () => {
+    it('429 TOO_MANY_REQUESTS au-delà de la limite par minute', async () => {
+      const limited = await createTestApp({ publicRateLimit: 3 });
+      try {
+        const { resource } = await createProviderWithResource(limited);
+        const url = `/v1/resources/${resource.id}/slots?from=${localDateIn(DAY)}&to=${localDateIn(DAY)}`;
+        for (let i = 0; i < 3; i++) await request(limited.getHttpServer()).get(url).expect(200);
+        const res = await request(limited.getHttpServer()).get(url).expect(429);
+        expect(apiErrorSchema.parse(res.body).code).toBe('TOO_MANY_REQUESTS');
+      } finally {
+        await limited.close();
+      }
     });
   });
 });

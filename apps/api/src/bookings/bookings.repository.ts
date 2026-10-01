@@ -18,9 +18,17 @@ export interface BookingRow extends Interval {
 export class BookingsRepository {
   constructor(@Inject(DB) private readonly handle: DbHandle) {}
 
+  /**
+   * Verrou consultatif par client, relâché à la fin de la transaction : deux demandes du même
+   * client passent l'une après l'autre, sans bloquer celles des autres clients.
+   */
+  async lockCustomer(customerId: string, tx: Database): Promise<void> {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${customerId}, 0))`);
+  }
+
   /** Holds encore actifs d'un utilisateur. */
-  async countActiveHolds(customerId: string): Promise<number> {
-    const [row] = await this.handle.db
+  async countActiveHolds(customerId: string, tx: Database): Promise<number> {
+    const [row] = await tx
       .select({ total: count() })
       .from(bookings)
       .where(

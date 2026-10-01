@@ -1,5 +1,5 @@
 import { TZDate } from '@date-fns/tz';
-import { addMinutes, areIntervalsOverlapping, format } from 'date-fns';
+import { addMinutes, format } from 'date-fns';
 
 /**
  * Moteur de calcul des créneaux. Fonctions pures : ni base de données ni horloge (`now` est un
@@ -71,11 +71,44 @@ export function wallTimeToInstant(date: string, time: string, timezone: string):
   if (time === '24:00') return wallTimeToInstant(addLocalDays(date, 1), '00:00', timezone);
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];
   const [hours, minutes] = time.split(':').map(Number) as [number, number];
-  return new Date(new TZDate(year, month - 1, day, hours, minutes, timezone).getTime());
+  const instant = new Date(new TZDate(year, month - 1, day, hours, minutes, timezone).getTime());
+  // Une date hors des bornes de `Date` donnerait NaN, et une boucle de découpage sans fin.
+  if (Number.isNaN(instant.getTime())) throw new RangeError(`Date hors limites : ${date} ${time}`);
+  return instant;
 }
 
-const overlapsAny = (slot: Interval, intervals: Interval[]) =>
-  intervals.some((interval) => areIntervalsOverlapping(slot, interval));
+/** Intervalles triés et fusionnés : deux à deux disjoints, pour une recherche par dichotomie. */
+function mergeIntervals(intervals: Interval[]): Interval[] {
+  const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: Interval[] = [];
+  for (const interval of sorted) {
+    const last = merged.at(-1);
+    if (last && interval.start <= last.end) {
+      if (interval.end > last.end) last.end = interval.end;
+    } else {
+      merged.push({ start: interval.start, end: interval.end });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Vrai si `slot` chevauche l'un des intervalles (bornes `[)` : se toucher n'est pas se chevaucher).
+ * `merged` vient de `mergeIntervals` : on cherche par dichotomie le premier intervalle qui finit
+ * après le début du créneau. Le coût par créneau reste logarithmique, même avec des milliers de
+ * fermetures ou de réservations.
+ */
+function overlapsAny(slot: Interval, merged: Interval[]): boolean {
+  let low = 0;
+  let high = merged.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (merged[middle]!.end > slot.start) high = middle;
+    else low = middle + 1;
+  }
+  const candidate = merged[low];
+  return candidate !== undefined && candidate.start < slot.end;
+}
 
 /**
  * Créneaux de chaque jour local de `from` à `to`.
@@ -85,7 +118,9 @@ const overlapsAny = (slot: Interval, intervals: Interval[]) =>
  * créneaux, un jour de 25 h en a plus, et aucun créneau ne tombe sur une heure qui n'existe pas.
  */
 export function computeSlots(input: SlotsInput): DaySlots[] {
-  const { timezone, slotMinutes, rules, closures, busy, now, horizonDays } = input;
+  const { timezone, slotMinutes, rules, now, horizonDays } = input;
+  const closures = mergeIntervals(input.closures);
+  const busy = mergeIntervals(input.busy);
   // Horizon en jours calendaires locaux : fin du jour « aujourd'hui + horizonDays ».
   const horizon = wallTimeToInstant(
     addLocalDays(localDateOf(now, timezone), horizonDays + 1),

@@ -141,7 +141,7 @@ SELECT lower(during), upper(during) FROM bookings
    AND (status = 'confirmed' OR (status = 'pending' AND expires_at > now()));
 ```
 
-**Hold de paiement** (`POST /v1/bookings`) : dans une même transaction, rejouée par `retryOnDeadlock`, l'API passe à `expired` les holds dépassés qui chevauchent le créneau, puis insère le booking `pending` avec `expires_at = now() + 15 min` (horloge de la base). C'est `bookings_no_overlap` qui départage deux demandes simultanées : test `apps/api/test/bookings.e2e-spec.ts` (un 201, un 409).
+**Hold de paiement** (`POST /v1/bookings`) : dans une même transaction, rejouée par `retryOnDeadlock`, l'API passe à `expired` les holds dépassés qui chevauchent le créneau, puis insère le booking `pending` avec `expires_at = now() + 15 min` (horloge de la base). Un verrou consultatif par client (`pg_advisory_xact_lock`) sérialise ses demandes : la limite de 5 holds actifs tient même face à des requêtes parallèles. C'est `bookings_no_overlap` qui départage deux demandes simultanées : test `apps/api/test/bookings.e2e-spec.ts` (un 201, un 409).
 
 ## Sessions et refresh token rotatif
 

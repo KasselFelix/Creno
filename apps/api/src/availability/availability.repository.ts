@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, count, eq, sql } from 'drizzle-orm';
 import {
   availabilityExceptions,
   availabilityRules,
@@ -73,12 +73,27 @@ export class AvailabilityRepository {
       .orderBy(sql`lower(${availabilityExceptions.during})`);
   }
 
+  /** Fermetures non terminées d'une ressource (celles qui pèsent sur le calcul des créneaux). */
+  async countUpcomingExceptions(resourceId: string, tx: Database): Promise<number> {
+    const [row] = await tx
+      .select({ total: count() })
+      .from(availabilityExceptions)
+      .where(
+        and(
+          eq(availabilityExceptions.resourceId, resourceId),
+          sql`upper(${availabilityExceptions.during}) > now()`,
+        ),
+      );
+    return row?.total ?? 0;
+  }
+
   async createException(
     resourceId: string,
     interval: Interval,
     reason: string | null,
+    tx: Database = this.handle.db,
   ): Promise<ExceptionRow> {
-    const [row] = await this.handle.db
+    const [row] = await tx
       .insert(availabilityExceptions)
       .values({ resourceId, during: toRange(interval.start, interval.end), reason })
       .returning({

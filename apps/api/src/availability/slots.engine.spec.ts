@@ -64,6 +64,10 @@ describe('wallTimeToInstant', () => {
       '2026-10-25T00:30:00.000Z',
     );
   });
+
+  it('refuse une date hors limites au lieu de renvoyer une date invalide', () => {
+    expect(() => wallTimeToInstant('+275761-01-01', '00:00', PARIS)).toThrow(RangeError);
+  });
 });
 
 describe('localDateOf', () => {
@@ -207,6 +211,43 @@ describe('computeSlots', () => {
     ];
     const [day] = computeSlots(input({ busy }));
     expect(day!.slots.map((s) => s.available)).toEqual([false, false, true]);
+  });
+
+  it('accepte des fermetures et des réservations non triées, imbriquées ou qui se chevauchent', () => {
+    const at = (time: string) => new Date(`2026-10-05T${time}:00Z`);
+    const closures = [
+      { start: at('09:30'), end: at('09:45') },
+      { start: at('05:00'), end: at('07:10') },
+      { start: at('05:30'), end: at('06:00') },
+    ];
+    const busy = [
+      { start: at('08:15'), end: at('08:20') },
+      { start: at('01:00'), end: at('02:00') },
+    ];
+    const [day] = computeSlots(input({ closures, busy }));
+    // 09:00 et 11:00 (heure locale) sont fermés ; il reste 10:00, occupé.
+    expect(day!.slots.map((s) => [s.start.toISOString(), s.available])).toEqual([
+      ['2026-10-05T08:00:00.000Z', false],
+    ]);
+  });
+
+  it('reste rapide avec des milliers de fermetures (route publique)', () => {
+    const closures = Array.from({ length: 5000 }, (_, i) => {
+      const start = new Date(Date.UTC(2026, 9, 1, 0, i));
+      return { start, end: new Date(start.getTime() + 30_000) };
+    });
+    const started = performance.now();
+    const days = computeSlots(
+      input({
+        closures,
+        slotMinutes: 5,
+        rules: allWeek('00:00', '24:00'),
+        from: '2026-10-05',
+        to: '2026-11-04',
+      }),
+    );
+    expect(days).toHaveLength(31);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it('ne propose pas les créneaux déjà commencés', () => {

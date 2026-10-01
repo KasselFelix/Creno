@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const SLOT_MINUTES_MIN = 5;
 export const SLOT_MINUTES_MAX = 1440;
 export const PRICE_CENTS_MAX = 10_000_000;
+export const MAX_RESOURCES_PER_PROVIDER = 50;
 
 /** Vrai pour un fuseau IANA connu du moteur JavaScript (ex. `Europe/Paris`), ou `UTC`. */
 export function isValidTimeZone(value: string): boolean {

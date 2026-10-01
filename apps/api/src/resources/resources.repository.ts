@@ -25,9 +25,17 @@ export class ResourcesRepository {
     return row;
   }
 
-  /** Verrouille la ligne jusqu'à la fin de la transaction : sérialise les écritures concurrentes. */
+  /**
+   * Verrouille la ligne jusqu'à la fin de la transaction : sérialise les écritures concurrentes.
+   * `NO KEY UPDATE` plutôt que `UPDATE` : une réservation en cours (clé étrangère vers la ressource)
+   * n'est pas mise en attente par ce verrou.
+   */
   async lock(id: string, tx: Database): Promise<void> {
-    await tx.select({ id: resources.id }).from(resources).where(eq(resources.id, id)).for('update');
+    await tx
+      .select({ id: resources.id })
+      .from(resources)
+      .where(eq(resources.id, id))
+      .for('no key update');
   }
 
   /** Identifiant du profil prestataire de l'utilisateur, s'il en a créé un. */

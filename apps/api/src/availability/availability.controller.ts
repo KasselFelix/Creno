@@ -9,8 +9,10 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import {
   type AvailabilityException,
   type CreateExceptionInput,
@@ -25,18 +27,24 @@ import {
 } from '@creno/shared';
 import { CurrentUser, Public, Roles } from '../auth/auth.decorators.js';
 import type { AuthUser } from '../auth/auth.types.js';
+import { OnlyThrottle } from '../common/throttle.js';
 import { ApiZodBody, ZodValidationPipe } from '../common/zod.js';
 import { AvailabilityService } from './availability.service.js';
 
 @ApiTags('availability')
 @Controller('resources/:id')
+@UseGuards(ThrottlerGuard)
+@OnlyThrottle()
 export class AvailabilityController {
   constructor(private readonly availability: AvailabilityService) {}
 
   @Get('availability-rules')
-  @Public()
-  getRules(@Param('id', ParseUUIDPipe) id: string): Promise<RulesResponse> {
-    return this.availability.getRules(id);
+  @Roles('provider')
+  getRules(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<RulesResponse> {
+    return this.availability.getRules(user, id);
   }
 
   @Put('availability-rules')
@@ -81,8 +89,10 @@ export class AvailabilityController {
     return this.availability.deleteException(user, id, exceptionId);
   }
 
+  // Route publique qui calcule : limitée en débit par IP.
   @Get('slots')
   @Public()
+  @OnlyThrottle('public')
   getSlots(
     @Param('id', ParseUUIDPipe) id: string,
     @Query(new ZodValidationPipe(slotsQuerySchema)) query: SlotsQuery,

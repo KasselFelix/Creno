@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import {
   type CreateProviderInput,
   createProviderSchema,
@@ -11,11 +12,14 @@ import {
 } from '@creno/shared';
 import { CurrentUser, Public, Roles } from '../auth/auth.decorators.js';
 import type { AuthUser } from '../auth/auth.types.js';
+import { OnlyThrottle } from '../common/throttle.js';
 import { ApiZodBody, ZodValidationPipe } from '../common/zod.js';
 import { ProvidersService } from './providers.service.js';
 
 @ApiTags('providers')
 @Controller('providers')
+@UseGuards(ThrottlerGuard)
+@OnlyThrottle()
 export class ProvidersController {
   constructor(private readonly providers: ProvidersService) {}
 
@@ -54,6 +58,7 @@ export class ProvidersController {
 
   @Get(':slug')
   @Public()
+  @OnlyThrottle('public')
   getBySlug(@Param('slug') slug: string): Promise<PublicProvider> {
     return this.providers.getBySlug(slug);
   }

@@ -29,6 +29,8 @@ export interface TestAppOptions {
   databaseUrl?: string;
   /** Limite de requêtes d'auth par minute (très haute par défaut pour ne pas gêner les autres tests). */
   authRateLimit?: number;
+  /** Limite des lectures publiques par minute (très haute par défaut). */
+  publicRateLimit?: number;
   /** Capture les logs JSON de l'application. */
   logs?: string[];
 }
@@ -41,6 +43,8 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     WEB_ORIGIN,
     JWT_ACCESS_SECRET: 'secret-de-test-secret-de-test-secret-de-test',
     AUTH_RATE_LIMIT_PER_MINUTE: String(options.authRateLimit ?? 1000),
+    PUBLIC_RATE_LIMIT_PER_MINUTE: String(options.publicRateLimit ?? 100_000),
+    BOOKING_RATE_LIMIT_PER_MINUTE: '100000',
     LOG_LEVEL: 'info',
   });
 

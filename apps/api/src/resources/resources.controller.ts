@@ -1,5 +1,15 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import {
   type CreateResourceInput,
   createResourceSchema,
@@ -9,11 +19,14 @@ import {
 } from '@creno/shared';
 import { CurrentUser, Public, Roles } from '../auth/auth.decorators.js';
 import type { AuthUser } from '../auth/auth.types.js';
+import { OnlyThrottle } from '../common/throttle.js';
 import { ApiZodBody, ZodValidationPipe } from '../common/zod.js';
 import { ResourcesService } from './resources.service.js';
 
 @ApiTags('resources')
 @Controller('resources')
+@UseGuards(ThrottlerGuard)
+@OnlyThrottle()
 export class ResourcesController {
   constructor(private readonly resources: ResourcesService) {}
 
@@ -29,6 +42,7 @@ export class ResourcesController {
 
   @Get(':id')
   @Public()
+  @OnlyThrottle('public')
   getById(@Param('id', ParseUUIDPipe) id: string): Promise<Resource> {
     return this.resources.getPublic(id);
   }

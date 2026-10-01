@@ -69,7 +69,7 @@ export function ProviderForm({ provider, onSaved }: { provider?: Provider; onSav
               <Select items={categoryItems} value={field.value} onValueChange={field.onChange}>
                 <SelectTrigger
                   id="provider-category"
-                  className="h-11 w-full md:h-9"
+                  className="h-11! w-full md:h-9!"
                   aria-invalid={!!errors.category}
                 >
                   <SelectValue />

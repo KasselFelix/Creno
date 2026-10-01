@@ -191,6 +191,32 @@ describe('bookings (hold de paiement)', () => {
     expect(apiErrorSchema.parse(res.body).code).toBe('HOLD_LIMIT_REACHED');
   });
 
+  it('la limite de holds tient face à des demandes simultanées du même compte', async () => {
+    await providerAgent
+      .put(`/v1/resources/${resource.id}/availability-rules`)
+      .send({ rules: everyDay('06:00', '18:00') })
+      .expect(200);
+    const { agent } = await registerAs(app, 'customer');
+    const hours = Array.from({ length: 12 }, (_, i) => `${String(6 + i).padStart(2, '0')}:00`);
+    const results = await Promise.all(hours.map((time) => hold(agent, time)));
+    expect(results.filter((r) => r.status === 201)).toHaveLength(MAX_ACTIVE_HOLDS);
+    const refused = results.filter((r) => r.status !== 201);
+    expect(refused).toHaveLength(hours.length - MAX_ACTIVE_HOLDS);
+    expect(refused.every((r) => apiErrorSchema.parse(r.body).code === 'HOLD_LIMIT_REACHED')).toBe(
+      true,
+    );
+    expect(await activeBookings()).toMatchObject({ rowCount: MAX_ACTIVE_HOLDS });
+  });
+
+  it('422 SLOT_NOT_OFFERED pour une date extrême, sans erreur serveur', async () => {
+    const { agent } = await registerAs(app, 'customer');
+    const res = await agent
+      .post('/v1/bookings')
+      .send({ resourceId: resource.id, start: '9999-12-31T23:00:00.000Z' })
+      .expect(422);
+    expect(apiErrorSchema.parse(res.body).code).toBe('SLOT_NOT_OFFERED');
+  });
+
   it('404 pour une ressource inconnue ou désactivée', async () => {
     const { agent } = await registerAs(app, 'customer');
     await agent

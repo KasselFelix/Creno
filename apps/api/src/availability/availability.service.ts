@@ -3,6 +3,7 @@ import { type DbHandle, sqlState } from '@creno/db';
 import {
   type AvailabilityException,
   BOOKING_HORIZON_DAYS,
+  MAX_UPCOMING_EXCEPTIONS,
   type CreateExceptionInput,
   type ExceptionList,
   type ReplaceRulesInput,
@@ -44,8 +45,8 @@ export class AvailabilityService {
     private readonly resourcesRepository: ResourcesRepository,
   ) {}
 
-  async getRules(resourceId: string): Promise<RulesResponse> {
-    await this.resources.requireExisting(resourceId);
+  async getRules(current: AuthUser, resourceId: string): Promise<RulesResponse> {
+    await this.resources.requireOwned(current, resourceId);
     return { rules: await this.availability.listRules(resourceId) };
   }
 
@@ -98,11 +99,21 @@ export class AvailabilityService {
       });
     }
     try {
-      const row = await this.availability.createException(
-        resourceId,
-        interval,
-        input.reason || null,
-      );
+      const row = await this.handle.db.transaction(async (tx) => {
+        // Verrou + comptage + insertion dans la même transaction : la limite tient même en parallèle.
+        await this.resourcesRepository.lock(resourceId, tx);
+        if (
+          (await this.availability.countUpcomingExceptions(resourceId, tx)) >=
+          MAX_UPCOMING_EXCEPTIONS
+        ) {
+          throw new DomainError(
+            'LIMIT_REACHED',
+            409,
+            `${MAX_UPCOMING_EXCEPTIONS} fermetures à venir au plus par ressource.`,
+          );
+        }
+        return this.availability.createException(resourceId, interval, input.reason || null, tx);
+      });
       this.logger.log({
         event: 'availability.exception_created',
         resourceId,
@@ -110,6 +121,7 @@ export class AvailabilityService {
       });
       return toException(row);
     } catch (error) {
+      if (error instanceof DomainError) throw error;
       throw mapPgError(error) ?? error;
     }
   }

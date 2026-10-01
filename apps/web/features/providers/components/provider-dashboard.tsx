@@ -121,9 +121,14 @@ function ResourcesCard() {
           Ce que vos clients réservent : une salle, un fauteuil, un terrain, une prestation.
         </CardDescription>
         <CardAction>
-          <Link href="/dashboard/resources/new" className={buttonVariants({ className: 'h-11' })}>
+          <Link
+            href="/dashboard/resources/new"
+            aria-label="Nouvelle ressource"
+            className={buttonVariants({ className: 'h-11' })}
+          >
             <Plus aria-hidden className="size-4" />
-            <span className="sr-only sm:not-sr-only">Nouvelle ressource</span>
+            <span className="sm:hidden">Ajouter</span>
+            <span className="hidden sm:inline">Nouvelle ressource</span>
           </Link>
         </CardAction>
       </CardHeader>

@@ -43,6 +43,9 @@ describe('slotsQuerySchema', () => {
     expect(slotsQuerySchema.safeParse({ from: '2026-02-30', to: '2026-03-01' }).success).toBe(
       false,
     );
+    expect(slotsQuerySchema.safeParse({ from: '9999-12-31', to: '9999-12-31' }).success).toBe(
+      false,
+    );
   });
 });
 

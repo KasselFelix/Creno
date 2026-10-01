@@ -155,7 +155,7 @@ export function ResourceForm({ resource }: { resource?: Resource }) {
               <Select items={timezoneItems} value={field.value} onValueChange={field.onChange}>
                 <SelectTrigger
                   id="resource-timezone"
-                  className="h-11 w-full md:h-9"
+                  className="h-11! w-full md:h-9!"
                   aria-invalid={!!errors.timezone}
                   aria-describedby="resource-timezone-help"
                 >

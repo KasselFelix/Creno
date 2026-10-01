@@ -5,6 +5,8 @@ export const MAX_SLOTS_RANGE_DAYS = 31;
 /** On ne propose pas de créneau au-delà de ce nombre de jours (jours calendaires de la ressource). */
 export const BOOKING_HORIZON_DAYS = 90;
 export const MAX_RULES = 28;
+/** Fermetures à venir par ressource : borne le coût du calcul des créneaux sur une route publique. */
+export const MAX_UPCOMING_EXCEPTIONS = 200;
 
 /** Heure locale `HH:mm`. `24:00` (fin de journée) n'est accepté que comme heure de fin. */
 const startTimeSchema = z
@@ -56,7 +58,9 @@ export type ReplaceRulesInput = z.infer<typeof replaceRulesSchema>;
 export const rulesResponseSchema = z.object({ rules: z.array(availabilityRuleSchema) });
 export type RulesResponse = z.infer<typeof rulesResponseSchema>;
 
+// Années 2000 à 2099 : une année extrême ferait sortir les calculs des bornes de `Date`.
 const isRealDate = (value: string) => {
+  if (!value.startsWith('20')) return false;
   const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value.slice(0, 10));
 };

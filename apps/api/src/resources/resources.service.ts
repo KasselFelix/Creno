@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { CreateResourceInput, Resource, UpdateResourceInput } from '@creno/shared';
+import {
+  type CreateResourceInput,
+  MAX_RESOURCES_PER_PROVIDER,
+  type Resource,
+  type UpdateResourceInput,
+} from '@creno/shared';
 import type { AuthUser } from '../auth/auth.types.js';
 import { DomainError } from '../common/domain-error.js';
 import { mapPgError } from '../common/pg-errors.js';
@@ -21,6 +26,15 @@ export class ResourcesService {
         'PROVIDER_PROFILE_REQUIRED',
         409,
         "Créez votre profil prestataire avant d'ajouter une ressource.",
+      );
+    }
+    // Garde-fou de volume, sans enjeu d'exactitude : un contrôle applicatif suffit.
+    const existing = await this.resources.listByProvider(providerId, { activeOnly: false });
+    if (existing.length >= MAX_RESOURCES_PER_PROVIDER) {
+      throw new DomainError(
+        'LIMIT_REACHED',
+        409,
+        `${MAX_RESOURCES_PER_PROVIDER} ressources au plus par prestataire.`,
       );
     }
     try {
@@ -47,12 +61,6 @@ export class ResourcesService {
     } catch (error) {
       throw mapPgError(error) ?? error;
     }
-  }
-
-  async requireExisting(id: string): Promise<ResourceRow> {
-    const row = await this.resources.findById(id);
-    if (!row) throw notFound();
-    return row;
   }
 
   async requireActive(id: string): Promise<ResourceRow> {
