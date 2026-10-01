@@ -2,6 +2,7 @@
 import { hash } from '@node-rs/argon2';
 import { sql, type SQL } from 'drizzle-orm';
 import { createDb } from './client.js';
+import { type ProviderSeed, searchProviderSeeds } from './seed-providers.js';
 import {
   availabilityExceptions,
   availabilityRules,
@@ -39,13 +40,14 @@ function parisRange(days: number, start: string, end: string): SQL {
   return sql`tstzrange(${at(start)}, ${at(end)}, '[)')`;
 }
 
-const providerSeeds = [
+// Les trois premiers servent aux parcours de démo (créneaux, réservations) ; les suivants à la recherche.
+const providerSeeds: ProviderSeed[] = [
   {
     email: 'studio.lumiere@example.com',
     fullName: 'Claire Martin',
     name: 'Studio Lumière',
     slug: 'studio-lumiere',
-    category: 'photographer' as const,
+    category: 'photographer',
     address: '12 rue Oberkampf',
     city: 'Paris',
     lng: 2.3696,
@@ -60,7 +62,7 @@ const providerSeeds = [
     fullName: 'Karim Benali',
     name: 'Salon Croix-Rousse',
     slug: 'salon-croix-rousse',
-    category: 'hairdresser' as const,
+    category: 'hairdresser',
     address: '4 place de la Croix-Rousse',
     city: 'Lyon',
     lng: 4.8317,
@@ -75,7 +77,7 @@ const providerSeeds = [
     fullName: 'Julie Durand',
     name: 'Five Bordeaux Lac',
     slug: 'five-bordeaux-lac',
-    category: 'sports_field' as const,
+    category: 'sports_field',
     address: '1 avenue des 40 Journaux',
     city: 'Bordeaux',
     lng: -0.5667,
@@ -85,6 +87,7 @@ const providerSeeds = [
       { name: 'Terrain 2 (5 contre 5)', slotMinutes: 60, priceCents: 9000 },
     ],
   },
+  ...searchProviderSeeds,
 ];
 
 async function main(): Promise<void> {
@@ -199,7 +202,7 @@ async function main(): Promise<void> {
     });
 
     process.stdout.write(
-      `${JSON.stringify({ level: 'info', event: 'db.seeded', providers: providerSeeds.length, resources: 6, bookings: 3 })}\n`,
+      `${JSON.stringify({ level: 'info', event: 'db.seeded', providers: providerSeeds.length, resources: providerSeeds.reduce((n, p) => n + p.resources.length, 0), bookings: 3 })}\n`,
     );
   } finally {
     await pool.end();
