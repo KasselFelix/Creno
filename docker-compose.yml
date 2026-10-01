@@ -29,7 +29,7 @@ services:
   api:
     <<: *env
     build: { context: ., dockerfile: apps/api/Dockerfile, target: dev }
-    command: sh -c "pnpm db:migrate && pnpm db:seed && pnpm turbo run dev --filter=api"
+    command: sh -c "pnpm db:migrate && pnpm db:seed --if-empty && pnpm turbo run dev --filter=api"
     environment:
       NODE_ENV: development
       DATABASE_URL: postgres://creno:creno@db:5432/creno

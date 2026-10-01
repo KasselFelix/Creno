@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { SiteHeader } from '@/components/site-header';
 import {
   Card,
@@ -10,6 +11,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { LoginForm } from '@/features/auth/components/login-form';
+import { getCurrentUser } from '@/lib/api/server';
 import { safeNextPath } from '@/lib/safe-next';
 
 export const metadata: Metadata = { title: 'Connexion — Creno' };
@@ -20,6 +22,8 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string }>;
 }) {
   const { next } = await searchParams;
+  // Vérifié auprès de l'API (pas seulement « un cookie existe ») : pas de boucle avec un cookie périmé.
+  if (await getCurrentUser()) redirect(safeNextPath(next));
 
   return (
     <>

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { SiteHeader } from '@/components/site-header';
 import {
   Card,
@@ -10,10 +11,14 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { RegisterForm } from '@/features/auth/components/register-form';
+import { getCurrentUser } from '@/lib/api/server';
+import { DEFAULT_AFTER_LOGIN } from '@/lib/safe-next';
 
 export const metadata: Metadata = { title: 'Créer un compte — Creno' };
 
-export default function RegisterPage() {
+export default async function RegisterPage() {
+  if (await getCurrentUser()) redirect(DEFAULT_AFTER_LOGIN);
+
   return (
     <>
       <SiteHeader />

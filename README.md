@@ -19,7 +19,7 @@ docker compose up
 | API (NestJS)         | http://localhost:4000 — `/health`, `/health/ready`, Swagger sur `/docs` |
 | PostgreSQL + PostGIS | `localhost:5432` (bases `creno` et `creno_test`)                        |
 
-Au démarrage, l'API applique les migrations et charge un jeu de données de démo (3 prestataires à Paris, Lyon et Bordeaux).
+Au démarrage, l'API applique les migrations et, si la base est vide, charge un jeu de données de démo (3 prestataires à Paris, Lyon et Bordeaux). `pnpm db:seed` remet ce jeu de données à zéro à la demande.
 
 **Comptes de démo** (développement uniquement), mot de passe `creno-demo-2026` :
 

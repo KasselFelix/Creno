@@ -3,7 +3,6 @@ import { AUTH_COOKIES } from '@creno/shared';
 
 const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? 'http://localhost:4000';
 const PROTECTED_PREFIXES = ['/account'];
-const GUEST_ONLY = ['/login', '/register'];
 
 const matches = (pathname: string, prefixes: string[]) =>
   prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -43,8 +42,10 @@ function withRefreshedCookies(request: NextRequest, setCookies: string[]): Heade
 /**
  * S'exécute avant chaque page (c'est le « middleware » de Next 16) :
  * 1. renouvelle la session côté serveur quand l'access token a expiré ;
- * 2. redirige les pages protégées vers /login, et /login vers /account si l'on est déjà connecté.
- * Contrôle de confort uniquement : la vraie autorisation est faite par l'API à chaque requête.
+ * 2. redirige les pages protégées vers /login quand il n'y a aucun cookie de session.
+ * Contrôle de confort uniquement, basé sur la PRÉSENCE d'un cookie : il ne dit pas si la session est
+ * encore valide. C'est pourquoi « déjà connecté → quitter /login » est décidé par les pages, après
+ * vérification auprès de l'API : sinon un cookie périmé ferait boucler /account ⇄ /login.
  */
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -65,8 +66,6 @@ export async function proxy(request: NextRequest) {
     const login = new URL('/login', request.url);
     login.searchParams.set('next', `${pathname}${search}`);
     response = NextResponse.redirect(login);
-  } else if (authenticated && matches(pathname, GUEST_ONLY)) {
-    response = NextResponse.redirect(new URL('/account', request.url));
   } else {
     response = NextResponse.next(
       requestHeaders ? { request: { headers: requestHeaders } } : undefined,
