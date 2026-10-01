@@ -20,6 +20,7 @@ export const errorCodes = [
   'SLOT_NOT_OFFERED',
   'HOLD_LIMIT_REACHED',
   'LIMIT_REACHED',
+  'GEOCODING_UNAVAILABLE',
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);

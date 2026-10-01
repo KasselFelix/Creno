@@ -24,7 +24,7 @@ export const createProviderSchema = z.object({
   description: z.string().trim().max(2000, { error: '2000 caractères maximum' }),
   address: text(200, 'Adresse requise'),
   city: text(100, 'Ville requise'),
-  // Saisies à la main à cette étape ; l'étape « recherche géo » les remplacera par le géocodage.
+  // Remplies par le formulaire à partir de la suggestion d'adresse choisie (géocodage).
   latitude: z
     .number({ error: 'Latitude requise' })
     .min(-90, { error: 'Entre -90 et 90' })
