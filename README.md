@@ -2,7 +2,7 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles) et **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation).
+> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation) et **recherche géographique** (prestataires dans un rayon, liste et carte).
 
 ## Démarrer
 
@@ -19,9 +19,9 @@ docker compose up
 | API (NestJS)         | http://localhost:4000 — `/health`, `/health/ready`, Swagger sur `/docs` |
 | PostgreSQL + PostGIS | `localhost:5432` (bases `creno` et `creno_test`)                        |
 
-Pour voir les créneaux d'un prestataire de démo : http://localhost:3000/providers/studio-lumiere. Connecté avec le compte prestataire, l'« Espace prestataire » (`/dashboard`) permet de gérer ressources, horaires et fermetures.
+Pour chercher un prestataire : http://localhost:3000/search (liste et carte ; la carte demande un token Mapbox, voir ci-dessous). Pour voir les créneaux d'un prestataire de démo : http://localhost:3000/providers/studio-lumiere. Connecté avec le compte prestataire, l'« Espace prestataire » (`/dashboard`) permet de gérer ressources, horaires et fermetures.
 
-Au démarrage, l'API applique les migrations et, si la base est vide, charge un jeu de données de démo (3 prestataires à Paris, Lyon et Bordeaux). `pnpm db:seed` remet ce jeu de données à zéro à la demande.
+Au démarrage, l'API applique les migrations et, si la base est vide, charge un jeu de données de démo (24 prestataires autour de Paris, Lyon et Bordeaux). `pnpm db:seed` remet ce jeu de données à zéro à la demande.
 
 **Comptes de démo** (développement uniquement), mot de passe `creno-demo-2026` :
 
@@ -30,6 +30,8 @@ Au démarrage, l'API applique les migrations et, si la base est vide, charge un 
 | Client      | `lea.petit@example.com`      |
 | Prestataire | `studio.lumiere@example.com` |
 | Admin       | `admin@creno.dev`            |
+
+**Carte** : créer un token public (`pk.…`) sur https://account.mapbox.com, le restreindre par URL, puis le mettre dans `.env` (`NEXT_PUBLIC_MAPBOX_TOKEN`). Sans token, la recherche fonctionne en liste seule.
 
 > Après un changement de dépendances (`package.json`), reconstruire avec `docker compose up -d --build -V` : sans `-V`, Compose réutilise les anciens `node_modules` des conteneurs.
 
@@ -76,7 +78,29 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Horaires en heure locale + fuseau IANA** : les changements d'heure ne décalent pas les horaires. → [ADR 0004](docs/adr/0004-date-fns-timezones.md)
 - **Créneaux calculés par un moteur pur en TypeScript** : `now` est un paramètre, les jours de 23 h et de 25 h sont des tests unitaires sans base. → [ADR 0006](docs/adr/0006-slot-engine.md)
 - **Cookies `HttpOnly` + sessions en base avec refresh token rotatif** : tokens hors de portée d'un XSS, révocation par appareil, détection de token volé. → [ADR 0005](docs/adr/0005-auth-cookies-rotating-refresh.md)
+- **Recherche par cercle (centre + rayon), plafonnée à 50 résultats** : `ST_DWithin` sur l'index GiST, filtres dans l'URL, pas de pagination ni de clustering. → [ADR 0007](docs/adr/0007-radius-search.md)
+- **Géocodage par l'API Adresse de l'État, derrière une interface** : sans clé, coordonnées stockables, appelée par l'API (timeout, repli, faux en test). → [ADR 0008](docs/adr/0008-geocoding-provider.md)
 - _À venir : choix du modèle IA, retry / circuit breaker / fallback de la recherche._
+
+## Recherche géographique
+
+```sql
+SELECT p.name, round(ST_Distance(p.location, $point))::int AS distance_meters,
+       r.min_price_cents, (count(*) OVER ())::int AS total
+FROM providers p
+JOIN LATERAL (
+  SELECT min(price_cents) AS min_price_cents, count(*)::int AS resource_count
+  FROM resources WHERE provider_id = p.id AND is_active
+) r ON r.resource_count > 0
+WHERE ST_DWithin(p.location, $point, $radius_m)
+ORDER BY ST_Distance(p.location, $point), p.id
+LIMIT 50;
+```
+
+- `GET /v1/search/providers?lat=&lng=&radiusKm=&category=&priceMax=` : prestataires dans le rayon, triés par distance, avec leur prix minimum. `ST_DWithin` s'appuie sur l'index GiST : 27 lignes lues sur 50 000 pour un rayon de 10 km (plan dans [docs/schema.md](docs/schema.md)).
+- `/search` : champ « Ville ou adresse » à suggestions, « Autour de moi », filtres, liste et carte côte à côte (onglets sur mobile). Les filtres sont dans l'URL : la recherche se partage et le bouton retour fonctionne.
+- `GET /v1/geocoding/search?q=` : suggestions d'adresses. Si le service de l'État ne répond pas, la route renvoie 503 et l'écran reste utilisable (géolocalisation, carte, saisie manuelle des coordonnées côté prestataire).
+- La position du visiteur est arrondie à environ 100 m, jamais enregistrée et absente des logs.
 
 ## Disponibilités et réservation
 
@@ -101,28 +125,30 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 
 ## Observabilité
 
-- Logs JSON (pino) avec un `requestId` par requête (repris de l'en-tête `x-request-id` s'il est fourni) et un champ `event` pour les événements métier ; emails, téléphones, cookies et en-têtes d'authentification sont masqués.
+- Logs JSON (pino) avec un `requestId` par requête (repris de l'en-tête `x-request-id` s'il est fourni) et un champ `event` pour les événements métier ; emails, téléphones, cookies et en-têtes d'authentification sont masqués, ainsi que la query string des routes de recherche et de géocodage (position du visiteur, adresse saisie).
 - `GET /health` (liveness, ne dépend pas de la base) et `GET /health/ready` (readiness, 503 si la base est injoignable).
 - _Sentry : à venir._
 
 ## Variables d'environnement
 
-| Variable                        | Utilisée par   | Défaut / exemple                                   | Rôle                                                                                                         |
-| ------------------------------- | -------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `NODE_ENV`                      | api, web       | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                            |
-| `DB_PORT`                       | docker compose | `5432`                                             | port exposé de Postgres                                                                                      |
-| `DATABASE_URL`                  | api, db        | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                              |
-| `DATABASE_URL_TEST`             | tests          | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                 |
-| `API_PORT`                      | api            | `4000`                                             | port HTTP de l'API                                                                                           |
-| `LOG_LEVEL`                     | api            | `info`                                             | niveau des logs pino                                                                                         |
-| `WEB_ORIGIN`                    | api            | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                     |
-| `API_INTERNAL_URL`              | web (serveur)  | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                               |
-| `JWT_ACCESS_SECRET`             | api            | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production |
-| `ACCESS_TOKEN_TTL_MINUTES`      | api            | `15`                                               | durée de vie de l'access token                                                                               |
-| `REFRESH_TOKEN_TTL_DAYS`        | api            | `30`                                               | durée de vie (glissante) d'une session                                                                       |
-| `AUTH_RATE_LIMIT_PER_MINUTE`    | api            | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
-| `PUBLIC_RATE_LIMIT_PER_MINUTE`  | api            | `120`                                              | lectures publiques (fiche, ressource, créneaux) par minute, par IP et par route                              |
-| `BOOKING_RATE_LIMIT_PER_MINUTE` | api            | `20`                                               | demandes de réservation par minute et par IP                                                                 |
-| `TRUST_PROXY`                   | api            | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
+| Variable                        | Utilisée par     | Défaut / exemple                                   | Rôle                                                                                                         |
+| ------------------------------- | ---------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `NODE_ENV`                      | api, web         | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                            |
+| `DB_PORT`                       | docker compose   | `5432`                                             | port exposé de Postgres                                                                                      |
+| `DATABASE_URL`                  | api, db          | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                              |
+| `DATABASE_URL_TEST`             | tests            | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                 |
+| `API_PORT`                      | api              | `4000`                                             | port HTTP de l'API                                                                                           |
+| `LOG_LEVEL`                     | api              | `info`                                             | niveau des logs pino                                                                                         |
+| `WEB_ORIGIN`                    | api              | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                     |
+| `API_INTERNAL_URL`              | web (serveur)    | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                               |
+| `JWT_ACCESS_SECRET`             | api              | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production |
+| `ACCESS_TOKEN_TTL_MINUTES`      | api              | `15`                                               | durée de vie de l'access token                                                                               |
+| `REFRESH_TOKEN_TTL_DAYS`        | api              | `30`                                               | durée de vie (glissante) d'une session                                                                       |
+| `AUTH_RATE_LIMIT_PER_MINUTE`    | api              | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
+| `PUBLIC_RATE_LIMIT_PER_MINUTE`  | api              | `120`                                              | lectures publiques (fiche, ressource, créneaux, recherche, géocodage) par minute, par IP et par route        |
+| `BOOKING_RATE_LIMIT_PER_MINUTE` | api              | `20`                                               | demandes de réservation par minute et par IP                                                                 |
+| `TRUST_PROXY`                   | api              | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
+| `GEOCODER_URL`                  | api              | `https://data.geopf.fr/geocodage`                  | géocodeur d'adresses (API Adresse de l'État, sans clé)                                                       |
+| `NEXT_PUBLIC_MAPBOX_TOKEN`      | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé              |
 
-La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Aucun secret n'est versionné.
+La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Les variables lues par le navigateur le sont dans `apps/web/lib/env.ts`. Aucun secret n'est versionné.

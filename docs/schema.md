@@ -143,6 +143,49 @@ SELECT lower(during), upper(during) FROM bookings
 
 **Hold de paiement** (`POST /v1/bookings`) : dans une même transaction, rejouée par `retryOnDeadlock`, l'API passe à `expired` les holds dépassés qui chevauchent le créneau, puis insère le booking `pending` avec `expires_at = now() + 15 min` (horloge de la base). Un verrou consultatif par client (`pg_advisory_xact_lock`) sérialise ses demandes : la limite de 5 holds actifs tient même face à des requêtes parallèles. C'est `bookings_no_overlap` qui départage deux demandes simultanées : test `apps/api/test/bookings.e2e-spec.ts` (un 201, un 409).
 
+## Recherche par rayon
+
+La position d'un prestataire est un point `geography(Point,4326)` ([ADR 0003](adr/0003-geography-type.md)), indexé en GiST (`providers_location_gix`). La recherche (`apps/api/src/search/search.repository.ts`, [ADR 0007](adr/0007-radius-search.md)) tient en une requête :
+
+```sql
+SELECT p.id, p.name, p.slug, p.category, p.address, p.city,
+       ST_Y(p.location::geometry) AS latitude,
+       ST_X(p.location::geometry) AS longitude,
+       round(ST_Distance(p.location, $point))::int AS distance_meters,
+       r.min_price_cents, r.resource_count,
+       (count(*) OVER ())::int AS total
+FROM providers p
+JOIN LATERAL (
+  SELECT min(price_cents) AS min_price_cents, count(*)::int AS resource_count
+  FROM resources
+  WHERE provider_id = p.id AND is_active
+) r ON r.resource_count > 0
+WHERE ST_DWithin(p.location, $point, $radius_m)
+  AND p.category = $category
+  AND r.min_price_cents <= $price_max
+ORDER BY ST_Distance(p.location, $point), p.id
+LIMIT $limit;
+```
+
+- `$point` vaut `ST_SetSRID(ST_MakePoint(lng, lat), 4326)::geography` : **longitude d'abord**. Une inversion place Paris au large de la Somalie ; un test le vérifie.
+- `ST_DWithin(a, b, mètres)` répond « ces deux points sont-ils à moins de N mètres ? ». C'est lui qui utilise l'index : il commence par une comparaison de boîtes englobantes (`location && _st_expand(point, rayon)`), puis vérifie la distance exacte sur les lignes retenues. Filtrer avec `ST_Distance(...) < N` calculerait la distance de chaque ligne de la table.
+- `JOIN LATERAL` : la sous-requête peut lire la ligne `p` en cours. Elle calcule le prix minimum et le nombre de ressources actives de chaque prestataire retenu ; `ON r.resource_count > 0` écarte ceux qui n'ont rien à réserver.
+- `count(*) OVER ()` est une fonction de fenêtre : elle compte les lignes du résultat avant `LIMIT`, sans seconde requête. L'écran peut ainsi dire « 50 premiers résultats sur 132 ».
+- Les conditions de catégorie, de prix et de rayon ne sont ajoutées que si le filtre est fourni. Sans centre : pas de distance, tri par nom.
+
+Plan mesuré sur 50 000 prestataires répartis sur la France (rayon de 10 km autour de Paris, catégorie et prix filtrés) :
+
+```
+Bitmap Heap Scan on providers p (actual rows=5)
+  Filter: ((category = 'hairdresser') AND st_dwithin(location, …, '10000'))
+  Rows Removed by Filter: 22
+  ->  Bitmap Index Scan on providers_location_gix (actual rows=27)
+        Index Cond: (location && _st_expand(…, '10000'))
+Execution Time: 8.654 ms
+```
+
+27 lignes lues sur 50 000. Sans centre, la requête parcourt toute la table (environ 0,8 s à ce volume) : limite assumée, notée dans l'ADR 0007.
+
 ## Sessions et refresh token rotatif
 
 Une ligne de `sessions` par appareil connecté (supprimée en cascade avec l'utilisateur). Le refresh token envoyé au navigateur vaut `<id de session>.<secret aléatoire de 256 bits>` ; la base ne stocke que `sha256(secret)` : une fuite de la table ne donne aucun token utilisable.
