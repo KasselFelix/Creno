@@ -16,6 +16,9 @@ export const errorCodes = [
   'INVALID_CREDENTIALS',
   'SESSION_EXPIRED',
   'TOO_MANY_REQUESTS',
+  'PROVIDER_PROFILE_REQUIRED',
+  'SLOT_NOT_OFFERED',
+  'HOLD_LIMIT_REACHED',
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);
