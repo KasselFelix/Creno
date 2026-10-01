@@ -121,8 +121,8 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 | `ACCESS_TOKEN_TTL_MINUTES`      | api            | `15`                                               | durée de vie de l'access token                                                                               |
 | `REFRESH_TOKEN_TTL_DAYS`        | api            | `30`                                               | durée de vie (glissante) d'une session                                                                       |
 | `AUTH_RATE_LIMIT_PER_MINUTE`    | api            | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
-| `PUBLIC_RATE_LIMIT_PER_MINUTE`  | api            | `120`                                              | lectures publiques (fiche, ressource, créneaux) par minute, par IP et par route                                         |
-| `BOOKING_RATE_LIMIT_PER_MINUTE` | api            | `20`                                               | demandes de réservation par minute et par IP                                                                |
+| `PUBLIC_RATE_LIMIT_PER_MINUTE`  | api            | `120`                                              | lectures publiques (fiche, ressource, créneaux) par minute, par IP et par route                              |
+| `BOOKING_RATE_LIMIT_PER_MINUTE` | api            | `20`                                               | demandes de réservation par minute et par IP                                                                 |
 | `TRUST_PROXY`                   | api            | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
 
 La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Aucun secret n'est versionné.
