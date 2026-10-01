@@ -17,6 +17,7 @@ const messages: Partial<Record<ErrorCode, string>> = {
   SLOT_NOT_OFFERED: "Ce créneau n'est plus proposé.",
   LIMIT_REACHED: "Limite atteinte. Supprimez des éléments avant d'en ajouter.",
   HOLD_LIMIT_REACHED: 'Vous avez trop de réservations en attente de paiement.',
+  GEOCODING_UNAVAILABLE: "La recherche d'adresse est momentanément indisponible.",
 };
 
 const FALLBACK = 'Une erreur est survenue. Réessayez.';

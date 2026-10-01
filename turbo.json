@@ -13,12 +13,15 @@
     "JWT_ACCESS_SECRET",
     "ACCESS_TOKEN_TTL_MINUTES",
     "REFRESH_TOKEN_TTL_DAYS",
-    "AUTH_RATE_LIMIT_PER_MINUTE"
+    "AUTH_RATE_LIMIT_PER_MINUTE",
+    "PUBLIC_RATE_LIMIT_PER_MINUTE",
+    "BOOKING_RATE_LIMIT_PER_MINUTE",
+    "GEOCODER_URL"
   ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["API_INTERNAL_URL"],
+      "env": ["API_INTERNAL_URL", "NEXT_PUBLIC_MAPBOX_TOKEN"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "dev": {

@@ -2,7 +2,8 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { LoaderCircle } from 'lucide-react';
-import { Controller, useForm } from 'react-hook-form';
+import { useState } from 'react';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   type CreateProviderInput,
@@ -21,6 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { PlaceCombobox } from '@/features/geocoding/components/place-combobox';
 import { errorMessage } from '@/lib/api/errors';
 import { useSaveProvider } from '../api';
 import { categoryLabels } from '../labels';
@@ -41,6 +43,14 @@ export function ProviderForm({ provider, onSaved }: { provider?: Provider; onSav
     },
   });
   const { errors } = form.formState;
+  // Coordonnées saisies à la main : solution de repli si la recherche d'adresse est indisponible.
+  const [manual, setManual] = useState(false);
+  const [latitude, longitude] = useWatch({
+    control: form.control,
+    name: ['latitude', 'longitude'],
+  });
+  const hasPosition = Number.isFinite(latitude) && Number.isFinite(longitude);
+  const missingPosition = !manual && (!!errors.latitude || !!errors.longitude);
 
   function onSubmit(values: CreateProviderInput) {
     save.mutate(values, {
@@ -96,6 +106,31 @@ export function ProviderForm({ provider, onSaved }: { provider?: Provider; onSav
           />
           <FieldError errors={[errors.description]} />
         </Field>
+        <Field data-invalid={missingPosition}>
+          <FieldLabel htmlFor="provider-place">Rechercher votre adresse</FieldLabel>
+          <PlaceCombobox
+            id="provider-place"
+            placeholder="12 rue Oberkampf, Paris"
+            className="h-11 md:h-9"
+            aria-invalid={missingPosition}
+            onSelect={(place) => {
+              // La suggestion choisie remplit l'adresse et place l'établissement sur la carte.
+              form.setValue('address', place.name, { shouldValidate: true, shouldDirty: true });
+              form.setValue('city', place.city, { shouldValidate: true, shouldDirty: true });
+              form.setValue('latitude', place.latitude, { shouldValidate: true });
+              form.setValue('longitude', place.longitude, { shouldValidate: true });
+            }}
+          />
+          {missingPosition ? (
+            <FieldError>Choisissez votre adresse dans les suggestions.</FieldError>
+          ) : (
+            <FieldDescription>
+              {hasPosition
+                ? 'Position enregistrée. Si vous déménagez, recherchez la nouvelle adresse ici.'
+                : 'Choisissez une suggestion : elle remplit l’adresse et place votre établissement sur la carte.'}
+            </FieldDescription>
+          )}
+        </Field>
         <div className="grid gap-5 sm:grid-cols-2">
           <Field data-invalid={!!errors.address}>
             <FieldLabel htmlFor="provider-address">Adresse</FieldLabel>
@@ -117,37 +152,47 @@ export function ProviderForm({ provider, onSaved }: { provider?: Provider; onSav
             />
             <FieldError errors={[errors.city]} />
           </Field>
-          <Field data-invalid={!!errors.latitude}>
-            <FieldLabel htmlFor="provider-latitude">Latitude</FieldLabel>
-            <Input
-              id="provider-latitude"
-              type="number"
-              step="any"
-              inputMode="decimal"
-              placeholder="48.8644"
-              aria-invalid={!!errors.latitude}
-              {...form.register('latitude', { valueAsNumber: true })}
-            />
-            <FieldError errors={[errors.latitude]} />
-          </Field>
-          <Field data-invalid={!!errors.longitude}>
-            <FieldLabel htmlFor="provider-longitude">Longitude</FieldLabel>
-            <Input
-              id="provider-longitude"
-              type="number"
-              step="any"
-              inputMode="decimal"
-              placeholder="2.3696"
-              aria-invalid={!!errors.longitude}
-              {...form.register('longitude', { valueAsNumber: true })}
-            />
-            <FieldError errors={[errors.longitude]} />
-          </Field>
+          {manual && (
+            <>
+              <Field data-invalid={!!errors.latitude}>
+                <FieldLabel htmlFor="provider-latitude">Latitude</FieldLabel>
+                <Input
+                  id="provider-latitude"
+                  type="number"
+                  step="any"
+                  inputMode="decimal"
+                  placeholder="48.8644"
+                  aria-invalid={!!errors.latitude}
+                  {...form.register('latitude', { valueAsNumber: true })}
+                />
+                <FieldError errors={[errors.latitude]} />
+              </Field>
+              <Field data-invalid={!!errors.longitude}>
+                <FieldLabel htmlFor="provider-longitude">Longitude</FieldLabel>
+                <Input
+                  id="provider-longitude"
+                  type="number"
+                  step="any"
+                  inputMode="decimal"
+                  placeholder="2.3696"
+                  aria-invalid={!!errors.longitude}
+                  {...form.register('longitude', { valueAsNumber: true })}
+                />
+                <FieldError errors={[errors.longitude]} />
+              </Field>
+            </>
+          )}
         </div>
-        <FieldDescription>
-          Les coordonnées placent votre établissement sur la carte. Elles seront bientôt déduites de
-          l&apos;adresse.
-        </FieldDescription>
+        {!manual && (
+          <Button
+            type="button"
+            variant="link"
+            className="h-11 w-fit px-0 md:h-9"
+            onClick={() => setManual(true)}
+          >
+            Saisir les coordonnées à la main
+          </Button>
+        )}
         <Button type="submit" className="h-11 sm:w-fit" disabled={save.isPending}>
           {save.isPending && <LoaderCircle aria-hidden className="size-4 animate-spin" />}
           {provider ? 'Enregistrer' : 'Créer mon profil'}
