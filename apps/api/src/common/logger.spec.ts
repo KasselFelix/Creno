@@ -3,7 +3,7 @@ import { DrizzleQueryError } from 'drizzle-orm';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { describeError } from './all-exceptions.filter.js';
-import { REDACT_PATHS, resolveRequestId } from './logger.js';
+import { loggableRequest, REDACT_PATHS, resolveRequestId } from './logger.js';
 
 function captureLog(payload: object): string {
   let output = '';
@@ -84,5 +84,26 @@ describe('resolveRequestId', () => {
     for (const bad of ['', 'abc', 'with space and more', 'x'.repeat(200), ['a', 'b']]) {
       expect(resolveRequestId(bad)).toMatch(/^[0-9a-f-]{36}$/);
     }
+  });
+});
+
+describe('loggableRequest', () => {
+  it('retire la query string des routes de recherche et de géocodage', () => {
+    expect(
+      loggableRequest({
+        method: 'GET',
+        url: '/v1/search/providers?lat=48.1&lng=2.4',
+        query: { lat: '48.1', lng: '2.4' },
+      }),
+    ).toEqual({ method: 'GET', url: '/v1/search/providers?[redacted]', query: undefined });
+    expect(loggableRequest({ url: '/v1/geocoding/search?q=10%20rue' }).url).toBe(
+      '/v1/geocoding/search?[redacted]',
+    );
+  });
+
+  it('laisse les autres requêtes intactes', () => {
+    const slots = { url: '/v1/resources/abc/slots?from=2026-10-02', query: { from: '2026-10-02' } };
+    expect(loggableRequest(slots)).toBe(slots);
+    expect(loggableRequest({ url: '/v1/search/providers' }).url).toBe('/v1/search/providers');
   });
 });

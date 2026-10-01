@@ -36,6 +36,27 @@ export const REDACT_PATHS = [
   'err.cause.detail',
 ];
 
+// Routes dont la query string porte une donnée personnelle : position du visiteur, adresse saisie.
+const PRIVATE_QUERY_PREFIXES = ['/v1/search', '/v1/geocoding'];
+
+interface LoggedRequest {
+  url?: string;
+  query?: unknown;
+}
+
+/** Requête à journaliser : sans query string pour les routes de recherche et de géocodage. */
+export function loggableRequest<T extends LoggedRequest>(req: T): T {
+  const url = req.url;
+  if (!url || !PRIVATE_QUERY_PREFIXES.some((prefix) => url.startsWith(prefix))) return req;
+  const queryStart = url.indexOf('?');
+  return {
+    ...req,
+    url: queryStart === -1 ? url : `${url.slice(0, queryStart)}?[redacted]`,
+    // pino-http recopie aussi la query string décodée (`req.query` d'Express).
+    query: undefined,
+  };
+}
+
 /** Reprend l'identifiant de requête du client s'il est bien formé, sinon en génère un. */
 export function resolveRequestId(incoming: string | string[] | undefined): string {
   return typeof incoming === 'string' && REQUEST_ID_FORMAT.test(incoming) ? incoming : randomUUID();
@@ -63,6 +84,7 @@ export function loggerParams(config: AppConfig, stream: DestinationStream | null
     // Les sondes de santé sont appelées toutes les quelques secondes : pas de log d'accès.
     autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
     redact: { paths: REDACT_PATHS, censor: '[redacted]' },
+    serializers: { req: loggableRequest },
   } satisfies Params['pinoHttp'];
   return { pinoHttp: stream ? [options, stream] : options };
 }

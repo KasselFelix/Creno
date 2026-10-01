@@ -62,7 +62,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     const body = this.toApiError(exception);
-    if (body.statusCode >= 500) {
+    // Une erreur métier 5xx (service tiers indisponible) est un dégradé déjà loggué en `warn` par
+    // son service : seules les erreurs inattendues remontent en `error`.
+    if (body.statusCode >= 500 && !(exception instanceof DomainError)) {
       this.logger.error(
         { event: 'http.unhandled_error', err: describeError(exception) },
         'Erreur non gérée',
