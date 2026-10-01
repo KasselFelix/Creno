@@ -6,8 +6,9 @@ import { hash } from '@node-rs/argon2';
 import { sql } from 'drizzle-orm';
 import request from 'supertest';
 import { createDb, type DbHandle, users } from '@creno/db';
-import type { PublicUser, UserRole } from '@creno/shared';
+import type { Provider, PublicUser, Resource, UserRole } from '@creno/shared';
 import { AppModule } from '../src/app.module.js';
+import { addLocalDays, localDateOf, wallTimeToInstant } from '../src/availability/slots.engine.js';
 import { LOG_STREAM } from '../src/common/logger.js';
 import { APP_CONFIG } from '../src/config/config.module.js';
 import type { AppConfig } from '../src/config/env.js';
@@ -28,6 +29,8 @@ export interface TestAppOptions {
   databaseUrl?: string;
   /** Limite de requêtes d'auth par minute (très haute par défaut pour ne pas gêner les autres tests). */
   authRateLimit?: number;
+  /** Limite des lectures publiques par minute (très haute par défaut). */
+  publicRateLimit?: number;
   /** Capture les logs JSON de l'application. */
   logs?: string[];
 }
@@ -40,6 +43,8 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     WEB_ORIGIN,
     JWT_ACCESS_SECRET: 'secret-de-test-secret-de-test-secret-de-test',
     AUTH_RATE_LIMIT_PER_MINUTE: String(options.authRateLimit ?? 1000),
+    PUBLIC_RATE_LIMIT_PER_MINUTE: String(options.publicRateLimit ?? 100_000),
+    BOOKING_RATE_LIMIT_PER_MINUTE: '100000',
     LOG_LEVEL: 'info',
   });
 
@@ -130,4 +135,62 @@ export function cookieValue(res: request.Response, name: string): string | undef
 export function setCookieLine(res: request.Response, name: string): string | undefined {
   const raw = res.headers['set-cookie'] as unknown as string[] | undefined;
   return raw?.find((c) => c.startsWith(`${name}=`));
+}
+
+type Agent = ReturnType<typeof request.agent>;
+
+export const PROVIDER_INPUT = {
+  name: 'Studio Lumière',
+  category: 'photographer',
+  description: 'Studio photo',
+  address: '12 rue Oberkampf',
+  city: 'Paris',
+  latitude: 48.8644,
+  longitude: 2.3696,
+};
+
+export const RESOURCE_INPUT = {
+  name: 'Studio A',
+  description: '',
+  timezone: 'Europe/Paris',
+  slotMinutes: 60,
+  priceCents: 4500,
+};
+
+/** Inscrit un prestataire, crée son profil et une ressource ouverte tous les jours de 09:00 à 12:00. */
+export async function createProviderWithResource(
+  app: INestApplication,
+  resource: Partial<typeof RESOURCE_INPUT> = {},
+): Promise<{ agent: Agent; user: PublicUser; provider: Provider; resource: Resource }> {
+  const { agent, user } = await registerAs(app, 'provider');
+  const provider = await agent.post('/v1/providers').send(PROVIDER_INPUT).expect(201);
+  const created = await agent
+    .post('/v1/resources')
+    .send({ ...RESOURCE_INPUT, ...resource })
+    .expect(201);
+  const resourceId = (created.body as Resource).id;
+  await agent
+    .put(`/v1/resources/${resourceId}/availability-rules`)
+    .send({ rules: everyDay('09:00', '12:00') })
+    .expect(200);
+  return {
+    agent,
+    user,
+    provider: provider.body as Provider,
+    resource: created.body as Resource,
+  };
+}
+
+export function everyDay(startTime: string, endTime: string) {
+  return [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({ weekday, startTime, endTime }));
+}
+
+/** Date locale de la ressource dans `days` jours : toujours dans le futur, jamais au-delà de l'horizon. */
+export function localDateIn(days: number, timezone = RESOURCE_INPUT.timezone): string {
+  return addLocalDays(localDateOf(new Date(), timezone), days);
+}
+
+/** Instant d'une heure locale de la ressource dans `days` jours. */
+export function instantIn(days: number, time: string, timezone = RESOURCE_INPUT.timezone): Date {
+  return wallTimeToInstant(localDateIn(days, timezone), time, timezone);
 }

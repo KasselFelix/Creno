@@ -1,6 +1,7 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import { cache } from 'react';
+import type { z } from 'zod';
 import { AUTH_COOKIES, type PublicUser, publicUserSchema } from '@creno/shared';
 
 /** URL interne de l'API : jamais exposée au navigateur. */
@@ -26,3 +27,20 @@ export const getCurrentUser = cache(async (): Promise<PublicUser | null> => {
     return null;
   }
 });
+
+/**
+ * Lecture d'une route publique de l'API depuis un Server Component. Renvoie `null` sur 404 ;
+ * toute autre erreur est levée et affichée par le `error.tsx` de la page.
+ */
+export async function serverFetch<T extends z.ZodType>(
+  path: string,
+  schema: T,
+): Promise<z.output<T> | null> {
+  const res = await fetch(`${API_INTERNAL_URL}${path}`, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(5000),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`API ${res.status} sur ${path}`);
+  return schema.parse(await res.json());
+}

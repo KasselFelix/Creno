@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapPgError } from './pg-errors.js';
+import { mapPgError, pgConstraint } from './pg-errors.js';
 
 describe('mapPgError', () => {
   it.each([
@@ -16,6 +16,21 @@ describe('mapPgError', () => {
     expect(mapPgError(new Error('query failed', { cause: { code: '23P01' } }))?.code).toBe(
       'SLOT_UNAVAILABLE',
     );
+  });
+
+  it('traduit une violation de CHECK (23514) en 400 VALIDATION_FAILED', () => {
+    const error = mapPgError({ code: '23514' });
+    expect(error?.code).toBe('VALIDATION_FAILED');
+    expect(error?.statusCode).toBe(400);
+  });
+
+  it('lit le nom de la contrainte, même enveloppé par Drizzle', () => {
+    const pgError = { code: '23505', constraint: 'providers_slug_unique' };
+    expect(pgConstraint(pgError)).toBe('providers_slug_unique');
+    expect(pgConstraint(new Error('query failed', { cause: pgError }))).toBe(
+      'providers_slug_unique',
+    );
+    expect(pgConstraint(new Error('boom'))).toBeUndefined();
   });
 
   it('ignore les autres erreurs', () => {

@@ -3,12 +3,16 @@ import { APP_FILTER } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
 import { AuthModule } from './auth/auth.module.js';
+import { AvailabilityModule } from './availability/availability.module.js';
+import { BookingsModule } from './bookings/bookings.module.js';
 import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
 import { LOG_STREAM, LogStreamModule, loggerParams } from './common/logger.js';
 import { APP_CONFIG, ConfigModule } from './config/config.module.js';
 import type { AppConfig } from './config/env.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
+import { ProvidersModule } from './providers/providers.module.js';
+import { ResourcesModule } from './resources/resources.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -24,6 +28,10 @@ import { UsersModule } from './users/users.module.js';
     HealthModule,
     AuthModule,
     UsersModule,
+    ProvidersModule,
+    ResourcesModule,
+    AvailabilityModule,
+    BookingsModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

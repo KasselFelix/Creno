@@ -11,6 +11,12 @@ const messages: Partial<Record<ErrorCode, string>> = {
   TOO_MANY_REQUESTS: 'Trop de tentatives. Réessayez dans une minute.',
   VALIDATION_FAILED: 'Certains champs sont invalides.',
   NOT_FOUND: 'Élément introuvable.',
+  ALREADY_EXISTS: 'Cet élément existe déjà.',
+  PROVIDER_PROFILE_REQUIRED: "Créez d'abord votre profil prestataire.",
+  SLOT_UNAVAILABLE: "Ce créneau vient d'être pris. Choisissez-en un autre.",
+  SLOT_NOT_OFFERED: "Ce créneau n'est plus proposé.",
+  LIMIT_REACHED: "Limite atteinte. Supprimez des éléments avant d'en ajouter.",
+  HOLD_LIMIT_REACHED: 'Vous avez trop de réservations en attente de paiement.',
 };
 
 const FALLBACK = 'Une erreur est survenue. Réessayez.';

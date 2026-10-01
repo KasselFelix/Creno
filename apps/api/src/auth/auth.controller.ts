@@ -13,7 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { SkipThrottle, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import {
   AUTH_COOKIES,
@@ -27,14 +27,10 @@ import {
 import { DomainError } from '../common/domain-error.js';
 import { ApiZodBody, ZodValidationPipe } from '../common/zod.js';
 import { CurrentUser, Public } from './auth.decorators.js';
+import { OnlyThrottle } from '../common/throttle.js';
 import { AuthCookies } from './auth.cookies.js';
 import { AuthService } from './auth.service.js';
 import type { AuthUser } from './auth.types.js';
-
-/** Limites nommées (voir ThrottlerModule dans auth.module.ts). */
-const onlyCredentialsLimit = { refresh: true };
-const onlyRefreshLimit = { credentials: true };
-const noLimit = { credentials: true, refresh: true };
 
 @ApiTags('auth')
 @Controller('auth')
@@ -46,7 +42,7 @@ export class AuthController {
   ) {}
 
   @Public()
-  @SkipThrottle(onlyCredentialsLimit)
+  @OnlyThrottle('credentials')
   @Post('register')
   @ApiZodBody(registerSchema)
   async register(
@@ -60,7 +56,7 @@ export class AuthController {
   }
 
   @Public()
-  @SkipThrottle(onlyCredentialsLimit)
+  @OnlyThrottle('credentials')
   @Post('login')
   @HttpCode(200)
   @ApiZodBody(loginSchema)
@@ -75,7 +71,7 @@ export class AuthController {
   }
 
   @Public()
-  @SkipThrottle(onlyRefreshLimit)
+  @OnlyThrottle('refresh')
   @Post('refresh')
   @HttpCode(200)
   async refresh(
@@ -96,7 +92,7 @@ export class AuthController {
 
   // Publique : on doit pouvoir se déconnecter même avec un access token expiré.
   @Public()
-  @SkipThrottle(noLimit)
+  @OnlyThrottle()
   @Post('logout')
   @HttpCode(204)
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<void> {
@@ -108,13 +104,13 @@ export class AuthController {
     }
   }
 
-  @SkipThrottle(noLimit)
+  @OnlyThrottle()
   @Get('sessions')
   async sessions(@CurrentUser() user: AuthUser): Promise<SessionList> {
     return { items: await this.auth.listSessions(user) };
   }
 
-  @SkipThrottle(noLimit)
+  @OnlyThrottle()
   @Delete('sessions/:id')
   @HttpCode(204)
   async revokeSession(

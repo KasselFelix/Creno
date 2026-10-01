@@ -31,6 +31,8 @@ import { TokensService } from './tokens.service.js';
       useFactory: (config: AppConfig) => [
         { name: 'credentials', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE },
         { name: 'refresh', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE * 3 },
+        { name: 'public', ttl: 60_000, limit: config.PUBLIC_RATE_LIMIT_PER_MINUTE },
+        { name: 'bookings', ttl: 60_000, limit: config.BOOKING_RATE_LIMIT_PER_MINUTE },
       ],
     }),
   ],

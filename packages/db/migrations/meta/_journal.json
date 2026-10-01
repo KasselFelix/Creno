@@ -36,6 +36,13 @@
       "when": 1790808621366,
       "tag": "0004_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790865947341,
+      "tag": "0005_availability_rules_no_overlap",
+      "breakpoints": true
     }
   ]
 }
