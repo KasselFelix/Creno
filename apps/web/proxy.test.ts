@@ -62,14 +62,12 @@ describe('proxy', () => {
   it('redirige vers /login et efface les cookies quand le refresh échoue', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response('{}', {
-            status: 401,
-            headers: [['set-cookie', 'creno_rt=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT']],
-          }),
-        ),
+      vi.fn().mockResolvedValue(
+        new Response('{}', {
+          status: 401,
+          headers: [['set-cookie', 'creno_rt=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT']],
+        }),
+      ),
     );
     const res = await proxy(request('/account', 'creno_rt=mort'));
     expect(res.status).toBe(307);
