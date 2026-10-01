@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   computeSlots,
   isOfferedSlot,
@@ -68,6 +68,40 @@ describe('wallTimeToInstant', () => {
   it('refuse une date hors limites au lieu de renvoyer une date invalide', () => {
     expect(() => wallTimeToInstant('+275761-01-01', '00:00', PARIS)).toThrow(RangeError);
   });
+});
+
+describe('indépendance au fuseau de la machine', () => {
+  const original = process.env.TZ;
+  afterEach(() => {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+  });
+
+  // Le calcul ne doit dépendre que du fuseau de la ressource : un poste à Paris et un serveur en
+  // UTC (CI, production) doivent donner les mêmes instants.
+  it.each(['UTC', 'Europe/Paris', 'America/New_York', 'Pacific/Auckland'])(
+    'mêmes instants quand la machine est en %s',
+    (machineZone) => {
+      process.env.TZ = machineZone;
+      expect(wallTimeToInstant('2026-10-25', '02:30', PARIS).toISOString()).toBe(
+        '2026-10-25T00:30:00.000Z',
+      );
+      expect(wallTimeToInstant('2027-03-28', '02:30', PARIS).toISOString()).toBe(
+        '2027-03-28T01:30:00.000Z',
+      );
+      expect(wallTimeToInstant('2026-11-01', '01:30', 'America/New_York').toISOString()).toBe(
+        '2026-11-01T05:30:00.000Z',
+      );
+      expect(localDateOf(new Date('2026-10-05T23:30:00Z'), PARIS)).toBe('2026-10-06');
+      const fallBack = starts({
+        rules: allWeek('00:00', '08:00'),
+        from: '2026-10-25',
+        to: '2026-10-25',
+      });
+      expect(fallBack).toHaveLength(9);
+      expect(fallBack[0]).toBe('2026-10-24T22:00:00.000Z');
+    },
+  );
 });
 
 describe('localDateOf', () => {

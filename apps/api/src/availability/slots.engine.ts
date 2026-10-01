@@ -1,4 +1,4 @@
-import { TZDate } from '@date-fns/tz';
+import { TZDate, tzOffset } from '@date-fns/tz';
 import { addMinutes, format } from 'date-fns';
 
 /**
@@ -62,16 +62,39 @@ export function localDateOf(instant: Date, timezone: string): string {
   return format(new TZDate(instant, timezone), 'yyyy-MM-dd');
 }
 
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
 /**
  * Instant correspondant à une heure murale dans le fuseau. `24:00` est le début du lendemain.
  * Heure inexistante (passage à l'heure d'été) : décalée vers l'avant. Heure répétée (passage à
- * l'heure d'hiver) : première occurrence. Les deux cas sont épinglés par les tests.
+ * l'heure d'hiver) : première occurrence.
+ *
+ * La conversion est faite à la main à partir des décalages du fuseau, et non avec
+ * `new TZDate(année, mois, …)` : ce constructeur tranche l'heure répétée selon le fuseau de la
+ * machine, donc différemment sur un poste à Paris et sur un serveur en UTC.
  */
 export function wallTimeToInstant(date: string, time: string, timezone: string): Date {
   if (time === '24:00') return wallTimeToInstant(addLocalDays(date, 1), '00:00', timezone);
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];
   const [hours, minutes] = time.split(':').map(Number) as [number, number];
-  const instant = new Date(new TZDate(year, month - 1, day, hours, minutes, timezone).getTime());
+  // L'heure murale lue comme si elle était en UTC : il reste à retirer le décalage du fuseau.
+  const wallAsUtc = Date.UTC(year, month - 1, day, hours, minutes);
+  // Décalages (en minutes) la veille et le lendemain : ils encadrent un éventuel changement d'heure.
+  const offsets = [
+    tzOffset(timezone, new Date(wallAsUtc - DAY_MS)),
+    tzOffset(timezone, new Date(wallAsUtc + DAY_MS)),
+  ] as const;
+  // Un candidat est valide si, à cet instant, le fuseau a bien le décalage utilisé pour le calculer.
+  const valid = offsets
+    .map((offset) => ({ offset, time: wallAsUtc - offset * MINUTE_MS }))
+    .filter((candidate) => tzOffset(timezone, new Date(candidate.time)) === candidate.offset)
+    .map((candidate) => candidate.time);
+  // Deux candidats valides : heure répétée, on prend la première. Aucun : heure inexistante,
+  // le décalage d'avant le changement la pousse après le saut (02:30 devient 03:30).
+  const instant = new Date(
+    valid.length > 0 ? Math.min(...valid) : wallAsUtc - offsets[0] * MINUTE_MS,
+  );
   // Une date hors des bornes de `Date` donnerait NaN, et une boucle de découpage sans fin.
   if (Number.isNaN(instant.getTime())) throw new RangeError(`Date hors limites : ${date} ${time}`);
   return instant;

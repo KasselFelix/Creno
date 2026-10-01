@@ -21,6 +21,7 @@ Deux endroits possibles : une requête SQL (`generate_series` + `AT TIME ZONE`),
 
 ## Conséquences
 
+- La conversion heure locale → instant est écrite à la main à partir des décalages du fuseau (`tzOffset`). Le constructeur `new TZDate(année, mois, …)` de `@date-fns/tz` tranche l'heure répétée selon le fuseau de la machine : le même code donnait un résultat différent sur un poste à Paris et en CI (UTC). Un test rejoue les cas limites avec la machine dans quatre fuseaux.
 - Les cas de changement d'heure sont des tests unitaires sans base (`slots.engine.spec.ts`) : dates fixes, `now` injecté.
 - Une réservation prise sur une ancienne grille (durée ou horaires modifiés depuis) bloque tous les créneaux qu'elle chevauche : le moteur compare des intervalles, pas des numéros de créneau.
 - Coût borné sur une route publique : fermetures et réservations sont fusionnées en intervalles disjoints, puis chaque créneau fait une recherche par dichotomie. Le calcul de 31 jours en créneaux de 5 min reste sous la seconde avec 5 000 fermetures (testé). S'y ajoutent un plafond de 200 fermetures à venir par ressource et une limite de débit par IP.
