@@ -3,7 +3,12 @@ import { check, index, pgTable, smallint, text, time, uuid } from 'drizzle-orm/p
 import { resources } from './resources.js';
 import { tstzrange } from './types.js';
 
-/** Horaires hebdomadaires, en heure locale du fuseau de la ressource. */
+/**
+ * Horaires hebdomadaires, en heure locale du fuseau de la ressource. Une ligne par plage : une
+ * pause est le trou entre deux lignes. `end_time` peut valoir 24:00 (fin de journée).
+ * Le non-chevauchement des plages d'un même jour (EXCLUDE USING gist) n'est pas exprimable avec
+ * Drizzle : il est dans la migration custom `0005_availability_rules_no_overlap.sql`.
+ */
 export const availabilityRules = pgTable(
   'availability_rules',
   {

@@ -1,6 +1,6 @@
 // Données de démo. Idempotent : vide les tables métier puis réinsère le même jeu de données.
 import { hash } from '@node-rs/argon2';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { createDb } from './client.js';
 import {
   availabilityExceptions,
@@ -9,21 +9,34 @@ import {
   providers,
   resources,
   toPoint,
-  toRange,
   users,
 } from './schema/index.js';
 
-const HOUR = 60 * 60 * 1000;
+const HOLD_MS = 15 * 60 * 1000;
+const TIMEZONE = 'Europe/Paris';
 
 /** Mot de passe de tous les comptes de démo (développement uniquement, documenté dans le README). */
 export const DEMO_PASSWORD = 'creno-demo-2026';
 
-/** Demain à `hour`:00 UTC, décalé de `days` jours. */
-function dayAt(days: number, hour: number, minutes = 0): Date {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + 1 + days);
-  d.setUTCHours(hour, minutes, 0, 0);
-  return d;
+/** Nombre de jours jusqu'au prochain jour ouvré (lundi à vendredi) à Paris, à partir de demain. */
+function daysToNextWeekday(): number {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
+  for (let days = 1; ; days++) {
+    const date = new Date(`${today}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    const weekday = date.getUTCDay();
+    if (weekday >= 1 && weekday <= 5) return days;
+  }
+}
+
+/**
+ * Créneau `[start, end)` en heure de Paris, `days` jours après aujourd'hui. `AT TIME ZONE` convertit
+ * l'heure locale en instant : la démo tombe sur la grille des horaires, été comme hiver.
+ */
+function parisRange(days: number, start: string, end: string): SQL {
+  const at = (time: string) =>
+    sql`(((now() AT TIME ZONE ${TIMEZONE})::date + ${days}::int) + ${time}::time) AT TIME ZONE ${TIMEZONE}`;
+  return sql`tstzrange(${at(start)}, ${at(end)}, '[)')`;
 }
 
 const providerSeeds = [
@@ -132,7 +145,7 @@ async function main(): Promise<void> {
         for (const r of p.resources) {
           const [resource] = await tx
             .insert(resources)
-            .values({ providerId: provider!.id, timezone: 'Europe/Paris', ...r })
+            .values({ providerId: provider!.id, timezone: TIMEZONE, ...r })
             .returning({ id: resources.id });
           resourceIds.push(resource!.id);
 
@@ -149,9 +162,11 @@ async function main(): Promise<void> {
       }
 
       const [studioA] = resourceIds;
+      const day = daysToNextWeekday();
+      // Fermeture d'une journée entière, de minuit à minuit en heure locale de la ressource.
       await tx.insert(availabilityExceptions).values({
         resourceId: studioA!,
-        during: toRange(dayAt(7, 0), dayAt(8, 0)),
+        during: parisRange(day + 7, '00:00', '24:00'),
         reason: 'Maintenance des éclairages',
       });
 
@@ -159,7 +174,7 @@ async function main(): Promise<void> {
         {
           resourceId: studioA!,
           customerId: customers[0]!.id,
-          during: toRange(dayAt(0, 8), dayAt(0, 9)),
+          during: parisRange(day, '10:00', '11:00'),
           status: 'confirmed',
           priceCents: 4500,
         },
@@ -167,16 +182,17 @@ async function main(): Promise<void> {
           // Chevauche la réservation confirmée : autorisé car une réservation annulée ne bloque plus le créneau.
           resourceId: studioA!,
           customerId: customers[1]!.id,
-          during: toRange(dayAt(0, 8, 30), dayAt(0, 9, 30)),
+          during: parisRange(day, '10:30', '11:30'),
           status: 'cancelled',
           priceCents: 4500,
         },
         {
+          // Hold de paiement : il occupe 14:00 pendant 15 minutes, puis le créneau redevient libre.
           resourceId: studioA!,
           customerId: customers[1]!.id,
-          during: toRange(dayAt(0, 10), dayAt(0, 11)),
+          during: parisRange(day, '14:00', '15:00'),
           status: 'pending',
-          expiresAt: new Date(Date.now() + HOUR / 4),
+          expiresAt: new Date(Date.now() + HOLD_MS),
           priceCents: 4500,
         },
       ]);
