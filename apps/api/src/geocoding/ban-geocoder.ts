@@ -68,9 +68,12 @@ export class BanGeocoder implements Geocoder {
     const parsed = responseSchema.safeParse(body);
     if (!parsed.success) throw new GeocoderError('invalid_response');
 
+    // Deux lieux au même libellé sont indiscernables pour le visiteur : on garde le premier (le mieux classé).
+    const seen = new Set<string>();
     return parsed.data.features.flatMap(({ geometry, properties }) => {
       const kind = KINDS[properties.type];
-      if (!kind) return [];
+      if (!kind || seen.has(properties.label)) return [];
+      seen.add(properties.label);
       const [longitude, latitude] = geometry.coordinates;
       return [
         {

@@ -43,6 +43,11 @@ describe('BanGeocoder', () => {
           }),
           feature({ label: 'Lieu-dit sans ville', name: 'Lieu-dit', type: 'locality' }),
           feature({ label: 'Type inconnu', name: 'X', type: 'poi' }),
+          // Doublon de libellé : ignoré.
+          feature(
+            { label: 'Lyon', name: 'Lyon', type: 'municipality', city: 'Lyon', postcode: '69002' },
+            [4.83, 45.75],
+          ),
         ],
       }),
     );
