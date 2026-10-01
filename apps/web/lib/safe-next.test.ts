@@ -18,6 +18,10 @@ describe('safeNextPath', () => {
     '/\n/evil.example',
     '/\r/evil.example',
     '/%2F/../\t/evil.example',
+    '/.//evil.example',
+    '/..//evil.example',
+    '/a/..//evil.example',
+    '/%2e//evil.example',
   ])('retombe sur /account pour %j', (value) => {
     expect(safeNextPath(value)).toBe('/account');
   });

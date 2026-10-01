@@ -15,7 +15,10 @@ export function safeNextPath(next: string | null | undefined): string {
   try {
     const url = new URL(next, PLACEHOLDER_ORIGIN);
     if (url.origin !== PLACEHOLDER_ORIGIN) return DEFAULT_AFTER_LOGIN;
-    return `${url.pathname}${url.search}${url.hash}`;
+    // Le parseur normalise `/./` et `/../` : `/.//evil.com` devient `//evil.com`, qu'un navigateur
+    // lit comme un autre site. On revérifie donc le chemin APRÈS normalisation.
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    return path.startsWith('//') ? DEFAULT_AFTER_LOGIN : path;
   } catch {
     return DEFAULT_AFTER_LOGIN;
   }
