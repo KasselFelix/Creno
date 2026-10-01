@@ -80,9 +80,20 @@ async function main(): Promise<void> {
   // Le seed vide les tables métier : jamais en production.
   if (process.env.NODE_ENV === 'production') throw new Error('Seed interdit en production');
   const { db, pool } = createDb(url, { max: 1 });
-  const passwordHash = await hash(DEMO_PASSWORD);
 
   try {
+    // `--if-empty` (démarrage de docker compose) : on ne touche pas à une base qui contient déjà des
+    // comptes, sinon chaque redémarrage effacerait les utilisateurs créés et invaliderait leurs sessions.
+    if (process.argv.includes('--if-empty')) {
+      const [existing] = await db.select({ id: users.id }).from(users).limit(1);
+      if (existing) {
+        process.stdout.write(
+          `${JSON.stringify({ level: 'info', event: 'db.seed_skipped', reason: 'not_empty' })}\n`,
+        );
+        return;
+      }
+    }
+    const passwordHash = await hash(DEMO_PASSWORD);
     await db.transaction(async (tx) => {
       await tx.execute(
         sql`TRUNCATE sessions, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
