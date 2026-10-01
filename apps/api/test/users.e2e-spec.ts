@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -22,12 +23,19 @@ describe('users', () => {
     expect(apiErrorSchema.parse(res.body).code).toBe('UNAUTHORIZED');
   });
 
-  it('401 avec un access token falsifié', async () => {
-    const forged =
-      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIiwic2lkIjoiMSJ9.c2lnbmF0dXJlLWZhdXNzZQ';
+  it.each([
+    ['signé avec un autre secret', 'HS256', 'un-autre-secret-un-autre-secret-0000'],
+    ['sans signature (alg none)', 'none', null],
+  ])('401 avec un access token falsifié : %s', async (_label, alg, secret) => {
+    // Construit à l'exécution : un JWT écrit en dur déclencherait le scan de secrets (gitleaks).
+    const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const unsigned = `${encode({ alg, typ: 'JWT' })}.${encode({ sub: '1', role: 'admin', sid: '1', iss: 'creno-api' })}`;
+    const signature = secret
+      ? createHmac('sha256', secret).update(unsigned).digest('base64url')
+      : '';
     await request(app.getHttpServer())
       .get('/v1/users/me')
-      .set('Authorization', `Bearer ${forged}`)
+      .set('Authorization', `Bearer ${unsigned}.${signature}`)
       .expect(401);
   });
 
