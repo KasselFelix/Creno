@@ -1,0 +1,52 @@
+import { type ApiError, apiErrorSchema, type ErrorCode } from '@creno/shared';
+
+/** Messages utilisateur par code d'erreur de l'API (jamais le message technique brut). */
+const messages: Partial<Record<ErrorCode, string>> = {
+  INVALID_CREDENTIALS: 'Email ou mot de passe incorrect.',
+  EMAIL_TAKEN: 'Un compte existe déjà avec cet email.',
+  SESSION_EXPIRED: 'Votre session a expiré. Reconnectez-vous.',
+  UNAUTHORIZED: 'Connectez-vous pour continuer.',
+  FORBIDDEN: "Vous n'avez pas accès à cette page.",
+  FORBIDDEN_OWNERSHIP: "Cette ressource n'est pas la vôtre.",
+  TOO_MANY_REQUESTS: 'Trop de tentatives. Réessayez dans une minute.',
+  VALIDATION_FAILED: 'Certains champs sont invalides.',
+  NOT_FOUND: 'Élément introuvable.',
+};
+
+const FALLBACK = 'Une erreur est survenue. Réessayez.';
+
+export class ApiClientError extends Error {
+  readonly code: ErrorCode | 'NETWORK_ERROR';
+  readonly statusCode: number;
+  /** Erreurs par champ renvoyées par l'API (`details.fieldErrors`). */
+  readonly fieldErrors: Record<string, string[]>;
+
+  constructor(error: ApiError | null, statusCode: number) {
+    super((error && messages[error.code]) ?? FALLBACK);
+    this.name = 'ApiClientError';
+    this.code = error?.code ?? 'NETWORK_ERROR';
+    this.statusCode = statusCode;
+    this.fieldErrors = extractFieldErrors(error?.details);
+  }
+}
+
+function extractFieldErrors(details: unknown): Record<string, string[]> {
+  if (!details || typeof details !== 'object' || !('fieldErrors' in details)) return {};
+  const { fieldErrors } = details;
+  if (!fieldErrors || typeof fieldErrors !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(fieldErrors).filter(
+      (entry): entry is [string, string[]] =>
+        Array.isArray(entry[1]) && entry[1].every((m) => typeof m === 'string'),
+    ),
+  );
+}
+
+export async function toApiClientError(res: Response): Promise<ApiClientError> {
+  const parsed = apiErrorSchema.safeParse(await res.json().catch(() => null));
+  return new ApiClientError(parsed.success ? parsed.data : null, res.status);
+}
+
+export function errorMessage(error: unknown): string {
+  return error instanceof ApiClientError ? error.message : FALLBACK;
+}
