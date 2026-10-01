@@ -2,7 +2,7 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI) et **authentification** (comptes, sessions, rôles).
+> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles) et **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation).
 
 ## Démarrer
 
@@ -18,6 +18,8 @@ docker compose up
 | Front (Next.js)      | http://localhost:3000                                                   |
 | API (NestJS)         | http://localhost:4000 — `/health`, `/health/ready`, Swagger sur `/docs` |
 | PostgreSQL + PostGIS | `localhost:5432` (bases `creno` et `creno_test`)                        |
+
+Pour voir les créneaux d'un prestataire de démo : http://localhost:3000/providers/studio-lumiere. Connecté avec le compte prestataire, l'« Espace prestataire » (`/dashboard`) permet de gérer ressources, horaires et fermetures.
 
 Au démarrage, l'API applique les migrations et, si la base est vide, charge un jeu de données de démo (3 prestataires à Paris, Lyon et Bordeaux). `pnpm db:seed` remet ce jeu de données à zéro à la demande.
 
@@ -64,7 +66,7 @@ ALTER TABLE bookings ADD CONSTRAINT bookings_no_overlap
   WHERE (status IN ('pending', 'confirmed'));
 ```
 
-C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jamais réservé deux fois, même quand deux clients valident à la même milliseconde. Un test lance deux insertions concurrentes sur deux connexions et vérifie qu'exactement une réussit ([packages/db/test/bookings-constraints.test.ts](packages/db/test/bookings-constraints.test.ts)). Détails, piège du `now()` et gestion du deadlock : [docs/schema.md](docs/schema.md).
+C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jamais réservé deux fois, même quand deux clients valident à la même milliseconde. Deux tests le prouvent : deux insertions concurrentes sur deux connexions ([packages/db/test/bookings-constraints.test.ts](packages/db/test/bookings-constraints.test.ts)), et deux `POST /v1/bookings` simultanés qui donnent exactement un 201 et un `409 SLOT_UNAVAILABLE` ([apps/api/test/bookings.e2e-spec.ts](apps/api/test/bookings.e2e-spec.ts)). Détails, piège du `now()` et gestion du deadlock : [docs/schema.md](docs/schema.md).
 
 ## Pourquoi ce choix technique
 
@@ -72,8 +74,16 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **API NestJS séparée de Next.js** : webhooks, jobs et app mobile ont besoin d'un backend indépendant. → [ADR 0001](docs/adr/0001-monorepo-nest-next.md)
 - **`geography` plutôt que `geometry`** : distances en mètres, index sphérique. → [ADR 0003](docs/adr/0003-geography-type.md)
 - **Horaires en heure locale + fuseau IANA** : les changements d'heure ne décalent pas les horaires. → [ADR 0004](docs/adr/0004-date-fns-timezones.md)
+- **Créneaux calculés par un moteur pur en TypeScript** : `now` est un paramètre, les jours de 23 h et de 25 h sont des tests unitaires sans base. → [ADR 0006](docs/adr/0006-slot-engine.md)
 - **Cookies `HttpOnly` + sessions en base avec refresh token rotatif** : tokens hors de portée d'un XSS, révocation par appareil, détection de token volé. → [ADR 0005](docs/adr/0005-auth-cookies-rotating-refresh.md)
 - _À venir : choix du modèle IA, retry / circuit breaker / fallback de la recherche._
+
+## Disponibilités et réservation
+
+- Un prestataire crée son profil, ses ressources, leurs **horaires hebdomadaires en heure locale** (plusieurs plages par jour) et ses fermetures exceptionnelles.
+- `GET /v1/resources/:id/slots?from=&to=` renvoie les créneaux par jour local de la ressource ; un créneau occupé est marqué `available: false`.
+- `POST /v1/bookings` pose un **hold de 15 minutes** (booking `pending`) : 409 si le créneau est pris, 422 s'il n'est pas proposé. Un hold expiré ne bloque plus rien, sans attendre de tâche de nettoyage.
+- Le paiement et la confirmation arrivent à l'étape suivante ; la fiche publique affiche la grille sans bouton de réservation.
 
 ## Authentification et autorisations
 

@@ -52,7 +52,7 @@ export class ResourcesRepository {
           activeOnly ? eq(resources.isActive, true) : undefined,
         ),
       )
-      .orderBy(asc(resources.createdAt), asc(resources.id));
+      .orderBy(asc(resources.createdAt), asc(resources.name), asc(resources.id));
   }
 
   async create(providerId: string, values: CreateResourceInput): Promise<ResourceRow> {
