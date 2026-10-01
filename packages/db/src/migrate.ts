@@ -1,19 +1,11 @@
-// Applique les migrations en attente (idempotent : Drizzle tient un journal dans drizzle.__drizzle_migrations).
-import path from 'node:path';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { createDb } from './client.js';
+// CLI : `pnpm db:migrate` (dev, via tsx) ou `node dist/migrate.js` (production).
+import { migrateDatabase } from './migrator.js';
 
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL manquante');
-
-  const { db, pool } = createDb(url, { max: 1 });
-  try {
-    await migrate(db, { migrationsFolder: path.resolve(import.meta.dirname, '../migrations') });
-    process.stdout.write(`${JSON.stringify({ level: 'info', event: 'db.migrated' })}\n`);
-  } finally {
-    await pool.end();
-  }
+  await migrateDatabase(url);
+  process.stdout.write(`${JSON.stringify({ level: 'info', event: 'db.migrated' })}\n`);
 }
 
 main().catch((error: unknown) => {

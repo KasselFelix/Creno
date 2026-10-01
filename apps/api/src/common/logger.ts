@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { Global, Module } from '@nestjs/common';
 import type { Params } from 'nestjs-pino';
+import type { DestinationStream } from 'pino';
 import type { AppConfig } from '../config/env.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
@@ -39,21 +41,28 @@ export function resolveRequestId(incoming: string | string[] | undefined): strin
   return typeof incoming === 'string' && REQUEST_ID_FORMAT.test(incoming) ? incoming : randomUUID();
 }
 
+/** Destination des logs : stdout par défaut ; remplacée dans les tests pour inspecter les logs. */
+export const LOG_STREAM = Symbol('LOG_STREAM');
+
+@Global()
+@Module({ providers: [{ provide: LOG_STREAM, useValue: null }], exports: [LOG_STREAM] })
+export class LogStreamModule {}
+
 /** Logs JSON (pino) : un `requestId` par requête, et jamais de secret ni de donnée personnelle. */
-export function loggerParams(config: AppConfig): Params {
-  return {
-    pinoHttp: {
-      level: config.NODE_ENV === 'test' ? 'silent' : config.LOG_LEVEL,
-      genReqId: (req: IncomingMessage, res: ServerResponse) => {
-        const id = resolveRequestId(req.headers[REQUEST_ID_HEADER]);
-        res.setHeader(REQUEST_ID_HEADER, id);
-        return id;
-      },
-      // `requestId` au premier niveau de chaque log de la requête (accès et logs métier).
-      customProps: (req) => ({ requestId: req.id }),
-      // Les sondes de santé sont appelées toutes les quelques secondes : pas de log d'accès.
-      autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
-      redact: { paths: REDACT_PATHS, censor: '[redacted]' },
+export function loggerParams(config: AppConfig, stream: DestinationStream | null = null): Params {
+  const options = {
+    // En test, silence… sauf si un test capture les logs pour les vérifier.
+    level: config.NODE_ENV === 'test' && !stream ? 'silent' : config.LOG_LEVEL,
+    genReqId: (req: IncomingMessage, res: ServerResponse) => {
+      const id = resolveRequestId(req.headers[REQUEST_ID_HEADER]);
+      res.setHeader(REQUEST_ID_HEADER, id);
+      return id;
     },
-  };
+    // `requestId` au premier niveau de chaque log de la requête (accès et logs métier).
+    customProps: (req) => ({ requestId: req.id }),
+    // Les sondes de santé sont appelées toutes les quelques secondes : pas de log d'accès.
+    autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
+    redact: { paths: REDACT_PATHS, censor: '[redacted]' },
+  } satisfies Params['pinoHttp'];
+  return { pinoHttp: stream ? [options, stream] : options };
 }

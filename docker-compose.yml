@@ -35,6 +35,9 @@ services:
       DATABASE_URL: postgres://creno:creno@db:5432/creno
       DATABASE_URL_TEST: postgres://creno:creno@db:5432/creno_test
       WEB_ORIGIN: http://localhost:3000
+      # Le navigateur passe par le rewrite Next : un proxy devant l'API.
+      TRUST_PROXY: '1'
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-change-me-dev-only-change-me-0000}
     ports:
       - '127.0.0.1:4000:4000'
     volumes:

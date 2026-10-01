@@ -1,7 +1,5 @@
 // Migre la base de test (creno_test) avant la suite.
-import path from 'node:path';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { createDb } from '../src/client.js';
+import { migrateDatabase } from '../src/migrator.js';
 
 export function testDatabaseUrl(): string {
   const url = process.env.DATABASE_URL_TEST;
@@ -10,10 +8,5 @@ export function testDatabaseUrl(): string {
 }
 
 export default async function setup(): Promise<void> {
-  const { db, pool } = createDb(testDatabaseUrl(), { max: 1 });
-  try {
-    await migrate(db, { migrationsFolder: path.resolve(import.meta.dirname, '../migrations') });
-  } finally {
-    await pool.end();
-  }
+  await migrateDatabase(testDatabaseUrl());
 }
