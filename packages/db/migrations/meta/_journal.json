@@ -29,6 +29,13 @@
       "when": 1790803615367,
       "tag": "0003_bookings_constraints_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790808621366,
+      "tag": "0004_auth",
+      "breakpoints": true
     }
   ]
 }

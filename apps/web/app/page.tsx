@@ -1,16 +1,11 @@
 import { Suspense } from 'react';
-import { ThemeToggle } from '@/components/theme-toggle';
+import { SiteHeader } from '@/components/site-header';
 import { ApiStatusCard, ApiStatusCardSkeleton } from '@/features/health/api-status-card';
 
 export default function HomePage() {
   return (
     <>
-      <header className="border-b">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <span className="text-lg font-semibold tracking-tight">Creno</span>
-          <ThemeToggle />
-        </div>
-      </header>
+      <SiteHeader />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-16">
         <div className="flex max-w-2xl flex-col gap-4">
           <h1 className="text-4xl font-semibold tracking-tight">

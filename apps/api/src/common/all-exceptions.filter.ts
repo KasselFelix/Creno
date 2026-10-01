@@ -17,6 +17,7 @@ const codeByStatus: Partial<Record<number, ErrorCode>> = {
   [HttpStatus.UNAUTHORIZED]: 'UNAUTHORIZED',
   [HttpStatus.FORBIDDEN]: 'FORBIDDEN',
   [HttpStatus.NOT_FOUND]: 'NOT_FOUND',
+  [HttpStatus.TOO_MANY_REQUESTS]: 'TOO_MANY_REQUESTS',
 };
 
 const GENERIC_SERVER_ERROR = 'Erreur interne.';

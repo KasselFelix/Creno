@@ -2,7 +2,7 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étape actuelle : **socle technique** (monorepo, base de données, API, CI).
+> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI) et **authentification** (comptes, sessions, rôles).
 
 ## Démarrer
 
@@ -20,6 +20,16 @@ docker compose up
 | PostgreSQL + PostGIS | `localhost:5432` (bases `creno` et `creno_test`)                        |
 
 Au démarrage, l'API applique les migrations et charge un jeu de données de démo (3 prestataires à Paris, Lyon et Bordeaux).
+
+**Comptes de démo** (développement uniquement), mot de passe `creno-demo-2026` :
+
+| Rôle        | Email                        |
+| ----------- | ---------------------------- |
+| Client      | `lea.petit@example.com`      |
+| Prestataire | `studio.lumiere@example.com` |
+| Admin       | `admin@creno.dev`            |
+
+> Après un changement de dépendances (`package.json`), reconstruire avec `docker compose up -d --build -V` : sans `-V`, Compose réutilise les anciens `node_modules` des conteneurs.
 
 ## Commandes
 
@@ -62,7 +72,17 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **API NestJS séparée de Next.js** : webhooks, jobs et app mobile ont besoin d'un backend indépendant. → [ADR 0001](docs/adr/0001-monorepo-nest-next.md)
 - **`geography` plutôt que `geometry`** : distances en mètres, index sphérique. → [ADR 0003](docs/adr/0003-geography-type.md)
 - **Horaires en heure locale + fuseau IANA** : les changements d'heure ne décalent pas les horaires. → [ADR 0004](docs/adr/0004-date-fns-timezones.md)
+- **Cookies `HttpOnly` + sessions en base avec refresh token rotatif** : tokens hors de portée d'un XSS, révocation par appareil, détection de token volé. → [ADR 0005](docs/adr/0005-auth-cookies-rotating-refresh.md)
 - _À venir : choix du modèle IA, retry / circuit breaker / fallback de la recherche._
+
+## Authentification et autorisations
+
+- Inscription (client ou prestataire), connexion, « Mon compte » avec la liste des appareils connectés.
+- Access token JWT de 15 min et refresh token de 30 jours, tous deux en cookies `HttpOnly` ; le navigateur ne parle qu'au front (`/api/*` est réécrit vers l'API), les cookies restent donc first-party.
+- **Refresh rotatif** : chaque renouvellement remplace le refresh token (compare-and-swap en base). Un ancien token rejoué après 10 s révoque la session : c'est le signe d'un vol.
+- Mots de passe hachés en argon2id ; même réponse et même durée pour « mauvais mot de passe » et « email inconnu ».
+- Autorisation par **rôle** (`@Roles('admin')`) et par **propriété**, vérifiée dans les services : lire le compte ou révoquer la session d'un autre utilisateur renvoie 403 (tests IDOR).
+- Helmet, vérification de l'en-tête `Origin`, limitation du nombre de tentatives sur les routes d'auth (429).
 
 ## CI/CD
 
@@ -76,15 +96,20 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 
 ## Variables d'environnement
 
-| Variable            | Utilisée par   | Défaut / exemple                                   | Rôle                                                           |
-| ------------------- | -------------- | -------------------------------------------------- | -------------------------------------------------------------- |
-| `NODE_ENV`          | api, web       | `development`                                      | environnement                                                  |
-| `DB_PORT`           | docker compose | `5432`                                             | port exposé de Postgres                                        |
-| `DATABASE_URL`      | api, db        | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                |
-| `DATABASE_URL_TEST` | tests          | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                   |
-| `API_PORT`          | api            | `4000`                                             | port HTTP de l'API                                             |
-| `LOG_LEVEL`         | api            | `info`                                             | niveau des logs pino                                           |
-| `WEB_ORIGIN`        | api            | `http://localhost:3000`                            | origine autorisée (CORS)                                       |
-| `API_INTERNAL_URL`  | web (serveur)  | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components |
+| Variable                     | Utilisée par   | Défaut / exemple                                   | Rôle                                                                                                         |
+| ---------------------------- | -------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `NODE_ENV`                   | api, web       | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                            |
+| `DB_PORT`                    | docker compose | `5432`                                             | port exposé de Postgres                                                                                      |
+| `DATABASE_URL`               | api, db        | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                              |
+| `DATABASE_URL_TEST`          | tests          | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                 |
+| `API_PORT`                   | api            | `4000`                                             | port HTTP de l'API                                                                                           |
+| `LOG_LEVEL`                  | api            | `info`                                             | niveau des logs pino                                                                                         |
+| `WEB_ORIGIN`                 | api            | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                     |
+| `API_INTERNAL_URL`           | web (serveur)  | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                               |
+| `JWT_ACCESS_SECRET`          | api            | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production |
+| `ACCESS_TOKEN_TTL_MINUTES`   | api            | `15`                                               | durée de vie de l'access token                                                                               |
+| `REFRESH_TOKEN_TTL_DAYS`     | api            | `30`                                               | durée de vie (glissante) d'une session                                                                       |
+| `AUTH_RATE_LIMIT_PER_MINUTE` | api            | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
+| `TRUST_PROXY`                | api            | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
 
 La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Aucun secret n'est versionné.

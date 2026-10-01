@@ -6,6 +6,7 @@ PostgreSQL 17 + PostGIS. Schéma source : `packages/db/src/schema/`, migrations 
 erDiagram
   users ||--o| providers : "possède (rôle provider)"
   users ||--o{ bookings : "réserve (client)"
+  users ||--o{ sessions : "appareils connectés"
   providers ||--o{ resources : propose
   resources ||--o{ availability_rules : "horaires hebdo"
   resources ||--o{ availability_exceptions : fermetures
@@ -17,6 +18,18 @@ erDiagram
     text full_name
     text phone "nullable"
     user_role role "customer | provider | admin"
+    text password_hash "argon2id, nullable"
+  }
+  sessions {
+    uuid id PK
+    uuid user_id FK
+    text refresh_token_hash "sha256 du secret courant"
+    text previous_token_hash "accepté 10 s après rotation"
+    timestamptz rotated_at
+    text user_agent "200 caractères max"
+    timestamptz expires_at
+    timestamptz last_used_at
+    timestamptz revoked_at "nullable"
   }
   providers {
     uuid id PK
@@ -69,6 +82,7 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 | `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                          |
 | `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                        |
 | `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises |
+| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                               |
 
 ## La contrainte `bookings_no_overlap`
 
@@ -89,6 +103,23 @@ ALTER TABLE bookings ADD CONSTRAINT bookings_no_overlap
 **Piège du `now()`** : le prédicat d'une contrainte doit être immuable, il ne peut donc pas tester `expires_at > now()`. Un hold expiré bloque le créneau tant que sa ligne n'est pas passée à `expired`. La transaction de réservation commence donc par expirer les holds dépassés qui chevauchent le créneau, puis insère ; le calcul des créneaux libres ignore de lui-même les holds expirés.
 
 **Deadlock** : deux insertions simultanées sur le même créneau peuvent s'attendre mutuellement pendant la vérification de la contrainte ; Postgres interrompt alors l'une d'elles avec `40P01` au lieu de `23P01`. La transaction est rejouée par `retryOnDeadlock` (`packages/db/src/errors.ts`), et le second essai obtient `23P01`. Couvert par `packages/db/test/bookings-constraints.test.ts`.
+
+## Sessions et refresh token rotatif
+
+Une ligne de `sessions` par appareil connecté (supprimée en cascade avec l'utilisateur). Le refresh token envoyé au navigateur vaut `<id de session>.<secret aléatoire de 256 bits>` ; la base ne stocke que `sha256(secret)` : une fuite de la table ne donne aucun token utilisable.
+
+À chaque refresh, le secret est remplacé par un **compare-and-swap** :
+
+```sql
+UPDATE sessions
+   SET previous_token_hash = refresh_token_hash, refresh_token_hash = $new, rotated_at = now(), …
+ WHERE id = $1 AND refresh_token_hash = $presented AND revoked_at IS NULL
+RETURNING *;
+```
+
+La condition sur `refresh_token_hash` rend la rotation atomique : deux refresh simultanés avec le même token ne peuvent pas réussir tous les deux. Le perdant, ou un onglet en retard, présente alors le hash « précédent » : il est accepté pendant 10 secondes (`rotated_at`), sans émettre de nouveau refresh token. Passé ce délai, un ancien token signale un vol ou un rejeu : `revoked_at` est renseigné et toute la session est invalidée.
+
+Contraintes : `sessions_expiry_after_creation`, `sessions_user_agent_length` (≤ 200). Aucune adresse IP n'est stockée.
 
 ## Autres contraintes
 

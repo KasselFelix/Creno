@@ -1,0 +1,4 @@
+# Faux positifs du scan de secrets, identifiés par leur empreinte (commit:fichier:règle:ligne).
+# JWT volontairement falsifié (signature invalide) d'un test e2e ; remplacé depuis par un jeton
+# construit à l'exécution. Le commit reste dans l'historique : on ne réécrit pas une branche poussée.
+c7e9b5aa155db47ff0a32a34c1060e9719a7b119:apps/api/test/users.e2e-spec.ts:jwt:27
