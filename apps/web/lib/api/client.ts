@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import { ApiClientError, toApiClientError } from './errors';
 
 interface ApiFetchOptions<T extends z.ZodType> {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** Schéma Zod de `@creno/shared` pour valider la réponse. Absent : pas de corps attendu (204). */
   schema?: T;
