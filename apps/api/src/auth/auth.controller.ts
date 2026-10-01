@@ -24,6 +24,7 @@ import {
   registerSchema,
   type SessionList,
 } from '@creno/shared';
+import { DomainError } from '../common/domain-error.js';
 import { ApiZodBody, ZodValidationPipe } from '../common/zod.js';
 import { CurrentUser, Public } from './auth.decorators.js';
 import { AuthCookies } from './auth.cookies.js';
@@ -86,21 +87,25 @@ export class AuthController {
       this.cookies.set(res, result);
       return { user: result.user };
     } catch (error) {
-      // Session morte : on efface les cookies pour que le front repasse par le login.
-      this.cookies.clear(res);
+      // Session morte : on efface les cookies pour que le front repasse par le login. Sur une autre
+      // erreur (panne passagère de la base…), on les garde : la session est peut-être encore valide.
+      if (error instanceof DomainError && error.code === 'SESSION_EXPIRED') this.cookies.clear(res);
       throw error;
     }
   }
 
+  // Publique : on doit pouvoir se déconnecter même avec un access token expiré.
+  @Public()
   @SkipThrottle(noLimit)
   @Post('logout')
   @HttpCode(204)
-  async logout(
-    @CurrentUser() user: AuthUser,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    await this.auth.logout(user);
-    this.cookies.clear(res);
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<void> {
+    try {
+      await this.auth.logout(req.cookies?.[AUTH_COOKIES.refresh]);
+    } finally {
+      // Quoi qu'il arrive, ce navigateur n'a plus de session.
+      this.cookies.clear(res);
+    }
   }
 
   @SkipThrottle(noLimit)

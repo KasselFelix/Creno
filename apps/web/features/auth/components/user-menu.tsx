@@ -63,11 +63,15 @@ export function UserMenu({ user }: { user: PublicUser }) {
           <DropdownMenuLabel className="truncate">{user.email}</DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem render={<Link href="/account" />}>
+        <DropdownMenuItem className="min-h-11 sm:min-h-8" render={<Link href="/account" />}>
           <UserRound aria-hidden className="size-4" />
           Mon compte
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleLogout} disabled={logout.isPending}>
+        <DropdownMenuItem
+          className="min-h-11 sm:min-h-8"
+          onClick={handleLogout}
+          disabled={logout.isPending}
+        >
           <LogOut aria-hidden className="size-4" />
           Se déconnecter
         </DropdownMenuItem>

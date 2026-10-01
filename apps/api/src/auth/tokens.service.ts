@@ -6,7 +6,8 @@ import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import type { AccessTokenPayload } from './auth.types.js';
 
-const REFRESH_TOKEN_FORMAT = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{43})$/;
+const REFRESH_TOKEN_FORMAT =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/;
 
 export interface RefreshTokenParts {
   sessionId: string;

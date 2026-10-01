@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { type Database, type DbHandle, sessions } from '@creno/db';
 import { DB } from '../database/database.module.js';
 
@@ -63,6 +63,21 @@ export class SessionsRepository {
       .update(sessions)
       .set({ revokedAt: sql`now()` })
       .where(and(eq(sessions.id, id), isNull(sessions.revokedAt)));
+  }
+
+  /**
+   * Supprime les sessions mortes (expirées ou révoquées) d'un utilisateur. Appelée à chaque
+   * connexion : la table ne grossit pas indéfiniment, même sans job de nettoyage.
+   */
+  async purgeDead(userId: string): Promise<void> {
+    await this.handle.db
+      .delete(sessions)
+      .where(
+        and(
+          eq(sessions.userId, userId),
+          or(isNotNull(sessions.revokedAt), lte(sessions.expiresAt, sql`now()`)),
+        ),
+      );
   }
 
   /** Sessions encore utilisables d'un utilisateur, la plus récemment utilisée d'abord. */

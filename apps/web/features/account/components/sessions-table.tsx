@@ -86,7 +86,7 @@ export function SessionsTable() {
       <TableHeader>
         <TableRow>
           <TableHead>Appareil</TableHead>
-          <TableHead>Dernière activité</TableHead>
+          <TableHead className="hidden sm:table-cell">Dernière activité</TableHead>
           <TableHead className="text-right">
             <span className="sr-only">Actions</span>
           </TableHead>
@@ -95,13 +95,17 @@ export function SessionsTable() {
       <TableBody>
         {sessions.data.items.map((session) => (
           <TableRow key={session.id}>
-            <TableCell className="font-medium">
+            <TableCell className="font-medium whitespace-normal">
               <span className="flex flex-wrap items-center gap-2">
                 {describeDevice(session.userAgent)}
                 {session.current && <Badge variant="secondary">Cet appareil</Badge>}
               </span>
+              {/* Sur mobile, la date passe sous l'appareil : le bouton reste visible sans défilement. */}
+              <span className="text-muted-foreground block text-xs font-normal sm:hidden">
+                {dateFormat.format(new Date(session.lastUsedAt))}
+              </span>
             </TableCell>
-            <TableCell className="text-muted-foreground">
+            <TableCell className="text-muted-foreground hidden sm:table-cell">
               {dateFormat.format(new Date(session.lastUsedAt))}
             </TableCell>
             <TableCell className="text-right">

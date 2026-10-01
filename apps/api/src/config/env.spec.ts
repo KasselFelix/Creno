@@ -28,6 +28,12 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, JWT_ACCESS_SECRET: 'court' })).toThrow(/JWT_ACCESS_SECRET/);
   });
 
+  it('refuse TRUST_PROXY=true en production (X-Forwarded-For falsifiable)', () => {
+    const prod = { ...base, NODE_ENV: 'production', JWT_ACCESS_SECRET: 'x'.repeat(48) };
+    expect(() => loadConfig({ ...prod, TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/);
+    expect(loadConfig({ ...prod, TRUST_PROXY: '2' }).TRUST_PROXY).toBe(2);
+  });
+
   it('interprète TRUST_PROXY', () => {
     expect(loadConfig({ ...base, TRUST_PROXY: '1' }).TRUST_PROXY).toBe(1);
     expect(loadConfig({ ...base, TRUST_PROXY: 'true' }).TRUST_PROXY).toBe(true);

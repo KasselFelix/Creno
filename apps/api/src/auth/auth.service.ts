@@ -12,6 +12,8 @@ import { TokensService } from './tokens.service.js';
 
 /** Un ancien refresh token reste accepté ce délai après rotation (refresh simultanés de plusieurs onglets). */
 export const REFRESH_GRACE_MS = 10_000;
+/** Durée de vie absolue d'une session : au-delà, il faut se reconnecter, même si elle sert tous les jours. */
+export const SESSION_MAX_AGE_MS = 90 * 24 * 60 * 60_000;
 const USER_AGENT_MAX_LENGTH = 200;
 
 export interface AuthResult {
@@ -71,6 +73,7 @@ export class AuthService {
       });
       throw new DomainError('INVALID_CREDENTIALS', 401, 'Email ou mot de passe incorrect.');
     }
+    await this.sessions.purgeDead(user.id);
     const secret = this.tokens.newRefreshSecret();
     const session = await this.sessions.create(this.newSessionValues(user.id, secret, userAgent));
     this.logger.log({ event: 'auth.logged_in', userId: user.id, sessionId: session.id });
@@ -95,7 +98,7 @@ export class AuthService {
         session.id,
         presented,
         this.tokens.hashSecret(secret),
-        new Date(Date.now() + this.tokens.refreshTtlMs),
+        this.nextExpiry(session),
       );
       // Perdu la course contre un refresh simultané : l'ancien hash est désormais « previous ».
       if (!rotated)
@@ -108,9 +111,23 @@ export class AuthService {
     return this.refreshWithinGrace(session, presented);
   }
 
-  async logout(current: AuthUser): Promise<void> {
-    await this.sessions.revoke(current.sessionId);
-    this.logger.log({ event: 'auth.logged_out', userId: current.id, sessionId: current.sessionId });
+  /**
+   * Déconnexion par le refresh token : elle marche même quand l'access token a expiré (onglet
+   * resté ouvert). Un token inconnu ou déjà mort ne provoque pas d'erreur : le résultat voulu
+   * (plus de session) est déjà atteint.
+   */
+  async logout(rawToken: unknown): Promise<void> {
+    const parts = this.tokens.parseRefreshToken(rawToken);
+    if (!parts) return;
+    const session = await this.sessions.findById(parts.sessionId);
+    if (!session || session.revokedAt) return;
+    const presented = this.tokens.hashSecret(parts.secret);
+    const owns =
+      this.tokens.sameHash(session.refreshTokenHash, presented) ||
+      this.tokens.sameHash(session.previousTokenHash, presented);
+    if (!owns) return;
+    await this.sessions.revoke(session.id);
+    this.logger.log({ event: 'auth.logged_out', userId: session.userId, sessionId: session.id });
   }
 
   async listSessions(current: AuthUser): Promise<Session[]> {
@@ -139,13 +156,15 @@ export class AuthService {
     session: SessionRow | undefined,
     presented: string,
   ): Promise<AuthResult> {
-    if (!session || session.revokedAt) throw sessionExpired();
-    const withinGrace =
-      this.tokens.sameHash(session.previousTokenHash, presented) &&
-      session.rotatedAt !== null &&
-      Date.now() - session.rotatedAt.getTime() <= REFRESH_GRACE_MS;
+    if (!session || session.revokedAt || session.expiresAt <= new Date()) throw sessionExpired();
+    // Secret jamais émis pour cette session : simple 401. On ne révoque pas, sinon connaître un
+    // identifiant de session suffirait à déconnecter quelqu'un.
+    if (!this.tokens.sameHash(session.previousTokenHash, presented)) throw sessionExpired();
 
+    const withinGrace =
+      session.rotatedAt !== null && Date.now() - session.rotatedAt.getTime() <= REFRESH_GRACE_MS;
     if (!withinGrace) {
+      // Le secret précédent revient après le délai de grâce : vol ou rejeu. On révoque la session.
       await this.sessions.revoke(session.id);
       this.logger.warn({
         event: 'auth.refresh_reuse_detected',
@@ -161,6 +180,12 @@ export class AuthService {
       user: toPublicUser(user),
       accessToken: await this.tokens.signAccessToken(user, session.id),
     };
+  }
+
+  /** Expiration glissante (30 jours), plafonnée à la durée de vie absolue de la session. */
+  private nextExpiry(session: SessionRow): Date {
+    const sliding = Date.now() + this.tokens.refreshTtlMs;
+    return new Date(Math.min(sliding, session.createdAt.getTime() + SESSION_MAX_AGE_MS));
   }
 
   /** Le rôle est relu en base à chaque refresh : un changement de rôle s'applique en ≤ 15 min. */

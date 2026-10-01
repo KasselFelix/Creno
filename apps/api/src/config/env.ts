@@ -31,11 +31,21 @@ export const envSchema = z
     AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
   })
   .superRefine((env, ctx) => {
-    if (env.NODE_ENV === 'production' && env.JWT_ACCESS_SECRET === EXAMPLE_JWT_SECRET) {
+    if (env.NODE_ENV !== 'production') return;
+    if (/change-me|dev-only/i.test(env.JWT_ACCESS_SECRET)) {
       ctx.addIssue({
         code: 'custom',
         path: ['JWT_ACCESS_SECRET'],
         message: "valeur d'exemple interdite en production",
+      });
+    }
+    // `true` ferait confiance à n'importe quel X-Forwarded-For : un client pourrait choisir son IP
+    // et contourner le rate limit. En production, on déclare le nombre exact de proxys.
+    if (env.TRUST_PROXY === true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRUST_PROXY'],
+        message: 'indiquer le nombre de proxys (ou leurs adresses), pas "true"',
       });
     }
   });

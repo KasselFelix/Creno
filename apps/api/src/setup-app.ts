@@ -10,8 +10,9 @@ import type { AppConfig } from './config/env.js';
 export function setupApp(app: INestApplication, config: AppConfig): void {
   const express = app as NestExpressApplication;
   express.disable('x-powered-by');
-  // Derrière un proxy (rewrite Next, ingress Azure), l'IP réelle est dans X-Forwarded-For :
-  // indispensable pour que le rate limit ne compte pas tous les clients comme une seule IP.
+  // Par défaut (false), l'API ignore X-Forwarded-For, qu'un client peut falsifier : le rate limit
+  // se base sur l'adresse de la connexion. Derrière des proxys de confiance qui réécrivent cet
+  // en-tête (ingress de production), on déclare leur nombre exact pour retrouver l'IP du visiteur.
   express.set('trust proxy', config.TRUST_PROXY);
 
   const swagger = config.NODE_ENV === 'development';

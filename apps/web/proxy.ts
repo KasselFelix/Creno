@@ -15,8 +15,6 @@ async function refreshSession(request: NextRequest, refreshToken: string) {
       method: 'POST',
       headers: {
         cookie: `${AUTH_COOKIES.refresh}=${refreshToken}`,
-        // L'API compte les tentatives par IP : on transmet celle du visiteur, pas celle du serveur Next.
-        'x-forwarded-for': request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '',
         'user-agent': request.headers.get('user-agent') ?? '',
       },
       cache: 'no-store',

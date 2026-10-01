@@ -8,6 +8,9 @@ interface ApiFetchOptions<T extends z.ZodType> {
   schema?: T;
 }
 
+/** Routes où un 401 est la réponse attendue (identifiants ou session invalides) : pas de nouvel essai. */
+const NO_REFRESH_RETRY = new Set(['/v1/auth/login', '/v1/auth/register', '/v1/auth/refresh']);
+
 let refreshing: Promise<boolean> | null = null;
 
 /** Un seul refresh à la fois, même si plusieurs requêtes reçoivent 401 en même temps. */
@@ -48,7 +51,7 @@ export async function apiFetch(
   let res: Response;
   try {
     res = await send(path, options);
-    if (res.status === 401 && !path.startsWith('/v1/auth/') && (await refreshSession())) {
+    if (res.status === 401 && !NO_REFRESH_RETRY.has(path) && (await refreshSession())) {
       res = await send(path, options);
     }
   } catch {
