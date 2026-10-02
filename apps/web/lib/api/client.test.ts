@@ -44,18 +44,20 @@ describe('apiFetch', () => {
     },
   );
 
-  it.each(['/v1/auth/login', '/v1/auth/register', '/v1/auth/refresh'])(
-    'ne tente pas de refresh pour %s',
-    async (path) => {
-      const fetchMock = mockFetch(
-        json(401, { statusCode: 401, code: 'INVALID_CREDENTIALS', message: 'x' }),
-      );
-      await expect(apiFetch(path, { method: 'POST', body: {} })).rejects.toMatchObject({
-        code: 'INVALID_CREDENTIALS',
-      });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    },
-  );
+  it.each([
+    '/v1/auth/login',
+    '/v1/auth/register',
+    '/v1/auth/register/complete',
+    '/v1/auth/refresh',
+  ])('ne tente pas de refresh pour %s', async (path) => {
+    const fetchMock = mockFetch(
+      json(401, { statusCode: 401, code: 'INVALID_CREDENTIALS', message: 'x' }),
+    );
+    await expect(apiFetch(path, { method: 'POST', body: {} })).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
   it('renvoie l’erreur d’origine quand le refresh échoue', async () => {
     const fetchMock = mockFetch(

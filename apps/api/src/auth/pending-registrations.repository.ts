@@ -10,7 +10,7 @@ export class PendingRegistrationsRepository {
   constructor(@Inject(DB) private readonly handle: DbHandle) {}
 
   /**
-   * Verrou consultatif tenu jusqu'à la fin de la transaction : les inscriptions et confirmations
+   * Verrou consultatif tenu jusqu'à la fin de la transaction : les demandes et fins d'inscription
    * d'une même adresse passent une par une (plafond exact, un seul compte créé). `lower` : même
    * verrou quelle que soit la casse, comme la comparaison `citext`. Le second argument sépare ces
    * verrous de ceux des réservations.
@@ -52,7 +52,7 @@ export class PendingRegistrationsRepository {
     return row;
   }
 
-  /** Enregistre le hash du lien qui va partir. `false` : la ligne a disparu entre-temps (adresse confirmée par un autre lien). */
+  /** Enregistre le hash du lien qui va partir. `false` : la ligne a disparu entre-temps (compte créé par un autre lien). */
   async setTokenHash(id: string, tokenHash: string): Promise<boolean> {
     const rows = await this.handle.db
       .update(pendingRegistrations)

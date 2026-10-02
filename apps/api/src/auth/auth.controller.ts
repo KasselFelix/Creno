@@ -63,9 +63,13 @@ export class AuthController {
   async completeRegistration(
     @Body(new ZodValidationPipe(completeRegistrationSchema)) body: CompleteRegistrationInput,
     @Headers('user-agent') userAgent: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponse> {
     const result = await this.auth.completeRegistration(body, userAgent);
+    // Quelqu'un d'autre était peut-être connecté dans ce navigateur (poste partagé) : sa session
+    // est fermée, pas seulement remplacée dans les cookies.
+    await this.auth.logout(req.cookies?.[AUTH_COOKIES.refresh]);
     this.cookies.set(res, result);
     return { user: result.user };
   }

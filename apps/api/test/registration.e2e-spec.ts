@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { pendingRegistrations, users } from '@creno/db';
+import { pendingRegistrations, sessions, users } from '@creno/db';
 import { AUTH_COOKIES, apiErrorSchema, authResponseSchema } from '@creno/shared';
 import {
   MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR,
@@ -181,6 +181,25 @@ describe('inscription par lien envoyé par email', () => {
       expect(logged('auth.registered')).toMatchObject([{ userId: user.id, role: 'provider' }]);
     });
 
+    it('un autre compte était connecté dans ce navigateur : sa session est fermée', async () => {
+      const previous = await registerAs(app);
+      const token = await requestLink(uniqueEmail());
+
+      await previous.agent
+        .post('/v1/auth/register/complete')
+        .send({ token, ...PROFILE })
+        .expect(200);
+
+      // L'agent porte maintenant les cookies du nouveau compte ; l'ancienne session est révoquée.
+      const me = await previous.agent.get('/v1/users/me').expect(200);
+      expect(me.body).not.toMatchObject({ id: previous.user.id });
+      const rows = await db()
+        .select({ revokedAt: sessions.revokedAt })
+        .from(sessions)
+        .where(eq(sessions.userId, previous.user.id));
+      expect(rows).toEqual([{ revokedAt: expect.any(Date) }]);
+    });
+
     it('lien rejoué, abîmé, inconnu ou au mauvais secret → 400 REGISTRATION_LINK_INVALID, aucun compte', async () => {
       const address = uniqueEmail();
       const token = await requestLink(address);
@@ -321,7 +340,7 @@ describe('inscription par lien envoyé par email', () => {
 
       expect(await runJobs(app, REGISTRATION_EMAIL_QUEUE)).toBe(0);
       expect(logged('auth.registration_email_failed')).toMatchObject([
-        { level: 50, reason: 'http_422', kind: 'verification' },
+        { level: 50, reason: 'http_422', kind: 'registration_link' },
       ]);
     });
 
@@ -391,7 +410,7 @@ describe('inscription : limites par IP', () => {
     expect(apiErrorSchema.parse(res.body).code).toBe('TOO_MANY_REQUESTS');
   });
 
-  it('fin d’inscription : partage la limite des routes d’identifiants → 429', async () => {
+  it('fin d’inscription : limitée à la minute par IP, comme les autres routes d’identifiants → 429', async () => {
     const attempt = () =>
       request(app.getHttpServer())
         .post('/v1/auth/register/complete')

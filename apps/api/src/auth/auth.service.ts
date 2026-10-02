@@ -246,7 +246,6 @@ export class AuthService {
     );
   }
 
-
   private async refreshWithinGrace(
     session: SessionRow | undefined,
     presented: string,

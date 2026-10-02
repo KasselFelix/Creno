@@ -58,7 +58,7 @@ export class MaintenanceService implements OnModuleInit {
     await this.jobs.register({
       name: PURGE_PENDING_REGISTRATIONS_QUEUE,
       queue,
-      // Toutes les heures : ces lignes portent un hash de mot de passe, autant ne pas les garder.
+      // Toutes les heures : une demande expirée ne sert plus à rien, autant ne pas garder l'adresse.
       cron: '10 * * * *',
       handler: async () => {
         await this.purgePendingRegistrations();

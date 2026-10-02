@@ -1,6 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -104,6 +105,7 @@ function InvalidLink() {
 
 export function CompleteRegistrationCard() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const token = useHashToken();
   const completion = useCompleteRegistration();
   const form = useForm<ProfileInput>({
@@ -119,6 +121,8 @@ export function CompleteRegistrationCard() {
       { ...values, token },
       {
         onSuccess: ({ user }) => {
+          // Aucune donnée d'un utilisateur connecté avant dans ce navigateur ne doit rester en cache.
+          queryClient.clear();
           // `replace` : le jeton a servi, il ne reste pas dans l'historique.
           router.replace(homeFor(user.role));
           router.refresh();

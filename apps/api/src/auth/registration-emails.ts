@@ -6,7 +6,7 @@ import { type RenderedEmail, renderParts } from '../notifications/templates.js';
  * Aucun texte saisi par l'auteur de la demande n'y figure (il n'a donné qu'une adresse) : personne
  * ne peut faire envoyer par Creno le message de son choix.
  */
-export function verificationEmail(completeUrl: string): RenderedEmail {
+export function registrationLinkEmail(completeUrl: string): RenderedEmail {
   return renderParts(null, {
     subject: 'Terminez votre inscription sur Creno',
     title: 'Terminez votre inscription',

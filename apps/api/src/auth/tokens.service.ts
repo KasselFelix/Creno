@@ -9,7 +9,7 @@ import type { AccessTokenPayload } from './auth.types.js';
 const OPAQUE_TOKEN_FORMAT =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/;
 
-/** Jeton opaque `<id>.<secret>` : refresh token (id de session) ou lien de confirmation (id d'inscription en attente). */
+/** Jeton opaque `<id>.<secret>` : refresh token (id de session) ou lien d'inscription (id de la demande en attente). */
 export interface OpaqueTokenParts {
   id: string;
   secret: string;

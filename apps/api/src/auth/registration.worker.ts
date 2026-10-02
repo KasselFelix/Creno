@@ -11,7 +11,7 @@ import {
 } from '../notifications/delivery.js';
 import { UsersRepository } from '../users/users.repository.js';
 import { PendingRegistrationsRepository } from './pending-registrations.repository.js';
-import { accountExistsEmail, verificationEmail } from './registration-emails.js';
+import { accountExistsEmail, registrationLinkEmail } from './registration-emails.js';
 import {
   REGISTRATION_EMAIL_DEAD_QUEUE,
   REGISTRATION_EMAIL_QUEUE,
@@ -95,12 +95,12 @@ export class RegistrationWorker implements OnModuleInit {
       const url = `${this.config.WEB_ORIGIN}/register/complete#${this.tokens.formatToken(pending.id, secret)}`;
       message = {
         to: pending.email,
-        ...verificationEmail(url),
+        ...registrationLinkEmail(url),
         // Un lien différent est un email différent : la clé suit le secret.
         idempotencyKey: `registration:${pending.id}:${tokenHash.slice(0, 16)}`,
       };
     }
-    const kind = existing ? 'account_exists' : 'verification';
+    const kind = existing ? 'account_exists' : 'registration_link';
     const attempt = job.retryCount + 1;
 
     try {
