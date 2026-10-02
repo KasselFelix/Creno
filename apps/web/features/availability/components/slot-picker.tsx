@@ -1,12 +1,14 @@
 'use client';
 
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { useState } from 'react';
 import { BOOKING_HORIZON_DAYS, type Resource, type Slot } from '@creno/shared';
 import { QueryError } from '@/components/query-error';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ReserveButton } from '@/features/bookings/components/reserve-button';
 import {
   addDays,
   formatDuration,
@@ -19,8 +21,17 @@ import { useSlots } from '../api';
 
 const WEEK = 7;
 
+/** Ce qu'il faut pour réserver : la session du visiteur, et la capacité du prestataire à encaisser. */
+interface BookingContext {
+  isAuthenticated: boolean;
+  /** Le compte Stripe du prestataire est actif. */
+  onlinePayment: boolean;
+  /** Chemin de la fiche, pour y revenir après connexion. */
+  providerPath: string;
+}
+
 /** Sélecteur de ressource, de jour et de créneau de la fiche publique d'un prestataire. */
-export function SlotPicker({ resources }: { resources: Resource[] }) {
+export function SlotPicker({ resources, ...booking }: { resources: Resource[] } & BookingContext) {
   const [resourceId, setResourceId] = useState(resources[0]!.id);
   const resource = resources.find((item) => item.id === resourceId) ?? resources[0]!;
 
@@ -47,12 +58,12 @@ export function SlotPicker({ resources }: { resources: Resource[] }) {
         ))}
       </div>
       {/* `key` : changer de ressource repart d'aujourd'hui, dans le fuseau de cette ressource. */}
-      <ResourceSlots key={resource.id} resource={resource} />
+      <ResourceSlots key={resource.id} resource={resource} booking={booking} />
     </div>
   );
 }
 
-function ResourceSlots({ resource }: { resource: Resource }) {
+function ResourceSlots({ resource, booking }: { resource: Resource; booking: BookingContext }) {
   const today = todayInZone(resource.timezone);
   const [weekStart, setWeekStart] = useState(today);
   // `null` : aucun jour choisi à la main, on montre le premier jour qui a un créneau libre.
@@ -188,9 +199,23 @@ function ResourceSlots({ resource }: { resource: Resource }) {
             <span className="text-lg font-semibold">
               {formatPrice(resource.priceCents, resource.currency)}
             </span>
-            <p className="text-muted-foreground basis-full text-sm">
-              La réservation et le paiement en ligne arrivent bientôt.
-            </p>
+            {resource.priceCents > 0 && !booking.onlinePayment ? (
+              <Alert className="basis-full">
+                <Info aria-hidden />
+                <AlertDescription>
+                  La réservation en ligne n&apos;est pas encore ouverte chez ce prestataire.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <ReserveButton
+                resourceId={resource.id}
+                start={selected.start}
+                free={resource.priceCents === 0}
+                isAuthenticated={booking.isAuthenticated}
+                loginNext={booking.providerPath}
+                onSlotLost={() => setSelectedStart(null)}
+              />
+            )}
           </CardContent>
         </Card>
       )}
@@ -238,10 +263,13 @@ function SlotGrid({
               </Button>
             ) : (
               // Le statut n'est jamais porté par la couleur seule : le libellé « Pris » le dit.
+              // `aria-disabled` plutôt que `disabled` : le créneau reste atteignable au clavier, et un
+              // lecteur d'écran annonce qu'il existe mais qu'il est pris.
               <Button
                 variant="outline"
-                className="bg-muted text-muted-foreground h-11 w-full flex-col gap-0 leading-tight"
-                disabled
+                className="bg-muted text-muted-foreground hover:bg-muted hover:text-muted-foreground h-11 w-full cursor-not-allowed flex-col gap-0 leading-tight active:translate-y-0!"
+                aria-disabled="true"
+                aria-label={`${label}, créneau déjà pris`}
               >
                 <span className="line-through">{label}</span>
                 <span className="text-xs">Pris</span>

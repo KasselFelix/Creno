@@ -21,7 +21,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ApiClientError, errorMessage } from '@/lib/api/errors';
-import { DEFAULT_AFTER_LOGIN } from '@/lib/safe-next';
+import { homeFor } from '@/lib/safe-next';
 import { useRegister } from '../api';
 
 const roles = [
@@ -49,8 +49,8 @@ export function RegisterForm() {
 
   function onSubmit(values: RegisterInput) {
     registerUser.mutate(values, {
-      onSuccess: () => {
-        router.push(DEFAULT_AFTER_LOGIN);
+      onSuccess: ({ user }) => {
+        router.push(homeFor(user.role));
         router.refresh();
       },
       onError: (error) => {

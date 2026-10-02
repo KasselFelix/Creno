@@ -10,9 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { errorMessage } from '@/lib/api/errors';
+import { afterLoginPath } from '@/lib/safe-next';
 import { useLogin } from '../api';
 
-export function LoginForm({ next }: { next: string }) {
+/** `next` : destination demandée par la page d'origine (`?next=`), validée avant usage. */
+export function LoginForm({ next }: { next: string | undefined }) {
   const router = useRouter();
   const login = useLogin();
   const form = useForm<LoginInput>({
@@ -23,8 +25,8 @@ export function LoginForm({ next }: { next: string }) {
 
   function onSubmit(values: LoginInput) {
     login.mutate(values, {
-      onSuccess: () => {
-        router.push(next);
+      onSuccess: ({ user }) => {
+        router.push(afterLoginPath(next, user.role));
         router.refresh();
       },
     });

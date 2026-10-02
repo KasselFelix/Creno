@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/card';
 import { LoginForm } from '@/features/auth/components/login-form';
 import { getCurrentUser } from '@/lib/api/server';
-import { safeNextPath } from '@/lib/safe-next';
+import { afterLoginPath } from '@/lib/safe-next';
 
 export const metadata: Metadata = { title: 'Connexion — Creno' };
 
@@ -23,7 +23,8 @@ export default async function LoginPage({
 }) {
   const { next } = await searchParams;
   // Vérifié auprès de l'API (pas seulement « un cookie existe ») : pas de boucle avec un cookie périmé.
-  if (await getCurrentUser()) redirect(safeNextPath(next));
+  const user = await getCurrentUser();
+  if (user) redirect(afterLoginPath(next, user.role));
 
   return (
     <>
@@ -37,7 +38,7 @@ export default async function LoginPage({
             <CardDescription>Accédez à vos réservations et à votre compte.</CardDescription>
           </CardHeader>
           <CardContent>
-            <LoginForm next={safeNextPath(next)} />
+            <LoginForm next={next} />
           </CardContent>
           <CardFooter className="text-muted-foreground text-sm">
             <p>
