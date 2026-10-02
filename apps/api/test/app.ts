@@ -85,7 +85,7 @@ export function dbOf(app: INestApplication): DbHandle {
 
 export async function resetDatabase(app: INestApplication): Promise<void> {
   await dbOf(app).db.execute(
-    sql`TRUNCATE sessions, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
   );
 }
 

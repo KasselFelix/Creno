@@ -43,6 +43,13 @@
       "when": 1790865947341,
       "tag": "0005_availability_rules_no_overlap",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790950287053,
+      "tag": "0006_payments",
+      "breakpoints": true
     }
   ]
 }

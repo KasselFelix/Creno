@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { char, check, index, integer, pgEnum, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  char,
+  check,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { resources } from './resources.js';
 import { timestamps } from './timestamps.js';
 import { tstzrange } from './types.js';
@@ -26,10 +36,16 @@ export const bookings = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     during: tstzrange('during').notNull(),
     status: bookingStatus('status').notNull().default('pending'),
-    // Fin du hold de paiement (15 min) ; obligatoire tant que le statut est `pending`.
+    // Fin du hold de paiement (15 min, puis 31 min une fois le paiement lancé) ; obligatoire tant
+    // que le statut est `pending`.
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     priceCents: integer('price_cents').notNull(),
     currency: char('currency', { length: 3 }).notNull().default('EUR'),
+    // Renseigné au premier lancement du paiement : le hold n'est prolongé qu'une fois. Un hold
+    // expiré sans cette date n'a jamais atteint le paiement (panier abandonné avant Stripe).
+    checkoutStartedAt: timestamp('checkout_started_at', { withTimezone: true }),
+    stripeCheckoutSessionId: text('stripe_checkout_session_id').unique(),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     ...timestamps,
   },
   (t) => [

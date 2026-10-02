@@ -1,4 +1,5 @@
-import { index, pgEnum, pgTable, text, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { boolean, check, index, pgEnum, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { timestamps } from './timestamps.js';
 import { geographyPoint } from './types.js';
 import { users } from './users.js';
@@ -26,8 +27,19 @@ export const providers = pgTable(
     address: text('address').notNull(),
     city: text('city').notNull(),
     location: geographyPoint('location').notNull(),
-    stripeAccountId: text('stripe_account_id'),
+    // Compte Stripe Connect Express. Les deux drapeaux recopient l'état du compte chez Stripe
+    // (webhook `account.updated`) : le prestataire encaisse quand `stripe_charges_enabled` est vrai.
+    stripeAccountId: text('stripe_account_id').unique(),
+    stripeChargesEnabled: boolean('stripe_charges_enabled').notNull().default(false),
+    stripeDetailsSubmitted: boolean('stripe_details_submitted').notNull().default(false),
     ...timestamps,
   },
-  (t) => [index('providers_location_gix').using('gist', t.location)],
+  (t) => [
+    index('providers_location_gix').using('gist', t.location),
+    // Pas de paiements actifs sans compte Stripe vers lequel verser l'argent.
+    check(
+      'providers_charges_need_account',
+      sql`NOT ${t.stripeChargesEnabled} OR ${t.stripeAccountId} IS NOT NULL`,
+    ),
+  ],
 );
