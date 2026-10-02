@@ -1,5 +1,5 @@
 import { type ArgumentMetadata, applyDecorators, type PipeTransform } from '@nestjs/common';
-import { ApiBody } from '@nestjs/swagger';
+import { ApiBody, ApiQuery } from '@nestjs/swagger';
 import { z } from 'zod';
 import { DomainError } from './domain-error.js';
 
@@ -34,5 +34,18 @@ export function ApiZodBody(schema: z.ZodType) {
     ApiBody({
       schema: z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as SwaggerSchema,
     }),
+  );
+}
+
+/** Documente les paramètres de query string dans Swagger à partir du schéma Zod (un objet). */
+export function ApiZodQuery(schema: z.ZodType) {
+  const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as {
+    properties?: Record<string, SwaggerSchema>;
+    required?: string[];
+  };
+  return applyDecorators(
+    ...Object.entries(json.properties ?? {}).map(([name, property]) =>
+      ApiQuery({ name, required: json.required?.includes(name) ?? false, schema: property }),
+    ),
   );
 }

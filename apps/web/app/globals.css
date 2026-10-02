@@ -128,3 +128,27 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Infobulle et contrôles Mapbox : leurs couleurs par défaut sont fixes (blanc), on les relie au thème.
+ * La feuille de style de mapbox-gl est chargée après celle-ci : le préfixe `.mapboxgl-map` donne à
+ * ces règles une spécificité plus forte, sinon celles de Mapbox l'emportent.
+ */
+.mapboxgl-map .mapboxgl-popup-content {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: --spacing(3);
+}
+.mapboxgl-map .mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip {
+  border-top-color: var(--popover);
+}
+.dark .mapboxgl-map .mapboxgl-ctrl-group {
+  background: var(--popover);
+}
+.dark .mapboxgl-map .mapboxgl-ctrl-group button .mapboxgl-ctrl-icon {
+  filter: invert(1);
+}

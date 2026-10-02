@@ -36,6 +36,41 @@ export const REDACT_PATHS = [
   'err.cause.detail',
 ];
 
+// Routes dont la query string porte une donnée personnelle : position du visiteur, adresse saisie.
+// Sans tenir compte de la casse, comme le routeur d'Express.
+const PRIVATE_QUERY_ROUTE = /^\/v1\/(search|geocoding)(\/|\?|$)/i;
+
+interface LoggedRequest {
+  url?: string;
+  query?: unknown;
+  headers?: Record<string, unknown>;
+}
+
+function withoutQuery(url: string): string {
+  const queryStart = url.indexOf('?');
+  return queryStart === -1 ? url : `${url.slice(0, queryStart)}?[redacted]`;
+}
+
+/**
+ * Requête à journaliser.
+ * - Recherche et géocodage : sans query string.
+ * - Toutes les routes : `Referer` sans query string. Le navigateur y met l'adresse de la page
+ *   d'où part l'appel, donc `/search?lat=…&lng=…&place=…` pour tout appel fait depuis la recherche.
+ */
+export function loggableRequest<T extends LoggedRequest>(req: T): T {
+  const logged = { ...req };
+  if (logged.url && PRIVATE_QUERY_ROUTE.test(logged.url)) {
+    logged.url = withoutQuery(logged.url);
+    // pino-http recopie aussi la query string décodée (`req.query` d'Express).
+    logged.query = undefined;
+  }
+  const referer = logged.headers?.referer;
+  if (typeof referer === 'string') {
+    logged.headers = { ...logged.headers, referer: withoutQuery(referer) };
+  }
+  return logged;
+}
+
 /** Reprend l'identifiant de requête du client s'il est bien formé, sinon en génère un. */
 export function resolveRequestId(incoming: string | string[] | undefined): string {
   return typeof incoming === 'string' && REQUEST_ID_FORMAT.test(incoming) ? incoming : randomUUID();
@@ -63,6 +98,7 @@ export function loggerParams(config: AppConfig, stream: DestinationStream | null
     // Les sondes de santé sont appelées toutes les quelques secondes : pas de log d'accès.
     autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
     redact: { paths: REDACT_PATHS, censor: '[redacted]' },
+    serializers: { req: loggableRequest },
   } satisfies Params['pinoHttp'];
   return { pinoHttp: stream ? [options, stream] : options };
 }

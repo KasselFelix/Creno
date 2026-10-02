@@ -1,3 +1,4 @@
+import { Search } from 'lucide-react';
 import Link from 'next/link';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { buttonVariants } from '@/components/ui/button';
@@ -16,6 +17,18 @@ export async function SiteHeader() {
         >
           Creno
         </Link>
+        <nav aria-label="Principale" className="mr-auto">
+          <Link
+            href="/search"
+            className={buttonVariants({
+              variant: 'ghost',
+              className: 'h-11 min-w-11 px-2 sm:px-2.5',
+            })}
+          >
+            <Search aria-hidden className="size-5" />
+            <span className="sr-only sm:not-sr-only">Rechercher</span>
+          </Link>
+        </nav>
         <nav aria-label="Compte" className="flex min-w-0 items-center gap-1 sm:gap-2">
           {user ? (
             <UserMenu user={user} />

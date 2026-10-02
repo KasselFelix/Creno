@@ -10,6 +10,7 @@ import type { Provider, PublicUser, Resource, UserRole } from '@creno/shared';
 import { AppModule } from '../src/app.module.js';
 import { addLocalDays, localDateOf, wallTimeToInstant } from '../src/availability/slots.engine.js';
 import { LOG_STREAM } from '../src/common/logger.js';
+import { GEOCODER, type Geocoder } from '../src/geocoding/geocoder.js';
 import { APP_CONFIG } from '../src/config/config.module.js';
 import type { AppConfig } from '../src/config/env.js';
 import { DB } from '../src/database/database.module.js';
@@ -33,6 +34,8 @@ export interface TestAppOptions {
   publicRateLimit?: number;
   /** Capture les logs JSON de l'application. */
   logs?: string[];
+  /** Remplace le géocodeur (service externe) : les tests n'appellent jamais le vrai. */
+  geocoder?: Geocoder;
 }
 
 /** Démarre l'application complète sur la base de test (jamais de base mockée). */
@@ -54,6 +57,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
       .overrideProvider(DB)
       .useValue(createDb(options.databaseUrl, { connectionTimeoutMillis: 500 }));
   }
+  if (options.geocoder) builder.overrideProvider(GEOCODER).useValue(options.geocoder);
   if (options.logs) {
     const logs = options.logs;
     builder.overrideProvider(LOG_STREAM).useValue(

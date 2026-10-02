@@ -31,6 +31,8 @@ export const envSchema = z
     AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
     PUBLIC_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
     BOOKING_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(20),
+    // Géocodeur d'adresses (Géoplateforme de l'IGN) : pas de clé, donc rien de secret ici.
+    GEOCODER_URL: z.url({ protocol: /^https?$/ }).default('https://data.geopf.fr/geocodage'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
