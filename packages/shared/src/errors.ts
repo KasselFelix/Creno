@@ -21,6 +21,11 @@ export const errorCodes = [
   'HOLD_LIMIT_REACHED',
   'LIMIT_REACHED',
   'GEOCODING_UNAVAILABLE',
+  'BOOKING_NOT_PAYABLE',
+  'PROVIDER_PAYMENTS_NOT_READY',
+  'PAYMENT_PROVIDER_UNAVAILABLE',
+  'CANCELLATION_NOT_ALLOWED',
+  'INVALID_WEBHOOK_SIGNATURE',
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);

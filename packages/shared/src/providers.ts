@@ -55,6 +55,10 @@ export const providerSchema = z.object({
 });
 export type Provider = z.infer<typeof providerSchema>;
 
-/** Fiche publique : le profil et ses ressources actives. */
-export const publicProviderSchema = providerSchema.extend({ resources: z.array(resourceSchema) });
+/** Fiche publique : le profil, ses ressources actives, et s'il encaisse des paiements en ligne. */
+export const publicProviderSchema = providerSchema.extend({
+  resources: z.array(resourceSchema),
+  /** Faux tant que le compte Stripe du prestataire n'est pas actif : ses ressources payantes ne sont pas réservables. */
+  onlinePayment: z.boolean(),
+});
 export type PublicProvider = z.infer<typeof publicProviderSchema>;
