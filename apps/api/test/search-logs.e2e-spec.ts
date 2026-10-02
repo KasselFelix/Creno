@@ -27,9 +27,17 @@ describe('recherche et géocodage : logs', () => {
   });
 
   it('ne journalise ni la position du visiteur ni le texte recherché', async () => {
+    // Le navigateur envoie l'adresse de la page `/search` dans l'en-tête Referer de chaque appel.
+    const referer =
+      'http://localhost:3000/search?lat=48.123&lng=2.456&place=10%20rue%20de%20la%20Paix';
     await request(app.getHttpServer())
       .get('/v1/search/providers?lat=48.123&lng=2.456&radiusKm=7&category=room')
+      .set('Referer', referer)
       .expect(200);
+    // Une route sans rapport avec la recherche, appelée depuis la page de recherche.
+    await request(app.getHttpServer()).get('/v1/users/me').set('Referer', referer).expect(401);
+    // Même route, autre casse : Express la sert, elle doit être masquée aussi.
+    await request(app.getHttpServer()).get('/V1/Search/providers?lat=48.123&lng=2.456').expect(200);
     await request(app.getHttpServer())
       .get('/v1/geocoding/search?q=10%20rue%20de%20la%20Paix')
       .expect(503);

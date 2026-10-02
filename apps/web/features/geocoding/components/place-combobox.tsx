@@ -21,6 +21,8 @@ interface PlaceComboboxProps {
   /** Texte affiché au départ (lieu déjà choisi). */
   defaultText?: string;
   onSelect: (place: GeocodingResult) => void;
+  /** Texte du champ à chaque frappe : permet à l'appelant de savoir qu'il ne correspond plus au lieu choisi. */
+  onTextChange?: (text: string) => void;
   'aria-invalid'?: boolean;
   'aria-label'?: string;
   className?: string;
@@ -32,10 +34,12 @@ export function PlaceCombobox({
   placeholder,
   defaultText = '',
   onSelect,
+  onTextChange,
   className,
   ...aria
 }: PlaceComboboxProps) {
   const [text, setText] = useState(defaultText);
+  const [open, setOpen] = useState(false);
   const debounced = useDebouncedValue(text, DEBOUNCE_MS);
   const suggestions = usePlaceSuggestions(debounced);
   const tooShort = text.trim().length < GEOCODING_QUERY_MIN;
@@ -47,8 +51,13 @@ export function PlaceCombobox({
         items={items}
         // Le géocodeur a déjà filtré et classé : pas de second filtre côté navigateur.
         filter={null}
+        open={open}
+        onOpenChange={setOpen}
         inputValue={text}
-        onInputValueChange={setText}
+        onInputValueChange={(value) => {
+          setText(value);
+          onTextChange?.(value);
+        }}
         onValueChange={(place) => {
           if (place) onSelect(place);
         }}
@@ -61,6 +70,18 @@ export function PlaceCombobox({
           placeholder={placeholder}
           autoComplete="off"
           showTrigger={false}
+          // Entrée sans suggestion surlignée aux flèches : on prend la première, comme dans une
+          // barre de recherche. (Entrée sur une suggestion surlignée est géré par le composant.)
+          onKeyDown={(event) => {
+            const first = items[0];
+            const highlighted = event.currentTarget.getAttribute('aria-activedescendant');
+            if (event.key !== 'Enter' || !open || highlighted || !first) return;
+            event.preventDefault();
+            setText(first.label);
+            onTextChange?.(first.label);
+            setOpen(false);
+            onSelect(first);
+          }}
           className={className}
           {...aria}
         />

@@ -15,11 +15,13 @@ export class GeocodingService {
       const items = await this.geocoder.search(query.q, GEOCODING_RESULTS_MAX);
       return { items: items.slice(0, GEOCODING_RESULTS_MAX) };
     } catch (error) {
+      // Une erreur qui ne vient pas du géocodeur est un bug chez nous : elle remonte (500, `error`).
+      if (!(error instanceof GeocoderError)) throw error;
       // Dégradé, pas une panne de notre côté : `warn`. Le texte saisi peut être une adresse
       // personnelle, on ne loggue que sa longueur.
       this.logger.warn({
         event: 'geocoding.failed',
-        reason: error instanceof GeocoderError ? error.reason : 'network',
+        reason: error.reason,
         durationMs: Date.now() - startedAt,
         queryLength: query.q.length,
       });

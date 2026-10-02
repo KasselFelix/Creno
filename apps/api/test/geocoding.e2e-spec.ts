@@ -60,11 +60,16 @@ describe('geocoding', () => {
     ['délai dépassé', new GeocoderError('timeout')],
     ['erreur 5xx', new GeocoderError('http_502')],
     ['réponse invalide', new GeocoderError('invalid_response')],
-    ['exception inattendue', new Error('boom')],
   ])('503 GEOCODING_UNAVAILABLE : %s', async (_label, failure) => {
     geocoder.search.mockRejectedValue(failure);
     const res = await get('q=place%20bellecour').expect(503);
     expect(apiErrorSchema.parse(res.body).code).toBe('GEOCODING_UNAVAILABLE');
+  });
+
+  it('ne déguise pas un bug en panne du géocodeur : 500 INTERNAL_ERROR', async () => {
+    geocoder.search.mockRejectedValue(new TypeError('boom'));
+    const res = await get('q=place%20bellecour').expect(500);
+    expect(apiErrorSchema.parse(res.body).code).toBe('INTERNAL_ERROR');
   });
 
   it('429 TOO_MANY_REQUESTS au-delà de la limite par minute', async () => {

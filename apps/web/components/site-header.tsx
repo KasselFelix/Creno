@@ -20,7 +20,10 @@ export async function SiteHeader() {
         <nav aria-label="Principale" className="mr-auto">
           <Link
             href="/search"
-            className={buttonVariants({ variant: 'ghost', className: 'h-11 px-2 sm:px-2.5' })}
+            className={buttonVariants({
+              variant: 'ghost',
+              className: 'h-11 min-w-11 px-2 sm:px-2.5',
+            })}
           >
             <Search aria-hidden className="size-5" />
             <span className="sr-only sm:not-sr-only">Rechercher</span>

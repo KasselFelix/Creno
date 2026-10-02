@@ -100,7 +100,7 @@ LIMIT 50;
 - `GET /v1/search/providers?lat=&lng=&radiusKm=&category=&priceMax=` : prestataires dans le rayon, triés par distance, avec leur prix minimum. `ST_DWithin` s'appuie sur l'index GiST : 27 lignes lues sur 50 000 pour un rayon de 10 km (plan dans [docs/schema.md](docs/schema.md)).
 - `/search` : champ « Ville ou adresse » à suggestions, « Autour de moi », filtres, liste et carte côte à côte (onglets sur mobile). Les filtres sont dans l'URL : la recherche se partage et le bouton retour fonctionne.
 - `GET /v1/geocoding/search?q=` : suggestions d'adresses. Si le service de l'État ne répond pas, la route renvoie 503 et l'écran reste utilisable (géolocalisation, carte, saisie manuelle des coordonnées côté prestataire).
-- La position du visiteur est arrondie à environ 100 m, jamais enregistrée et absente des logs.
+- La position du visiteur est arrondie à environ 100 m, jamais enregistrée et absente des logs (query string et en-tête `Referer` compris). La carte, elle, est servie par Mapbox, qui reçoit la zone affichée.
 
 ## Disponibilités et réservation
 

@@ -23,7 +23,7 @@ Il faut choisir la forme de la zone de recherche (cercle ou rectangle de la cart
 
 - Les filtres vivent dans l'URL de `/search` : la recherche est partageable, le bouton retour fonctionne, et la recherche en langage naturel (étape 7) n'aura qu'à produire ces mêmes filtres.
 - Avec un centre, la requête reste rapide quand la table grossit : sur 50 000 prestataires répartis sur la France, un rayon de 10 km lit 27 lignes par l'index et répond en moins de 10 ms (`EXPLAIN ANALYZE`, voir [docs/schema.md](../schema.md)).
-- **Limite connue** : sans centre, la requête parcourt tous les prestataires pour les trier et les compter (environ 0,8 s sur 50 000). Sans importance à l'échelle du MVP ; au-delà, il faudra exiger un lieu ou stocker le prix minimum sur le prestataire.
+- **Limite connue** : sans centre, la requête parcourt tous les prestataires pour les trier et les compter (0,6 à 0,8 s sur 50 000). Sans importance à l'échelle du MVP ; au-delà, il faudra exiger un lieu ou stocker le prix minimum sur le prestataire.
 - Pas de clustering des marqueurs : 50 au plus sur la carte.
 - Le cercle n'épouse pas la forme de l'écran : un prestataire visible dans un coin de la carte peut être hors du rayon. Le compteur (« 12 prestataires dans un rayon de 10 km autour de Lyon ») dit ce qui est cherché.
 

@@ -175,7 +175,8 @@ export function SearchView() {
           }}
           className="lg:hidden"
         >
-          <TabsList className="h-11! w-full">
+          {/* 52 px : les onglets eux-mêmes font alors 45 px de haut (cible tactile). */}
+          <TabsList className="h-13! w-full">
             <TabsTrigger value="list">Liste</TabsTrigger>
             <TabsTrigger value="map">Carte</TabsTrigger>
           </TabsList>

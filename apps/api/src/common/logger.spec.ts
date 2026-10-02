@@ -88,7 +88,7 @@ describe('resolveRequestId', () => {
 });
 
 describe('loggableRequest', () => {
-  it('retire la query string des routes de recherche et de géocodage', () => {
+  it('retire la query string des routes de recherche et de géocodage, sans tenir compte de la casse', () => {
     expect(
       loggableRequest({
         method: 'GET',
@@ -99,11 +99,26 @@ describe('loggableRequest', () => {
     expect(loggableRequest({ url: '/v1/geocoding/search?q=10%20rue' }).url).toBe(
       '/v1/geocoding/search?[redacted]',
     );
+    expect(
+      loggableRequest({ url: '/V1/Search/providers?lat=48.1', query: { lat: '48.1' } }),
+    ).toEqual({ url: '/V1/Search/providers?[redacted]', query: undefined });
   });
 
-  it('laisse les autres requêtes intactes', () => {
+  it('laisse la query string des autres routes', () => {
     const slots = { url: '/v1/resources/abc/slots?from=2026-10-02', query: { from: '2026-10-02' } };
-    expect(loggableRequest(slots)).toBe(slots);
+    expect(loggableRequest(slots)).toEqual(slots);
     expect(loggableRequest({ url: '/v1/search/providers' }).url).toBe('/v1/search/providers');
+    expect(loggableRequest({ url: '/v1/searching?x=1' }).url).toBe('/v1/searching?x=1');
+  });
+
+  it('retire la query string du Referer sur toutes les routes', () => {
+    const logged = loggableRequest({
+      url: '/v1/users/me',
+      headers: { host: 'api', referer: 'http://localhost:3000/search?lat=48.1&lng=2.4&place=Paix' },
+    });
+    expect(logged.headers).toEqual({
+      host: 'api',
+      referer: 'http://localhost:3000/search?[redacted]',
+    });
   });
 });

@@ -14,18 +14,21 @@ const KINDS: Partial<Record<string, GeocodingResult['kind']>> = {
 
 // GeoJSON : les coordonnées sont dans l'ordre [longitude, latitude].
 const responseSchema = z.object({
-  features: z.array(
-    z.object({
-      geometry: z.object({ coordinates: z.tuple([z.number(), z.number()]) }),
-      properties: z.object({
-        label: z.string(),
-        name: z.string(),
-        type: z.string(),
-        city: z.string().default(''),
-        postcode: z.string().default(''),
+  features: z
+    .array(
+      z.object({
+        geometry: z.object({ coordinates: z.tuple([z.number(), z.number()]) }),
+        properties: z.object({
+          label: z.string(),
+          name: z.string(),
+          type: z.string(),
+          city: z.string().default(''),
+          postcode: z.string().default(''),
+        }),
       }),
-    }),
-  ),
+    )
+    // On demande 5 lieux : une réponse bien plus longue n'est pas celle du service attendu.
+    .max(50),
 });
 
 /**
@@ -53,6 +56,8 @@ export class BanGeocoder implements Geocoder {
       res = await this.fetchFn(url, {
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout(TIMEOUT_MS),
+        // Le service n'a aucune raison de nous renvoyer ailleurs.
+        redirect: 'error',
       });
       // Texte sans lettre ni chiffre (« ??? ») : le service répond 400, pour nous c'est « aucun lieu ».
       if (res.status === 400) return [];

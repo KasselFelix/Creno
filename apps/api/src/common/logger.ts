@@ -37,24 +37,38 @@ export const REDACT_PATHS = [
 ];
 
 // Routes dont la query string porte une donnée personnelle : position du visiteur, adresse saisie.
-const PRIVATE_QUERY_PREFIXES = ['/v1/search', '/v1/geocoding'];
+// Sans tenir compte de la casse, comme le routeur d'Express.
+const PRIVATE_QUERY_ROUTE = /^\/v1\/(search|geocoding)(\/|\?|$)/i;
 
 interface LoggedRequest {
   url?: string;
   query?: unknown;
+  headers?: Record<string, unknown>;
 }
 
-/** Requête à journaliser : sans query string pour les routes de recherche et de géocodage. */
-export function loggableRequest<T extends LoggedRequest>(req: T): T {
-  const url = req.url;
-  if (!url || !PRIVATE_QUERY_PREFIXES.some((prefix) => url.startsWith(prefix))) return req;
+function withoutQuery(url: string): string {
   const queryStart = url.indexOf('?');
-  return {
-    ...req,
-    url: queryStart === -1 ? url : `${url.slice(0, queryStart)}?[redacted]`,
+  return queryStart === -1 ? url : `${url.slice(0, queryStart)}?[redacted]`;
+}
+
+/**
+ * Requête à journaliser.
+ * - Recherche et géocodage : sans query string.
+ * - Toutes les routes : `Referer` sans query string. Le navigateur y met l'adresse de la page
+ *   d'où part l'appel, donc `/search?lat=…&lng=…&place=…` pour tout appel fait depuis la recherche.
+ */
+export function loggableRequest<T extends LoggedRequest>(req: T): T {
+  const logged = { ...req };
+  if (logged.url && PRIVATE_QUERY_ROUTE.test(logged.url)) {
+    logged.url = withoutQuery(logged.url);
     // pino-http recopie aussi la query string décodée (`req.query` d'Express).
-    query: undefined,
-  };
+    logged.query = undefined;
+  }
+  const referer = logged.headers?.referer;
+  if (typeof referer === 'string') {
+    logged.headers = { ...logged.headers, referer: withoutQuery(referer) };
+  }
+  return logged;
 }
 
 /** Reprend l'identifiant de requête du client s'il est bien formé, sinon en génère un. */

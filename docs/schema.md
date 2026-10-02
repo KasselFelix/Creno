@@ -184,7 +184,7 @@ Bitmap Heap Scan on providers p (actual rows=5)
 Execution Time: 8.654 ms
 ```
 
-27 lignes lues sur 50 000. Sans centre, la requête parcourt toute la table (environ 0,8 s à ce volume) : limite assumée, notée dans l'ADR 0007.
+27 lignes lues sur 50 000. Sans centre, la requête parcourt toute la table (0,6 à 0,8 s à ce volume) : limite assumée, notée dans l'ADR 0007.
 
 ## Sessions et refresh token rotatif
 
