@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { sendNotificationJobSchema } from '@creno/shared';
+import { describeError } from '../common/all-exceptions.filter.js';
 import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import { JobsService, type ReceivedJob } from '../jobs/jobs.service.js';
@@ -14,6 +15,8 @@ import {
 import {
   DEAD_QUEUE,
   DISPATCH_QUEUE,
+  MAX_EMAILS_PER_RECIPIENT_PER_HOUR,
+  MAX_SMS_PER_RECIPIENT_PER_DAY,
   SEND_QUEUE,
   SEND_RETRY_LIMIT,
 } from './notifications.queues.js';
@@ -72,11 +75,14 @@ export class NotificationsWorker implements OnModuleInit {
       return;
     }
     const id = parsed.data.notificationId;
-    // Déjà envoyée (job livré deux fois) ou close : rien à faire.
-    const attempt = await this.notifications.startAttempt(id);
-    if (attempt === undefined) return;
+    const attempt = job.retryCount + 1;
+    // Déjà envoyée, close, ou essai déjà pris (job livré deux fois) : rien à faire.
+    if (!(await this.notifications.startAttempt(id, attempt))) return;
     const context = await this.notifications.sendContext(id);
-    if (!context) return;
+    if (!context) {
+      await this.notifications.close(id, 'skipped', 'context_missing');
+      return;
+    }
     const base = {
       notificationId: id,
       bookingId: context.bookingId,
@@ -89,6 +95,12 @@ export class NotificationsWorker implements OnModuleInit {
     if (obsolete) {
       await this.notifications.close(id, 'skipped', obsolete);
       this.logger.log({ event: 'notification.skipped', ...base, reason: obsolete });
+      return;
+    }
+    const refused = await this.refusalReason(context);
+    if (refused) {
+      await this.notifications.close(id, 'skipped', refused);
+      this.logger.warn({ event: 'notification.skipped', ...base, reason: refused });
       return;
     }
 
@@ -112,7 +124,21 @@ export class NotificationsWorker implements OnModuleInit {
       this.logger.warn({ event: 'notification.retry', ...base, reason: error.reason, attempt });
       throw error;
     }
-    await this.notifications.markSent(id, delivery.messageId);
+    try {
+      await this.notifications.markSent(id, delivery.messageId);
+    } catch (error) {
+      // Le message est parti mais son statut n'a pas pu être écrit. Email : on laisse le job être
+      // rejoué, la clé d'idempotence évite le doublon. SMS : pas de clé, un rejeu renverrait le
+      // message ; on s'arrête là et on le signale (la ligne reste `pending`).
+      if (context.channel === 'email') throw error;
+      this.logger.error({
+        event: 'notification.sent_unrecorded',
+        ...base,
+        providerMessageId: delivery.messageId,
+        err: describeError(error),
+      });
+      return;
+    }
     this.logger.log({
       event: 'notification.sent',
       ...base,
@@ -152,6 +178,22 @@ export class NotificationsWorker implements OnModuleInit {
       case 'payment_refunded_late':
         return null;
     }
+  }
+
+  /** Garde-fous contre l'abus : destination de SMS non autorisée, ou trop de messages au même destinataire. */
+  private async refusalReason(context: SendContext): Promise<string | null> {
+    if (context.channel === 'sms') {
+      const phone = context.recipientPhone ?? '';
+      if (!this.config.SMS_ALLOWED_PREFIXES.some((prefix) => phone.startsWith(prefix))) {
+        return 'destination_not_allowed';
+      }
+    }
+    const [hours, max] =
+      context.channel === 'sms'
+        ? [24, MAX_SMS_PER_RECIPIENT_PER_DAY]
+        : [1, MAX_EMAILS_PER_RECIPIENT_PER_HOUR];
+    const sent = await this.notifications.recentlySent(context.recipientId, context.channel, hours);
+    return sent >= max ? 'rate_limited' : null;
   }
 
   private deliver(context: SendContext): Promise<Delivery> {

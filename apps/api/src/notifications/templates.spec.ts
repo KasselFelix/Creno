@@ -87,6 +87,13 @@ describe('renderEmail', () => {
     expect(escapeHtml(`'`)).toBe('&#39;');
   });
 
+  it('garde le sujet sur une seule ligne, même si un nom contient des retours à la ligne', () => {
+    const email = renderEmail(data({ resourceName: 'Studio\r\nBcc: victime@test.dev\tA' }));
+    expect(email.subject).toBe(
+      'Réservation confirmée : Studio Bcc: victime@test.dev A chez Studio Lumière',
+    );
+  });
+
   it('annulation : le client apprend son remboursement, le prestataire que le créneau est libre', () => {
     const toCustomer = renderEmail(data({ kind: 'booking_cancelled', bookingStatus: 'cancelled' }));
     expect(toCustomer.text).toMatch(/Vous êtes remboursé de 45,00\s€\./);

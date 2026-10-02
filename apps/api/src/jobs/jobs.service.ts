@@ -62,9 +62,16 @@ export class JobsService implements OnApplicationShutdown {
 
   /** Démarre pg-boss une seule fois (il installe ou met à jour son schéma), à la première utilisation. */
   private start(): Promise<void> {
-    this.starting ??= this.boss.start().then(() => {
-      this.logger.log({ event: 'jobs.started', workers: this.config.JOBS_WORKERS_ENABLED });
-    });
+    this.starting ??= this.boss.start().then(
+      () => {
+        this.logger.log({ event: 'jobs.started', workers: this.config.JOBS_WORKERS_ENABLED });
+      },
+      (error: unknown) => {
+        // Base injoignable : l'échec n'est pas gardé en mémoire, l'appel suivant réessaie.
+        this.starting = undefined;
+        throw error;
+      },
+    );
     return this.starting;
   }
 
@@ -87,7 +94,9 @@ export class JobsService implements OnApplicationShutdown {
   /** Ajoute un job. Avec `tx`, il est écrit dans cette transaction (outbox transactionnelle). */
   async send(name: string, data: object, { tx }: SendJobOptions = {}): Promise<void> {
     await this.start();
-    await this.boss.send(name, data, tx ? { db: fromDrizzle(tx, sql) } : {});
+    const id = await this.boss.send(name, data, tx ? { db: fromDrizzle(tx, sql) } : {});
+    // Sans job, la ligne qui l'attend ne serait jamais traitée : l'erreur annule la transaction.
+    if (!id) throw new Error(`Job non créé dans la file ${name}`);
   }
 
   /**
@@ -129,7 +138,9 @@ export class JobsService implements OnApplicationShutdown {
         attempt: job.retryCount + 1,
         err: describeError(error),
       });
-      throw error;
+      // pg-boss enregistre l'erreur dans la sortie du job : on ne lui donne que le message nettoyé
+      // (une erreur Drizzle porte les paramètres de la requête).
+      throw new Error(describeError(error).message ?? 'Échec du job');
     }
   }
 

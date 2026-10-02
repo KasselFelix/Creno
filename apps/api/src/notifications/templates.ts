@@ -142,8 +142,12 @@ function parts(data: MessageData): EmailParts {
   }
 }
 
+/** Un sujet tient sur une ligne : les noms saisis ne doivent pas y glisser de retour à la ligne. */
+const oneLine = (value: string) => value.replace(/[\p{Cc}\s]+/gu, ' ').trim();
+
 export function renderEmail(data: MessageData): RenderedEmail {
-  const { subject, title, paragraphs, action } = parts(data);
+  const { subject: rawSubject, title, paragraphs, action } = parts(data);
+  const subject = oneLine(rawSubject);
   const greeting = `Bonjour ${data.recipientName},`;
 
   const text = [

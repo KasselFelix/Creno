@@ -81,6 +81,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     TWILIO_ACCOUNT_SID: '',
     TWILIO_AUTH_TOKEN: '',
     TWILIO_FROM: '',
+    SMS_ALLOWED_PREFIXES: '+336,+337',
   });
 
   const builder = Test.createTestingModule({ imports: [AppModule] });

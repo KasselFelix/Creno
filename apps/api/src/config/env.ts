@@ -77,6 +77,13 @@ export const envSchema = z
       /^[0-9a-fA-F]{32}$/,
       "jeton d'authentification Twilio attendu",
     ),
+    // Préfixes des numéros qui peuvent recevoir un SMS (défaut : mobiles français). Un numéro
+    // hors liste ne reçoit rien : frein à la fraude vers des numéros surtaxés à l'étranger.
+    SMS_ALLOWED_PREFIXES: z
+      .string()
+      .regex(/^\+\d{1,6}(,\+\d{1,6})*$/, { error: 'liste de préfixes attendue, ex. +336,+337' })
+      .default('+336,+337')
+      .transform((value) => value.split(',')),
     // Numéro expéditeur au format international, ou identifiant d'un Messaging Service.
     TWILIO_FROM: optionalSecret(
       /^(\+[1-9]\d{6,14}|MG[0-9a-fA-F]{32})$/,
@@ -104,6 +111,14 @@ export const envSchema = z
     // Mailpit n'envoie rien : en production, il masquerait l'absence d'emails réels.
     if (env.MAILPIT_URL) {
       ctx.addIssue({ code: 'custom', path: ['MAILPIT_URL'], message: 'interdite en production' });
+    }
+    // L'expéditeur de démonstration de Resend n'écrit qu'à l'adresse du compte : tout échouerait.
+    if (/@resend\.dev>?$/.test(env.EMAIL_FROM)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['EMAIL_FROM'],
+        message: 'expéditeur sur un domaine vérifié obligatoire en production',
+      });
     }
     for (const name of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'RESEND_API_KEY'] as const) {
       if (!env[name]) {

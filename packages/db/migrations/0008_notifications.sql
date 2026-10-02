@@ -26,5 +26,4 @@ ALTER TABLE "notifications" ADD CONSTRAINT "notifications_recipient_id_users_id_
 CREATE INDEX "notifications_scheduled_for_idx" ON "notifications" USING btree ("scheduled_for") WHERE "notifications"."status" = 'scheduled';--> statement-breakpoint
 CREATE INDEX "notifications_recipient_id_idx" ON "notifications" USING btree ("recipient_id");--> statement-breakpoint
 CREATE INDEX "bookings_pending_expires_at_idx" ON "bookings" USING btree ("expires_at") WHERE "bookings"."status" = 'pending';--> statement-breakpoint
-CREATE INDEX "stripe_events_received_at_idx" ON "stripe_events" USING btree ("received_at");--> statement-breakpoint
-CREATE INDEX "sessions_expires_at_idx" ON "sessions" USING btree ("expires_at");
+CREATE INDEX "stripe_events_received_at_idx" ON "stripe_events" USING btree ("received_at");

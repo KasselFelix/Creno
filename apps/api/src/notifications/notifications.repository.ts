@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, isNotNull, lt, lte, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import {
   bookings,
@@ -41,6 +41,7 @@ export interface NewNotification {
 export interface SendContext {
   id: string;
   bookingId: string;
+  recipientId: string;
   kind: NotificationKind;
   channel: NotificationChannel;
   recipientEmail: string;
@@ -117,19 +118,51 @@ export class NotificationsRepository {
     const rows = await tx
       .update(notifications)
       .set({ status: 'pending' })
-      .where(inArray(notifications.id, due))
+      // `= ANY(ARRAY(…))` : la sous-requête est évaluée une fois, puis l'UPDATE passe par la clé
+      // primaire. Avec `IN (…)`, Postgres relisait toute la table (semi-jointure par hachage).
+      .where(sql`${notifications.id} = ANY(ARRAY(${due}))`)
       .returning({ id: notifications.id });
     return rows.map((row) => row.id);
   }
 
-  /** Compte un essai d'envoi. Renvoie son numéro, ou `undefined` si la notification n'est plus à envoyer. */
-  async startAttempt(id: string): Promise<number | undefined> {
-    const [row] = await this.handle.db
+  /**
+   * Prend l'essai n° `attempt` d'une notification à envoyer. Renvoie faux si elle n'est plus à
+   * envoyer, ou si cet essai a déjà été pris (même job livré deux fois) : la condition sur
+   * `attempts` fait le travail d'un verrou, sans transaction ouverte pendant l'envoi.
+   */
+  async startAttempt(id: string, attempt: number): Promise<boolean> {
+    const rows = await this.handle.db
       .update(notifications)
-      .set({ attempts: sql`${notifications.attempts} + 1` })
-      .where(and(eq(notifications.id, id), eq(notifications.status, 'pending')))
-      .returning({ attempts: notifications.attempts });
-    return row?.attempts;
+      .set({ attempts: attempt })
+      .where(
+        and(
+          eq(notifications.id, id),
+          eq(notifications.status, 'pending'),
+          lt(notifications.attempts, attempt),
+        ),
+      )
+      .returning({ id: notifications.id });
+    return rows.length > 0;
+  }
+
+  /** Messages déjà envoyés à ce destinataire sur ce canal depuis `hours` heures. */
+  async recentlySent(
+    recipientId: string,
+    channel: NotificationChannel,
+    hours: number,
+  ): Promise<number> {
+    const [row] = await this.handle.db
+      .select({ total: count() })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.recipientId, recipientId),
+          eq(notifications.channel, channel),
+          eq(notifications.status, 'sent'),
+          gt(notifications.sentAt, sql`now() - make_interval(hours => ${hours})`),
+        ),
+      );
+    return row?.total ?? 0;
   }
 
   async sendContext(id: string): Promise<SendContext | undefined> {
@@ -137,6 +170,7 @@ export class NotificationsRepository {
       .select({
         id: notifications.id,
         bookingId: notifications.bookingId,
+        recipientId: notifications.recipientId,
         kind: notifications.kind,
         channel: notifications.channel,
         recipientEmail: recipient.email,

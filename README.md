@@ -145,6 +145,7 @@ RETURNING id;   -- rien de renvoyé : événement déjà traité
 - **Outbox transactionnelle** : la ligne `notifications` et son job sont écrits dans la transaction qui change le statut de la réservation. Pas de notification pour un changement annulé, pas de changement sans notification, et aucun appel à un service externe pendant une requête ou un webhook.
 - **pg-boss** (file de jobs dans Postgres) : 5 reprises en backoff exponentiel, puis file morte → notification `failed` et log `error`. Un job ne contient que l'identifiant de la notification, jamais d'adresse ni de numéro.
 - **En local**, les emails arrivent dans Mailpit (http://localhost:8025) sans aucun compte. Avec `RESEND_API_KEY`, ils partent par Resend ; avec les trois variables `TWILIO_*`, le rappel part aussi par SMS. Sans rien, les notifications sont marquées `skipped`.
+- **Garde-fous** : SMS réservés aux préfixes autorisés (`SMS_ALLOWED_PREFIXES`, mobiles français par défaut), 5 SMS par jour et 30 emails par heure au plus pour un même destinataire ; au-delà, la notification est `skipped`. L'email et le téléphone ne sont pas encore vérifiés : ces plafonds bornent ce qu'un compte peut faire envoyer à un tiers.
 - **Tâches planifiées** : rappels dus et holds expirés toutes les 5 min, purge nocturne des sessions mortes et des événements Stripe de plus de 90 jours.
 - Tests : idempotence, transaction annulée, rappel, reprises et file morte ([apps/api/test/notifications.e2e-spec.ts](apps/api/test/notifications.e2e-spec.ts)) ; ménage ([apps/api/test/maintenance.e2e-spec.ts](apps/api/test/maintenance.e2e-spec.ts)).
 
@@ -206,6 +207,7 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 | `TWILIO_ACCOUNT_SID`            | api              | vide                                               | compte Twilio pour le SMS de rappel (les trois variables `TWILIO_*` ensemble, ou aucune)                     |
 | `TWILIO_AUTH_TOKEN`             | api              | vide                                               | jeton d'authentification Twilio                                                                              |
 | `TWILIO_FROM`                   | api              | vide                                               | numéro expéditeur (`+33…`) ou Messaging Service (`MG…`)                                                      |
+| `SMS_ALLOWED_PREFIXES`          | api              | `+336,+337`                                        | préfixes des numéros qui peuvent recevoir un SMS (mobiles français par défaut)                               |
 | `JOBS_WORKERS_ENABLED`          | api              | `true`                                             | `false` : l'instance crée des jobs sans les exécuter (ni workers, ni tâches planifiées)                      |
 | `NEXT_PUBLIC_MAPBOX_TOKEN`      | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé              |
 

@@ -22,8 +22,11 @@ Une réservation confirmée, annulée ou remboursée doit prévenir le client et
 ## Conséquences
 
 - Les notifications partent avec un léger décalage (le worker interroge la file toutes les 2 s ; un rappel peut partir jusqu'à 5 min après son échéance).
-- Twilio n'a pas de clé d'idempotence : si le processus meurt entre l'envoi du SMS et l'écriture du statut, le job rejoué renvoie le SMS. Rare, accepté.
+- Twilio n'a pas de clé d'idempotence : si le processus meurt entre l'envoi du SMS et l'écriture du statut, le job rejoué renvoie le SMS. Rare, accepté. Si seule l'écriture du statut échoue, le SMS n'est pas rejoué (log `error` `notification.sent_unrecorded`) ; l'email, lui, est rejoué sans risque grâce à la clé d'idempotence.
 - L'API ne démarre plus si la base est injoignable : pg-boss vérifie son schéma au démarrage. Le conteneur est alors relancé par l'orchestrateur.
+- pg-boss crée son schéma : le rôle de base de l'API a besoin du droit `CREATE` sur la base. En production (étape 9), le schéma sera installé par le rôle de migration et l'API tournera avec `migrate: false`.
+- **L'email et le téléphone ne sont pas encore vérifiés** (étape 6 bis) : un compte peut porter l'adresse ou le numéro d'un tiers. D'ici là, deux freins : SMS réservés aux préfixes de `SMS_ALLOWED_PREFIXES` (mobiles français par défaut, donc pas de numéro surtaxé à l'étranger), et un plafond par destinataire (5 SMS par jour, 30 emails par heure) au-delà duquel la notification est `skipped` (`rate_limited`).
+- Les `CREATE INDEX` de la migration ne sont pas `CONCURRENTLY` (impossible dans la transaction du migrateur) : ils bloquent brièvement les écritures sur `bookings` et `stripe_events`. Sans effet à notre volume ; sur une grosse base, ils iraient dans une migration à part.
 - pg-boss ouvre son propre pool (4 connexions) en plus de celui de l'API (10) : à compter dans la limite de connexions du serveur Postgres.
 - Le job de ménage des holds ne change rien à la correction : la réservation suivante expire déjà les holds qui la gênent, et le calcul des créneaux les ignore (ADR 0002). Un paiement reçu après son passage suit le chemin de l'ADR 0009 (confirmation si le créneau est libre, sinon remboursement et email).
 - Les SMS sont limités au rappel et à l'alphabet GSM-7 (160 caractères, un segment) : un seul caractère hors de cet alphabet triplerait le prix du message.

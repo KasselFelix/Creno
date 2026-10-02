@@ -18,6 +18,7 @@ const prod = {
   STRIPE_SECRET_KEY: stripeKey('live'),
   STRIPE_WEBHOOK_SECRET: webhookSecret,
   RESEND_API_KEY: resendKey,
+  EMAIL_FROM: 'Creno <bonjour@creno.test>',
 };
 
 describe('loadConfig', () => {
@@ -106,6 +107,22 @@ describe('loadConfig', () => {
         TWILIO_FROM: '+33600000000',
       });
       expect(config.TWILIO_FROM).toBe('+33600000000');
+    });
+
+    it('refuse l’expéditeur de démonstration de Resend en production', () => {
+      expect(() => loadConfig({ ...prod, EMAIL_FROM: 'Creno <onboarding@resend.dev>' })).toThrow(
+        /EMAIL_FROM/,
+      );
+    });
+
+    it('limite les SMS aux mobiles français par défaut', () => {
+      expect(loadConfig(base).SMS_ALLOWED_PREFIXES).toEqual(['+336', '+337']);
+      expect(
+        loadConfig({ ...base, SMS_ALLOWED_PREFIXES: '+32,+336' }).SMS_ALLOWED_PREFIXES,
+      ).toEqual(['+32', '+336']);
+      expect(() => loadConfig({ ...base, SMS_ALLOWED_PREFIXES: 'tous' })).toThrow(
+        /SMS_ALLOWED_PREFIXES/,
+      );
     });
 
     it('valide l’expéditeur des emails', () => {

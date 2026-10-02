@@ -1,12 +1,15 @@
 import type { INestApplication } from '@nestjs/common';
 import { asc, eq, sql } from 'drizzle-orm';
 import type request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bookings, notifications } from '@creno/db';
 import { type Booking, REMINDER_LEAD_HOURS, type Resource } from '@creno/shared';
+import { JobsService } from '../src/jobs/jobs.service.js';
 import { DeliveryError } from '../src/notifications/delivery.js';
+import { NotificationsRepository } from '../src/notifications/notifications.repository.js';
 import {
   DEAD_QUEUE,
+  MAX_EMAILS_PER_RECIPIENT_PER_HOUR,
   SEND_QUEUE,
   SEND_RETRY_LIMIT,
 } from '../src/notifications/notifications.queues.js';
@@ -238,6 +241,82 @@ describe('notifications', () => {
 
       expect(await rows()).toHaveLength(0);
       expect(await runJobs(app, SEND_QUEUE)).toBe(0);
+    });
+
+    it('webhook en échec après la création des notifications → rien ne reste, puis le renvoi de Stripe aboutit', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await hold(agent);
+      await agent.post(`/v1/bookings/${booking.id}/checkout`).expect(200);
+      // Le second job de la transaction ne peut pas être créé : toute la transaction est annulée.
+      const jobs = app.get(JobsService);
+      const send = vi.spyOn(jobs, 'send');
+      send.mockImplementationOnce(send.getMockImplementation() ?? jobs.send.bind(jobs));
+      send.mockRejectedValueOnce(new Error('file indisponible'));
+      const event = { id: 'evt_test_echec' };
+
+      await postStripeEvent(app, 'checkout.session.completed', paidSession(booking), event).expect(
+        500,
+      );
+      send.mockRestore();
+
+      expect(await rows()).toHaveLength(0);
+      expect(await runJobs(app, SEND_QUEUE)).toBe(0);
+      const [row] = await db().select().from(bookings).where(eq(bookings.id, booking.id));
+      expect(row!.status).toBe('pending');
+
+      await postStripeEvent(app, 'checkout.session.completed', paidSession(booking), event).expect(
+        200,
+      );
+      expect(await rows()).toHaveLength(3);
+      expect(await runJobs(app, SEND_QUEUE)).toBe(2);
+    });
+
+    it('job livré deux fois → un seul envoi', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      await confirmedBooking(agent);
+      await runJobs(app, SEND_QUEUE);
+      const sent = (await rows()).find((row) => row.status === 'sent')!;
+
+      await app.get(JobsService).send(SEND_QUEUE, { notificationId: sent.id });
+      expect(await runJobs(app, SEND_QUEUE)).toBe(1);
+
+      expect(email.send).toHaveBeenCalledTimes(2);
+      expect((await rows()).find((row) => row.id === sent.id)).toMatchObject({ attempts: 1 });
+    });
+
+    it('prestataire qui réserve chez lui-même → il reçoit la confirmation et l’avis, sans conflit', async () => {
+      const booking = await confirmedBooking(provider.agent);
+      expect((await rows()).map((row) => [row.kind, row.recipientId])).toEqual([
+        ['booking_confirmed', provider.user.id],
+        ['booking_received', provider.user.id],
+        ['booking_reminder', provider.user.id],
+      ]);
+
+      // Il annule en tant que client : les deux destinataires sont la même personne, une seule ligne.
+      await provider.agent.post(`/v1/bookings/${booking.id}/cancel`).expect(200);
+      expect((await rows()).filter((row) => row.kind === 'booking_cancelled')).toHaveLength(1);
+    });
+
+    it('SMS parti mais statut impossible à écrire → pas de rejeu (Twilio n’a pas de clé d’idempotence)', async () => {
+      const { agent } = await customerWithPhone();
+      await confirmedBooking(agent);
+      await runJobs(app, SEND_QUEUE);
+      await makeRemindersDue();
+      await app.get(NotificationsService).dispatchDue();
+      const repository = app.get(NotificationsRepository);
+      const markSent = vi.spyOn(repository, 'markSent');
+      markSent.mockRejectedValue(new Error('base coupée'));
+
+      await runJobs(app, SEND_QUEUE);
+      markSent.mockRestore();
+
+      expect(sms.send).toHaveBeenCalledTimes(1);
+      expect(logged('notification.sent_unrecorded')).toMatchObject([
+        { level: 50, channel: 'sms', providerMessageId: 'sms_fake_1' },
+      ]);
+      // Le job du SMS est terminé ; celui de l'email reste à rejouer (clé d'idempotence côté Resend).
+      expect(await runJobs(app, SEND_QUEUE)).toBe(1);
+      expect(sms.send).toHaveBeenCalledTimes(1);
     });
 
     it('réservation annulée avant l’envoi → la confirmation n’est pas envoyée', async () => {
@@ -487,6 +566,70 @@ describe('notifications', () => {
       expect(await runJobs(app, SEND_QUEUE)).toBe(0);
       expect(logged('notification.failed')).toMatchObject([{ level: 50, reason: 'http_422' }]);
       email.send.mockImplementation(fakeEmailGateway().send.getMockImplementation()!);
+    });
+  });
+
+  describe('garde-fous contre l’abus', () => {
+    it('numéro hors des préfixes autorisés → SMS `skipped`, l’email part', async () => {
+      const customer = await registerAs(app, 'customer');
+      await customer.agent.patch('/v1/users/me').send({ phone: '+447900000000' }).expect(200);
+      await confirmedBooking(customer.agent);
+      await runJobs(app, SEND_QUEUE);
+      await makeRemindersDue();
+      await app.get(NotificationsService).dispatchDue();
+      await runJobs(app, SEND_QUEUE);
+
+      expect(sms.send).not.toHaveBeenCalled();
+      expect((await rows()).filter((row) => row.kind === 'booking_reminder')).toMatchObject([
+        { channel: 'email', status: 'sent' },
+        { channel: 'sms', status: 'skipped', reason: 'destination_not_allowed' },
+      ]);
+    });
+
+    it(`au-delà de ${MAX_EMAILS_PER_RECIPIENT_PER_HOUR} emails par heure au même destinataire → \`skipped\``, async () => {
+      const { agent, user } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await runJobs(app, SEND_QUEUE);
+      email.send.mockClear();
+      // Le plafond est atteint : la confirmation déjà envoyée est comptée 30 fois (autres créneaux).
+      const [confirmation] = await rowsOf(booking.id);
+      const others = await db()
+        .insert(bookings)
+        .values(
+          Array.from({ length: MAX_EMAILS_PER_RECIPIENT_PER_HOUR - 1 }, (_, i) => ({
+            resourceId: resource.id,
+            customerId: user.id,
+            during: sql`tstzrange(now() + make_interval(days => ${40 + i}), now() + make_interval(days => ${40 + i}, hours => 1), '[)')`,
+            status: 'cancelled' as const,
+            cancelledAt: sql`now()`,
+            priceCents: 0,
+          })),
+        )
+        .returning({ id: bookings.id });
+      await db()
+        .insert(notifications)
+        .values(
+          others.map(({ id }) => ({
+            bookingId: id,
+            recipientId: user.id,
+            kind: confirmation!.kind,
+            channel: 'email' as const,
+            status: 'sent' as const,
+            sentAt: sql`now()`,
+          })),
+        );
+
+      await agent.post(`/v1/bookings/${booking.id}/cancel`).expect(200);
+      await runJobs(app, SEND_QUEUE);
+
+      // Le prestataire, lui, reçoit toujours son email.
+      expect(emails().map((message) => message.to)).toEqual([provider.user.email]);
+      expect(
+        (await rowsOf(booking.id)).find(
+          (row) => row.kind === 'booking_cancelled' && row.recipientId === user.id,
+        ),
+      ).toMatchObject({ status: 'skipped', reason: 'rate_limited' });
+      expect(logged('notification.skipped')).toMatchObject([{ level: 40, reason: 'rate_limited' }]);
     });
   });
 

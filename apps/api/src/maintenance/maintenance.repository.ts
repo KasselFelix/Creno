@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { bookings, type DbHandle, sessions, stripeEvents } from '@creno/db';
 import { STRIPE_EVENTS_RETENTION_DAYS } from '@creno/shared';
 import { DB } from '../database/database.module.js';
@@ -25,14 +25,20 @@ export class MaintenanceRepository {
       .orderBy(asc(bookings.expiresAt))
       .limit(limit)
       .for('update', { skipLocked: true });
-    return db
-      .update(bookings)
-      .set({ status: 'expired' })
-      .where(and(inArray(bookings.id, candidates), overdue))
-      .returning({ id: bookings.id, stripeCheckoutSessionId: bookings.stripeCheckoutSessionId });
+    return (
+      db
+        .update(bookings)
+        .set({ status: 'expired' })
+        // `= ANY(ARRAY(…))` : l'UPDATE passe par la clé primaire des seules lignes retenues.
+        .where(and(sql`${bookings.id} = ANY(ARRAY(${candidates}))`, overdue))
+        .returning({ id: bookings.id, stripeCheckoutSessionId: bookings.stripeCheckoutSessionId })
+    );
   }
 
-  /** Supprime les sessions expirées ou révoquées, tous utilisateurs confondus. */
+  /**
+   * Supprime les sessions expirées ou révoquées, tous utilisateurs confondus. Parcours complet
+   * de la table, une fois par nuit : le `OR` rendrait un index sur `expires_at` inutile.
+   */
   async purgeSessions(): Promise<number> {
     const rows = await this.handle.db
       .delete(sessions)
