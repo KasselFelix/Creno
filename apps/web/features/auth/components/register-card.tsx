@@ -40,7 +40,7 @@ export function RegisterCard() {
           </CardTitle>
           <CardDescription>
             Nous avons envoyé un email à{' '}
-            <span className="text-foreground font-medium break-all">{sentTo}</span>.
+            <span className="text-foreground font-medium wrap-anywhere">{sentTo}</span>.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-muted-foreground flex flex-col gap-2 text-sm">
