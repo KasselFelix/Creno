@@ -25,7 +25,12 @@ beforeEach(async () => {
   );
   const [owner] = await db
     .insert(users)
-    .values({ email: 'owner@test.dev', fullName: 'Owner', role: 'provider' })
+    .values({
+      email: 'owner@test.dev',
+      fullName: 'Owner',
+      role: 'provider',
+      emailVerifiedAt: new Date(),
+    })
     .returning({ id: users.id });
   const [provider] = await db
     .insert(providers)

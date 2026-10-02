@@ -20,6 +20,19 @@ export const registerSchema = z.object({
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+/** Durée de validité du lien de confirmation envoyé à l'inscription. */
+export const EMAIL_VERIFICATION_TTL_HOURS = 24;
+
+export const verifyEmailSchema = z.object({
+  // Le format précis est vérifié par l'API : un lien abîmé donne la même erreur qu'un lien expiré.
+  token: z.string().min(1, { error: 'Lien de confirmation requis' }).max(200),
+});
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+
+/** Contenu du job d'email d'inscription : un identifiant, jamais d'adresse ni de jeton. */
+export const registrationEmailJobSchema = z.object({ pendingRegistrationId: z.uuid() });
+export type RegistrationEmailJob = z.infer<typeof registrationEmailJobSchema>;
+
 export const loginSchema = z.object({
   email: emailSchema,
   // Pas de règle de longueur au login : on ne révèle pas la politique, on compare au hash.

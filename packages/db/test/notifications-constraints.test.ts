@@ -41,8 +41,8 @@ beforeEach(async () => {
   const [owner, customer] = await db
     .insert(users)
     .values([
-      { email: 'owner@test.dev', fullName: 'Owner', role: 'provider' },
-      { email: 'client@test.dev', fullName: 'Client' },
+      { email: 'owner@test.dev', fullName: 'Owner', role: 'provider', emailVerifiedAt: new Date() },
+      { email: 'client@test.dev', fullName: 'Client', emailVerifiedAt: new Date() },
     ])
     .returning({ id: users.id });
   const [provider] = await db

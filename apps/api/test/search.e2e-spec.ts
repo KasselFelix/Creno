@@ -41,6 +41,7 @@ async function insertProviders(app: INestApplication, seeds: ProviderSeed[]): Pr
         fullName: 'Prestataire',
         role: 'provider' as const,
         passwordHash: 'hash-inutilisable',
+        emailVerifiedAt: new Date(),
       })),
     )
     .returning({ id: users.id });
