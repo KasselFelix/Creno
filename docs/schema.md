@@ -81,7 +81,7 @@ erDiagram
     char currency
     timestamptz checkout_started_at "paiement lancé, hold prolongé"
     text stripe_checkout_session_id UK "nullable"
-    timestamptz cancelled_at "nullable"
+    timestamptz cancelled_at "obligatoire si cancelled"
   }
   payments {
     uuid id PK
@@ -105,15 +105,16 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 
 ## Migrations
 
-| Fichier                                             | Contenu                                                                                                |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                      |
-| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                           |
-| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                         |
-| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises  |
-| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                |
-| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                        |
-| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers` |
+| Fichier                                             | Contenu                                                                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                        |
+| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                             |
+| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                           |
+| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises    |
+| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                  |
+| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                          |
+| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`   |
+| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation » |
 
 ## La contrainte `bookings_no_overlap`
 
@@ -190,6 +191,8 @@ L'insertion et le traitement sont dans **la même transaction** : si le traiteme
 | `expired`                                                                     | retour à `confirmed` dans un **savepoint** ; si `bookings_no_overlap` lève `23P01` (créneau repris), la réservation reste `expired` et le paiement est remboursé |
 | `cancelled`                                                                   | remboursement                                                                                                                                                    |
 | `confirmed`                                                                   | rien                                                                                                                                                             |
+
+Quand un remboursement est nécessaire, la transaction est annulée sans rien enregistrer, Stripe est appelé **hors transaction** (aucun verrou ni connexion tenus pendant l'appel réseau), puis une seconde transaction enregistre l'événement et le paiement. Si l'appel échoue, rien n'est enregistré et Stripe renvoie l'événement.
 
 Un savepoint est un point de reprise à l'intérieur d'une transaction : quand la contrainte refuse la mise à jour, seule cette mise à jour est annulée, et la transaction continue (sans lui, Postgres refuserait toute requête suivante).
 

@@ -8,6 +8,8 @@ export const HOLD_MINUTES = 15;
 export const MAX_ACTIVE_HOLDS = 5;
 /** Holds actifs d'un même utilisateur sur une même ressource. */
 export const MAX_ACTIVE_HOLDS_PER_RESOURCE = 2;
+/** Réservations gratuites à venir d'un même utilisateur : elles sont confirmées sans paiement. */
+export const MAX_FREE_UPCOMING_BOOKINGS = 5;
 /**
  * Durée du hold une fois le paiement lancé. Stripe impose une session Checkout d'au moins 30 min :
  * le hold est prolongé une seule fois, et la session expire au même instant (1 min de marge).
@@ -71,7 +73,8 @@ export type BookingList = z.infer<typeof bookingListSchema>;
 
 /** `checkoutUrl` est `null` pour une ressource gratuite : la réservation est alors déjà confirmée. */
 export const checkoutResponseSchema = z.object({
-  checkoutUrl: z.url().nullable(),
+  // `https` seulement : le navigateur est redirigé vers cette adresse.
+  checkoutUrl: z.url({ protocol: /^https$/ }).nullable(),
   booking: bookingDetailSchema,
 });
 export type CheckoutResponse = z.infer<typeof checkoutResponseSchema>;

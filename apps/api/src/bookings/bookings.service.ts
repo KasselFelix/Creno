@@ -13,6 +13,7 @@ import {
   HOLD_MINUTES,
   MAX_ACTIVE_HOLDS,
   MAX_ACTIVE_HOLDS_PER_RESOURCE,
+  MAX_FREE_UPCOMING_BOOKINGS,
   platformFeeCents,
 } from '@creno/shared';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -136,19 +137,28 @@ export class BookingsService {
           // Frein au blocage gratuit d'un agenda. Le verrou par client sérialise ses demandes :
           // des requêtes parallèles ne peuvent pas toutes passer sous la limite avant d'insérer.
           await this.bookings.lockCustomer(current.id, tx);
-          const holds = await this.bookings.countActiveHolds(current.id, resource.id, tx);
-          if (holds.total >= MAX_ACTIVE_HOLDS) {
+          const held = await this.bookings.countCommitments(current.id, resource.id, tx);
+          if (held.holds >= MAX_ACTIVE_HOLDS) {
             throw new DomainError(
               'HOLD_LIMIT_REACHED',
               409,
               `Vous avez déjà ${MAX_ACTIVE_HOLDS} réservations en attente de paiement.`,
             );
           }
-          if (holds.onResource >= MAX_ACTIVE_HOLDS_PER_RESOURCE) {
+          if (held.holdsOnResource >= MAX_ACTIVE_HOLDS_PER_RESOURCE) {
             throw new DomainError(
               'HOLD_LIMIT_REACHED',
               409,
               `Vous avez déjà ${MAX_ACTIVE_HOLDS_PER_RESOURCE} créneaux en attente de paiement sur cette ressource.`,
+            );
+          }
+          // Une réservation gratuite est confirmée sans paiement : sans ce plafond, un seul compte
+          // pourrait prendre tous les créneaux d'une ressource gratuite.
+          if (resource.priceCents === 0 && held.freeUpcoming >= MAX_FREE_UPCOMING_BOOKINGS) {
+            throw new DomainError(
+              'HOLD_LIMIT_REACHED',
+              409,
+              `Vous avez déjà ${MAX_FREE_UPCOMING_BOOKINGS} réservations gratuites à venir.`,
             );
           }
           const released = await this.bookings.expireOverlappingHolds(resource.id, slot, tx);
@@ -248,7 +258,7 @@ export class BookingsService {
           });
     } catch (error) {
       // Le hold reprend son échéance d'origine : le client peut réessayer tant qu'il court.
-      if (extended) await this.bookings.revertCheckout(id, row.expiresAt);
+      if (extended) await this.bookings.revertCheckout(id);
       throw this.gatewayFailure('checkout', id, error);
     }
     if (!fresh.stripeCheckoutSessionId) {

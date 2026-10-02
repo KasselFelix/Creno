@@ -22,10 +22,11 @@ Un client paie un créneau à la réservation ; l'argent revient au prestataire,
 ## Conséquences
 
 - Un créneau peut rester bloqué jusqu'à 46 min par un client qui ne paie pas (15 + 31). Freins : 5 holds actifs par client, 2 par ressource.
-- Un prestataire dont le compte n'est pas actif (`stripe_charges_enabled = false`) n'est pas réservable pour ses ressources payantes ; les gratuites sont confirmées sans Stripe.
+- Un prestataire dont le compte n'est pas actif (`stripe_charges_enabled = false`) n'est pas réservable pour ses ressources payantes ; les gratuites sont confirmées sans Stripe, dans la limite de 5 réservations gratuites à venir par client (elles n'ont pas le frein du paiement).
 - Stripe refuse moins de 0,50 € par carte : un prix vaut 0 ou au moins 50 centimes.
-- Le remboursement tardif est appelé pendant la transaction du webhook (cas rare) : une connexion reste ouverte le temps de l'appel, en échange d'une reprise automatique si Stripe échoue.
-- En production, `account.updated` arrive sur un second endpoint (« Connect »), avec son propre secret : `STRIPE_CONNECT_WEBHOOK_SECRET`.
+- Le remboursement tardif est appelé **hors transaction** : la transaction qui découvre le créneau perdu est annulée, Stripe est appelé, puis une seconde transaction enregistre l'événement et le paiement. Si Stripe échoue, rien n'est enregistré et l'événement est renvoyé. Un `charge.refunded` reçu avant l'enregistrement du paiement est refusé (503) pour être renvoyé plus tard.
+- En production, `account.updated` arrive sur un second endpoint (« Connect »), avec son propre secret : `STRIPE_CONNECT_WEBHOOK_SECRET`. Un événement venu d'un compte connecté n'est accepté que pour `account.updated` : un événement de paiement de cette origine est ignoré, quelles que soient ses métadonnées.
+- Stripe ne rend pas ses frais de traitement lors d'un remboursement : une annulation remboursée coûte ces frais à la plateforme. Accepté à ce stade ; un plafond d'annulations par client est une piste.
 - Pas de job : un hold expiré est libéré par la réservation suivante ou par `checkout.session.expired`. Le job de ménage arrive avec pg-boss (étape 6).
 
 ## Alternatives écartées

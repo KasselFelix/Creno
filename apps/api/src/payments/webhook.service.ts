@@ -25,11 +25,14 @@ const sessionSchema = z.object({
   amount_total: z.number().int().nullish(),
   currency: z.string().nullish(),
   payment_intent: idOrObject.nullish(),
+  client_reference_id: z.string().nullish(),
   metadata: z.record(z.string(), z.string()).nullish(),
 });
 
 const chargeSchema = z.object({
   payment_intent: idOrObject.nullish(),
+  // Stripe recopie sur le paiement les métadonnées posées à la création de la session.
+  metadata: z.record(z.string(), z.string()).nullish(),
   amount_refunded: z.number().int().min(0),
   refunded: z.boolean(),
 });
@@ -51,6 +54,26 @@ type Outcome =
   | { kind: 'account_synced'; providerId: string; changed: boolean; chargesEnabled: boolean };
 
 const unmatched = (reason: string): Outcome => ({ kind: 'unmatched', reason });
+
+type LateRefundReason = 'slot_taken' | 'booking_cancelled';
+
+/**
+ * Le paiement reçu ne peut pas être honoré : il faut le rembourser. Levée DANS la transaction pour
+ * l'annuler : l'appel à Stripe se fait ensuite hors transaction, sans tenir de verrou.
+ */
+class RefundRequired extends Error {
+  constructor(
+    readonly bookingId: string,
+    readonly paymentIntentId: string,
+    readonly reason: LateRefundReason,
+  ) {
+    super('Remboursement requis');
+    this.name = 'RefundRequired';
+  }
+}
+
+/** L'événement arrive trop tôt : on ne l'enregistre pas et Stripe le renverra (toute réponse hors 2xx). */
+const retryLater = () => new DomainError('INTERNAL_ERROR', 503, 'Événement à renvoyer.');
 
 /**
  * Traite les événements Stripe. C'est le seul endroit qui confirme une réservation payante et qui
@@ -81,19 +104,44 @@ export class WebhookService {
 
     // L'événement est enregistré et traité dans la même transaction : si le traitement échoue,
     // l'enregistrement est annulé lui aussi, la réponse est une 500 et Stripe renvoie l'événement.
-    const outcome = await retryOnDeadlock(() =>
-      this.handle.db.transaction(async (tx) => {
-        if (!(await this.payments.recordEvent(event, tx))) return { kind: 'duplicate' } as Outcome;
-        return this.process(event, tx);
-      }),
-    );
+    const run = (refunded?: RefundRequired) =>
+      retryOnDeadlock(() =>
+        this.handle.db.transaction(async (tx) => {
+          if (!(await this.payments.recordEvent(event, tx)))
+            return { kind: 'duplicate' } as Outcome;
+          return this.process(event, tx, refunded);
+        }),
+      );
+
+    let outcome: Outcome;
+    try {
+      outcome = await run();
+    } catch (error) {
+      if (!(error instanceof RefundRequired)) throw error;
+      // Paiement arrivé trop tard. La transaction est annulée, rien n'est enregistré : on rembourse
+      // d'abord (sans verrou ni connexion tenus pendant l'appel), puis on enregistre. Si Stripe
+      // échoue ici, l'erreur remonte (500) et Stripe renvoie l'événement ; la clé d'idempotence du
+      // remboursement rend ce rejeu sûr.
+      await this.gateway.refund({
+        paymentIntentId: error.paymentIntentId,
+        bookingId: error.bookingId,
+      });
+      outcome = await run(error);
+    }
     this.report(event, outcome);
   }
 
-  private process(event: VerifiedStripeEvent, tx: Database): Promise<Outcome> | Outcome {
+  private process(
+    event: VerifiedStripeEvent,
+    tx: Database,
+    refunded?: RefundRequired,
+  ): Promise<Outcome> | Outcome {
+    // Les paiements sont créés sur le compte de la plateforme : un événement de paiement venu d'un
+    // compte connecté ne peut pas être l'un des nôtres, quelles que soient ses métadonnées.
+    if (event.connect && event.type !== 'account.updated') return unmatched('connect_event');
     switch (event.type) {
       case 'checkout.session.completed':
-        return this.onCheckoutCompleted(event.object, tx);
+        return this.onCheckoutCompleted(event.object, tx, refunded);
       case 'checkout.session.expired':
         return this.onCheckoutExpired(event.object, tx);
       case 'charge.refunded':
@@ -114,10 +162,17 @@ export class WebhookService {
     if (booking.stripeCheckoutSessionId && booking.stripeCheckoutSessionId !== session.id) {
       return unmatched('other_session');
     }
+    // Nos sessions portent la réservation à deux endroits (`client_reference_id` et métadonnées).
+    if (session.client_reference_id !== booking.id) return unmatched('other_session');
     return booking;
   }
 
-  private async onCheckoutCompleted(object: unknown, tx: Database): Promise<Outcome> {
+  /** `refunded` : second passage, après le remboursement d'un paiement arrivé trop tard. */
+  private async onCheckoutCompleted(
+    object: unknown,
+    tx: Database,
+    refunded?: RefundRequired,
+  ): Promise<Outcome> {
     const parsed = sessionSchema.safeParse(object);
     if (!parsed.success) return unmatched('invalid_payload');
     const session = parsed.data;
@@ -151,6 +206,12 @@ export class WebhookService {
       tx,
     );
 
+    // Le remboursement est fait : il ne reste qu'à garder la trace du paiement reçu. Le statut de
+    // la réservation ne bouge pas, même si le créneau s'est libéré entre-temps.
+    if (refunded?.bookingId === booking.id) {
+      return { kind: 'late_refund', bookingId: booking.id, reason: refunded.reason };
+    }
+
     const confirmed = (reactivated: boolean): Outcome => ({
       kind: 'confirmed',
       bookingId: booking.id,
@@ -175,20 +236,10 @@ export class WebhookService {
         } catch (error) {
           if (sqlState(error) !== '23P01') throw error;
         }
-        await this.refundLate(booking.id, session.payment_intent);
-        return { kind: 'late_refund', bookingId: booking.id, reason: 'slot_taken' };
+        throw new RefundRequired(booking.id, session.payment_intent, 'slot_taken');
       case 'cancelled':
-        await this.refundLate(booking.id, session.payment_intent);
-        return { kind: 'late_refund', bookingId: booking.id, reason: 'booking_cancelled' };
+        throw new RefundRequired(booking.id, session.payment_intent, 'booking_cancelled');
     }
-  }
-
-  /**
-   * Rembourse un paiement arrivé trop tard, avant le commit : si Stripe échoue, la transaction est
-   * annulée et Stripe renverra l'événement. La clé d'idempotence du remboursement rend ce rejeu sûr.
-   */
-  private refundLate(bookingId: string, paymentIntentId: string): Promise<void> {
-    return this.gateway.refund({ paymentIntentId, bookingId });
   }
 
   private async onCheckoutExpired(object: unknown, tx: Database): Promise<Outcome> {
@@ -211,7 +262,19 @@ export class WebhookService {
       { refundedCents: charge.amount_refunded, full: charge.refunded },
       tx,
     );
-    if (!payment) return unmatched('unknown_payment');
+    if (!payment) {
+      // Le remboursement d'une de nos réservations peut arriver avant que son paiement soit
+      // enregistré (Stripe ne garantit pas l'ordre des événements) : on le redemande plus tard.
+      const bookingId = z.uuid().safeParse(charge.metadata?.bookingId);
+      if (bookingId.success && (await this.bookings.lockForPayment(bookingId.data, tx))) {
+        this.logger.warn({
+          event: 'stripe.webhook_retry_requested',
+          reason: 'payment_not_recorded',
+        });
+        throw retryLater();
+      }
+      return unmatched('unknown_payment');
+    }
     const booking = await this.bookings.lockForPayment(payment.bookingId, tx);
     return {
       kind: 'refunded',

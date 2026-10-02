@@ -12,6 +12,7 @@ import {
   checkoutResponseSchema,
   FREE_CANCELLATION_HOURS,
   HOLD_MINUTES,
+  MAX_FREE_UPCOMING_BOOKINGS,
   type Resource,
   slotsResponseSchema,
 } from '@creno/shared';
@@ -234,6 +235,30 @@ describe('bookings : paiement, liste, annulation', () => {
       });
       expect(gateway.createCheckoutSession).not.toHaveBeenCalled();
       expect(await db().select().from(payments)).toHaveLength(0);
+    });
+
+    it(`pas plus de ${MAX_FREE_UPCOMING_BOOKINGS} réservations gratuites à venir par client`, async () => {
+      const created = await provider.agent
+        .post('/v1/resources')
+        .send({ ...RESOURCE_INPUT, name: 'Visite', priceCents: 0 })
+        .expect(201);
+      const freeId = (created.body as Resource).id;
+      await provider.agent
+        .put(`/v1/resources/${freeId}/availability-rules`)
+        .send({ rules: everyDay('09:00', '18:00') })
+        .expect(200);
+      const { agent } = await registerAs(app, 'customer');
+      for (let hour = 9; hour < 9 + MAX_FREE_UPCOMING_BOOKINGS; hour++) {
+        const booking = await hold(agent, `${String(hour).padStart(2, '0')}:00`, DAY, freeId);
+        await checkout(agent, booking.id).expect(200);
+      }
+      const res = await agent
+        .post('/v1/bookings')
+        .send({ resourceId: freeId, start: instantIn(DAY, '16:00').toISOString() })
+        .expect(409);
+      expectCode(res, 'HOLD_LIMIT_REACHED');
+      // Les ressources payantes ne sont pas concernées.
+      await hold(agent, '10:00');
     });
 
     it('403 sur la réservation d’un autre client ou pour le prestataire, 401 sans session, 404 inconnue', async () => {

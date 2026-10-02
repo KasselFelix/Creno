@@ -20,7 +20,7 @@ export const connectStatusSchema = z.object({
 export type ConnectStatus = z.infer<typeof connectStatusSchema>;
 
 /** Lien à usage unique vers le formulaire d'inscription hébergé par Stripe. */
-export const connectOnboardingSchema = z.object({ url: z.url() });
+export const connectOnboardingSchema = z.object({ url: z.url({ protocol: /^https$/ }) });
 export type ConnectOnboarding = z.infer<typeof connectOnboardingSchema>;
 
 export const paymentStatuses = ['succeeded', 'refunded'] as const;

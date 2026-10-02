@@ -26,6 +26,7 @@ function insertBooking(
     customerId,
     during: toRange(values.start, values.end),
     status: values.status,
+    cancelledAt: values.status === 'cancelled' ? new Date() : null,
     expiresAt: values.expiresAt ?? null,
     priceCents: 4500,
   });

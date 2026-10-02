@@ -218,6 +218,7 @@ async function main(): Promise<void> {
           customerId: customers[1]!.id,
           during: parisRange(day, '10:30', '11:30'),
           status: 'cancelled',
+          cancelledAt: new Date(),
           priceCents: 4500,
         },
         {

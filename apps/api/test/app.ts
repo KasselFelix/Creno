@@ -280,12 +280,14 @@ export function postStripeEvent(
   app: INestApplication,
   type: string,
   object: Record<string, unknown>,
-  options: { id?: string; secret?: string } = {},
+  options: { id?: string; secret?: string; account?: string } = {},
 ) {
   events += 1;
   const payload = JSON.stringify({
     id: options.id ?? `evt_test_${Date.now()}_${events}`,
     object: 'event',
+    // Renseigné par Stripe sur les événements d'un compte connecté.
+    ...(options.account ? { account: options.account } : {}),
     type,
     data: { object },
   });
@@ -308,6 +310,7 @@ export function paidSession(
   return {
     id: sessionIdOf(booking.id),
     object: 'checkout.session',
+    client_reference_id: booking.id,
     payment_status: 'paid',
     amount_total: booking.priceCents,
     currency: 'eur',

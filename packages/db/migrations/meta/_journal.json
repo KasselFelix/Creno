@@ -50,6 +50,13 @@
       "when": 1790950287053,
       "tag": "0006_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790955157638,
+      "tag": "0007_bookings_cancelled_has_date",
+      "breakpoints": true
     }
   ]
 }

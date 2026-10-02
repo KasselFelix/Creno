@@ -100,23 +100,29 @@ export class BookingsRepository {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${customerId}, 0))`);
   }
 
-  /** Holds encore actifs d'un utilisateur : au total, et sur une ressource donnée. */
-  async countActiveHolds(
+  /**
+   * Ce qu'un utilisateur bloque déjà : ses holds actifs (au total et sur une ressource donnée), et
+   * ses réservations gratuites à venir, confirmées sans paiement donc sans autre frein.
+   */
+  async countCommitments(
     customerId: string,
     resourceId: string,
     tx: Database,
-  ): Promise<{ total: number; onResource: number }> {
+  ): Promise<{ holds: number; holdsOnResource: number; freeUpcoming: number }> {
+    const hold = sql`${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()`;
+    const freeUpcoming = sql`${bookings.status} = 'confirmed' AND ${bookings.priceCents} = 0 AND upper(${bookings.during}) > now()`;
     const [row] = await tx
       .select({
-        total: count(),
-        onResource:
-          sql<number>`count(*) FILTER (WHERE ${bookings.resourceId} = ${resourceId})`.mapWith(
+        holds: sql<number>`count(*) FILTER (WHERE ${hold})`.mapWith(Number),
+        holdsOnResource:
+          sql<number>`count(*) FILTER (WHERE ${hold} AND ${bookings.resourceId} = ${resourceId})`.mapWith(
             Number,
           ),
+        freeUpcoming: sql<number>`count(*) FILTER (WHERE ${freeUpcoming})`.mapWith(Number),
       })
       .from(bookings)
-      .where(and(eq(bookings.customerId, customerId), activeHold));
-    return { total: row?.total ?? 0, onResource: row?.onResource ?? 0 };
+      .where(and(eq(bookings.customerId, customerId), sql`(${hold}) OR (${freeUpcoming})`));
+    return row ?? { holds: 0, holdsOnResource: 0, freeUpcoming: 0 };
   }
 
   /** Vrai si le prestataire de la ressource peut encaisser un paiement en ligne. */
@@ -244,11 +250,17 @@ export class BookingsRepository {
     return rows.length > 0;
   }
 
-  /** Annule la prolongation quand la session Checkout n'a pas pu être créée. */
-  async revertCheckout(id: string, previousExpiresAt: Date): Promise<void> {
+  /**
+   * Annule la prolongation quand la session Checkout n'a pas pu être créée : le hold reprend son
+   * échéance d'origine, recalculée (et non relue), pour que des échecs répétés ne l'allongent jamais.
+   */
+  async revertCheckout(id: string): Promise<void> {
     await this.handle.db
       .update(bookings)
-      .set({ expiresAt: previousExpiresAt, checkoutStartedAt: null })
+      .set({
+        expiresAt: sql`${bookings.createdAt} + make_interval(mins => ${HOLD_MINUTES})`,
+        checkoutStartedAt: null,
+      })
       .where(
         and(
           eq(bookings.id, id),

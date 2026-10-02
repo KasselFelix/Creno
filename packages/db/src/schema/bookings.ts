@@ -64,5 +64,9 @@ export const bookings = pgTable(
       sql`${t.status} <> 'pending' OR ${t.expiresAt} IS NOT NULL`,
     ),
     check('bookings_price_cents_positive', sql`${t.priceCents} >= 0`),
+    check(
+      'bookings_cancelled_has_date',
+      sql`${t.status} <> 'cancelled' OR ${t.cancelledAt} IS NOT NULL`,
+    ),
   ],
 );

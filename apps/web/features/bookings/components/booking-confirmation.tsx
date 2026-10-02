@@ -40,11 +40,12 @@ export function BookingConfirmation({ bookingId, paid }: Props) {
   const booking = useBooking(bookingId, (data) => awaitingPayment(data) && !waitedTooLong);
   const waiting = booking.data ? awaitingPayment(booking.data) : false;
 
+  // `waitedTooLong` en dépendance : « Actualiser » le remet à faux, ce qui relance une attente de 30 s.
   useEffect(() => {
-    if (!waiting) return;
+    if (!waiting || waitedTooLong) return;
     const timer = setTimeout(() => setWaitedTooLong(true), CONFIRMATION_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [waiting]);
+  }, [waiting, waitedTooLong]);
 
   if (booking.isPending) {
     return (
