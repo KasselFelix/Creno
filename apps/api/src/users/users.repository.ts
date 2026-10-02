@@ -20,7 +20,13 @@ export class UsersRepository {
   }
 
   async create(
-    values: { email: string; fullName: string; role: UserRole; passwordHash: string },
+    values: {
+      email: string;
+      fullName: string;
+      role: UserRole;
+      passwordHash: string;
+      emailVerifiedAt: Date;
+    },
     tx: Database = this.handle.db,
   ): Promise<UserRow> {
     const [row] = await tx.insert(users).values(values).returning();

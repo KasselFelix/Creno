@@ -122,7 +122,7 @@ export function dbOf(app: INestApplication): DbHandle {
 
 export async function resetDatabase(app: INestApplication): Promise<void> {
   await dbOf(app).db.execute(
-    sql`TRUNCATE notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE pending_registrations, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
   );
   await app.get(JobsService).clear();
 }
@@ -159,31 +159,25 @@ export function uniqueEmail(prefix = 'user'): string {
   return `${prefix}.${Date.now()}.${counter}@test.dev`;
 }
 
-/** Inscrit un utilisateur via l'API et renvoie un agent Supertest qui garde ses cookies. */
-export async function registerAs(
-  app: INestApplication,
-  role: 'customer' | 'provider' = 'customer',
-): Promise<{ agent: ReturnType<typeof request.agent>; user: PublicUser }> {
-  const agent = request.agent(app.getHttpServer());
-  const res = await agent
-    .post('/v1/auth/register')
-    .send({ email: uniqueEmail(role), password: TEST_PASSWORD, fullName: `Test ${role}`, role })
-    .expect(201);
-  return { agent, user: (res.body as { user: PublicUser }).user };
-}
+let passwordHash: Promise<string> | undefined;
 
-/** Crée un admin directement en base (le rôle admin n'est jamais ouvert à l'inscription) et le connecte. */
-export async function loginAsAdmin(
+/** Crée un compte confirmé directement en base, puis le connecte. */
+async function createAccount(
   app: INestApplication,
+  role: UserRole,
+  fullName: string,
 ): Promise<{ agent: ReturnType<typeof request.agent>; user: PublicUser }> {
-  const email = uniqueEmail('admin');
+  const email = uniqueEmail(role);
+  // Hash calculé une fois pour toute la suite : argon2 est lent exprès.
+  passwordHash ??= hash(TEST_PASSWORD);
   await dbOf(app)
     .db.insert(users)
     .values({
       email,
-      fullName: 'Admin',
-      role: 'admin' satisfies UserRole,
-      passwordHash: await hash(TEST_PASSWORD),
+      fullName,
+      role,
+      passwordHash: await passwordHash,
+      emailVerifiedAt: new Date(),
     });
   const agent = request.agent(app.getHttpServer());
   const res = await agent
@@ -191,6 +185,26 @@ export async function loginAsAdmin(
     .send({ email, password: TEST_PASSWORD })
     .expect(200);
   return { agent, user: (res.body as { user: PublicUser }).user };
+}
+
+/**
+ * Compte déjà inscrit et connecté : renvoie un agent Supertest qui garde ses cookies. L'inscription
+ * réelle (email, lien de confirmation) a ses propres tests dans `registration.e2e-spec.ts`.
+ */
+export function registerAs(app: INestApplication, role: 'customer' | 'provider' = 'customer') {
+  return createAccount(app, role, `Test ${role}`);
+}
+
+/** Admin connecté (le rôle admin n'est jamais ouvert à l'inscription). */
+export function loginAsAdmin(app: INestApplication) {
+  return createAccount(app, 'admin', 'Admin');
+}
+
+/** Jeton du lien de confirmation contenu dans un email d'inscription. */
+export function verificationTokenOf(message: { text: string }): string {
+  const match = /\/verify-email#([\w.-]+)/.exec(message.text);
+  if (!match) throw new Error('Aucun lien de confirmation dans cet email');
+  return match[1]!;
 }
 
 /** Valeur d'un cookie dans les en-têtes Set-Cookie d'une réponse. */

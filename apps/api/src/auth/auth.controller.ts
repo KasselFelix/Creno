@@ -23,6 +23,8 @@ import {
   type RegisterInput,
   registerSchema,
   type SessionList,
+  type VerifyEmailInput,
+  verifyEmailSchema,
 } from '@creno/shared';
 import { DomainError } from '../common/domain-error.js';
 import { ApiZodBody, ZodValidationPipe } from '../common/zod.js';
@@ -41,18 +43,26 @@ export class AuthController {
     private readonly cookies: AuthCookies,
   ) {}
 
+  // 202 sans corps ni cookie, que l'adresse ait déjà un compte ou non : la suite se passe par email.
   @Public()
   @OnlyThrottle('credentials')
   @Post('register')
+  @HttpCode(202)
   @ApiZodBody(registerSchema)
-  async register(
-    @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
-    @Headers('user-agent') userAgent: string | undefined,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<AuthResponse> {
-    const result = await this.auth.register(body, userAgent);
-    this.cookies.set(res, result);
-    return { user: result.user };
+  async register(@Body(new ZodValidationPipe(registerSchema)) body: RegisterInput): Promise<void> {
+    await this.auth.register(body);
+  }
+
+  // Publique : le lien s'ouvre souvent sur un autre appareil que celui de l'inscription.
+  @Public()
+  @OnlyThrottle('credentials')
+  @Post('email/verify')
+  @HttpCode(204)
+  @ApiZodBody(verifyEmailSchema)
+  async verifyEmail(
+    @Body(new ZodValidationPipe(verifyEmailSchema)) body: VerifyEmailInput,
+  ): Promise<void> {
+    await this.auth.verifyEmail(body.token);
   }
 
   @Public()

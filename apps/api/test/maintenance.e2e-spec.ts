@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { bookings, sessions, stripeEvents } from '@creno/db';
+import { bookings, pendingRegistrations, sessions, stripeEvents } from '@creno/db';
 import {
   type Booking,
   type Resource,
@@ -13,6 +13,7 @@ import { JobsService } from '../src/jobs/jobs.service.js';
 import {
   EXPIRE_HOLDS_QUEUE,
   MaintenanceService,
+  PURGE_PENDING_REGISTRATIONS_QUEUE,
   PURGE_SESSIONS_QUEUE,
   PURGE_STRIPE_EVENTS_QUEUE,
 } from '../src/maintenance/maintenance.service.js';
@@ -196,12 +197,40 @@ describe('jobs de ménage', () => {
     expect(left.map((row) => row.id).sort()).toEqual(['evt_limite', 'evt_recent']);
   });
 
+  it('purge les inscriptions en attente dont le lien a expiré, garde les autres', async () => {
+    const attempt = { fullName: 'Léa', role: 'customer' as const, passwordHash: 'hash' };
+    await db()
+      .insert(pendingRegistrations)
+      .values([
+        {
+          ...attempt,
+          email: 'expiree@test.dev',
+          createdAt: sql`now() - interval '25 hours'`,
+          expiresAt: sql`now() - interval '1 hour'`,
+        },
+        { ...attempt, email: 'valable@test.dev', expiresAt: sql`now() + interval '23 hours'` },
+      ]);
+
+    expect(await maintenance().purgePendingRegistrations()).toBe(1);
+
+    const left = await db()
+      .select({ email: pendingRegistrations.email })
+      .from(pendingRegistrations);
+    expect(left).toEqual([{ email: 'valable@test.dev' }]);
+    expect(logged('maintenance.pending_registrations_purged')).toMatchObject([{ count: 1 }]);
+  });
+
   it('chaque tâche est branchée sur sa file : un job reçu l’exécute', async () => {
     const { agent } = await registerAs(app, 'customer');
     const overdue = await hold(agent, '09:00');
     await lapse(overdue.id);
     const jobs = app.get(JobsService);
-    for (const queue of [EXPIRE_HOLDS_QUEUE, PURGE_SESSIONS_QUEUE, PURGE_STRIPE_EVENTS_QUEUE]) {
+    for (const queue of [
+      EXPIRE_HOLDS_QUEUE,
+      PURGE_SESSIONS_QUEUE,
+      PURGE_STRIPE_EVENTS_QUEUE,
+      PURGE_PENDING_REGISTRATIONS_QUEUE,
+    ]) {
       await jobs.send(queue, {});
       expect(await runJobs(app, queue)).toBe(1);
     }
@@ -209,5 +238,6 @@ describe('jobs de ménage', () => {
     expect(await statusOf(overdue.id)).toBe('expired');
     expect(logged('maintenance.sessions_purged')).toHaveLength(1);
     expect(logged('maintenance.stripe_events_purged')).toHaveLength(1);
+    expect(logged('maintenance.pending_registrations_purged')).toHaveLength(1);
   });
 });
