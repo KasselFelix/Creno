@@ -8,6 +8,7 @@ import {
   type RegisterInput,
   sessionListSchema,
   type UpdateMeInput,
+  type VerifyEmailInput,
 } from '@creno/shared';
 import { apiFetch } from '@/lib/api/client';
 
@@ -23,7 +24,15 @@ export function useLogin() {
 export function useRegister() {
   return useMutation({
     mutationFn: (input: RegisterInput) =>
-      apiFetch('/v1/auth/register', { method: 'POST', body: input, schema: authResponseSchema }),
+      // 202 sans corps : la suite se passe dans la boîte mail, quelle que soit l'adresse.
+      apiFetch('/v1/auth/register', { method: 'POST', body: input }),
+  });
+}
+
+export function useVerifyEmail() {
+  return useMutation({
+    mutationFn: (input: VerifyEmailInput) =>
+      apiFetch('/v1/auth/email/verify', { method: 'POST', body: input }),
   });
 }
 

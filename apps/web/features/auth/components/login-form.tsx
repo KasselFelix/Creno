@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { errorMessage } from '@/lib/api/errors';
+import { ApiClientError, errorMessage } from '@/lib/api/errors';
 import { afterLoginPath } from '@/lib/safe-next';
 import { useLogin } from '../api';
 
@@ -38,7 +38,17 @@ export function LoginForm({ next }: { next: string | undefined }) {
         {login.isError && (
           <Alert variant="destructive">
             <CircleAlert aria-hidden />
-            <AlertDescription>{errorMessage(login.error)}</AlertDescription>
+            <AlertDescription>
+              <p>{errorMessage(login.error)}</p>
+              {/* Un compte pas encore confirmé n'existe pas : même erreur qu'un mauvais mot de passe. */}
+              {login.error instanceof ApiClientError &&
+                login.error.code === 'INVALID_CREDENTIALS' && (
+                  <p>
+                    Compte tout juste créé ? Confirmez d&apos;abord votre adresse avec le lien reçu
+                    par email.
+                  </p>
+                )}
+            </AlertDescription>
           </Alert>
         )}
         <Field data-invalid={!!errors.email}>

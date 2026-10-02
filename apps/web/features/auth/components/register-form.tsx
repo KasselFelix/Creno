@@ -2,7 +2,6 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CircleAlert, LoaderCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { Controller, useForm } from 'react-hook-form';
 import { PASSWORD_MIN_LENGTH, type RegisterInput, registerSchema } from '@creno/shared';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -21,7 +20,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ApiClientError, errorMessage } from '@/lib/api/errors';
-import { homeFor } from '@/lib/safe-next';
 import { useRegister } from '../api';
 
 const roles = [
@@ -37,8 +35,8 @@ const roles = [
   },
 ] as const;
 
-export function RegisterForm() {
-  const router = useRouter();
+/** `onSent` : la demande est acceptée, un email part vers l'adresse saisie. */
+export function RegisterForm({ onSent }: { onSent: (email: string) => void }) {
   const registerUser = useRegister();
   const form = useForm<RegisterInput>({
     resolver: zodResolver(registerSchema),
@@ -49,12 +47,9 @@ export function RegisterForm() {
 
   function onSubmit(values: RegisterInput) {
     registerUser.mutate(values, {
-      onSuccess: ({ user }) => {
-        router.push(homeFor(user.role));
-        router.refresh();
-      },
+      onSuccess: () => onSent(values.email),
       onError: (error) => {
-        // Les erreurs par champ de l'API (ex. email déjà pris) s'affichent sous le champ concerné.
+        // Les erreurs par champ de l'API s'affichent sous le champ concerné.
         if (!(error instanceof ApiClientError)) return;
         for (const field of ['email', 'password', 'fullName', 'role'] as const) {
           const message = error.fieldErrors[field]?.[0];

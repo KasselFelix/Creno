@@ -71,11 +71,11 @@ describe('apiFetch', () => {
 
   it('expose les erreurs par champ de l’API et un message utilisateur', async () => {
     mockFetch(
-      json(409, {
-        statusCode: 409,
-        code: 'EMAIL_TAKEN',
+      json(400, {
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
         message: 'technique',
-        details: { fieldErrors: { email: ['Un compte existe déjà avec cet email.'] } },
+        details: { fieldErrors: { email: ['Email invalide'] } },
       }),
     );
     const error = await apiFetch('/v1/auth/register', { method: 'POST', body: {} }).catch(
@@ -83,8 +83,8 @@ describe('apiFetch', () => {
     );
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error).toMatchObject({
-      message: 'Un compte existe déjà avec cet email.',
-      fieldErrors: { email: ['Un compte existe déjà avec cet email.'] },
+      message: 'Certains champs sont invalides.',
+      fieldErrors: { email: ['Email invalide'] },
     });
   });
 
