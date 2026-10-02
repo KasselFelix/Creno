@@ -138,7 +138,7 @@ export function CompleteRegistrationCard() {
         <CardTitle>
           <h1>Terminez votre inscription</h1>
         </CardTitle>
-        <CardDescription>Votre adresse est confirmée : choisissez votre profil.</CardDescription>
+        <CardDescription>Dernière étape : votre profil et votre mot de passe.</CardDescription>
       </CardHeader>
       <CardContent>
         {token === null ? (

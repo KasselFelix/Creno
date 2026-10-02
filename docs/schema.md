@@ -26,10 +26,7 @@ erDiagram
   }
   pending_registrations {
     uuid id PK
-    citext email "pas unique : plusieurs tentatives"
-    text full_name
-    user_role role "customer | provider"
-    text password_hash "argon2id"
+    citext email "pas unique : plusieurs demandes"
     text token_hash "sha256 du secret du lien, nullable"
     timestamptz expires_at "création + 24 h"
   }
@@ -321,22 +318,23 @@ Execution Time: 8.654 ms
 
 ## Inscription en attente
 
-Une demande d'inscription ne crée pas de ligne dans `users` : elle crée une ligne `pending_registrations`, et le compte naît quand l'adresse est confirmée par le lien reçu (ADR 0011). `pending_registrations` n'a donc **aucune clé étrangère** et **pas d'unicité sur `email`** : plusieurs tentatives peuvent viser la même adresse, chacune avec son nom, son rôle et son mot de passe ; la première confirmée crée le compte et supprime les autres.
+Une demande d'inscription ne crée pas de ligne dans `users` : elle crée une ligne `pending_registrations` (l'adresse, rien d'autre), et le compte naît quand le lien reçu est utilisé, avec le profil et le mot de passe saisis à ce moment-là (ADR 0011). `pending_registrations` n'a donc **aucune clé étrangère** et **pas d'unicité sur `email`** : plusieurs demandes peuvent viser la même adresse, leurs liens se valent, le premier utilisé crée le compte et supprime les autres.
 
-Le lien vaut `<id>.<secret>` ; la base ne garde que `sha256(secret)` dans `token_hash`, écrit par le worker au moment où l'email part. `token_hash` reste `NULL` pour une tentative faite sur une adresse qui a déjà un compte : elle n'est confirmable par personne.
+Le lien vaut `<id>.<secret>` ; la base ne garde que `sha256(secret)` dans `token_hash`, écrit par le worker au moment où l'email part. `token_hash` reste `NULL` pour une demande faite sur une adresse qui a déjà un compte : personne ne peut s'en servir.
 
-La confirmation, dans une transaction :
+La fin de l'inscription, dans une transaction :
 
 ```sql
-SELECT pg_advisory_xact_lock(hashtextextended(lower($email), 1)); -- une confirmation à la fois par adresse
-SELECT * FROM pending_registrations WHERE id = $1;                -- relue sous le verrou : supprimée si un autre lien a gagné
+SELECT pg_advisory_xact_lock(hashtextextended(lower($email), 1)); -- une création de compte à la fois par adresse
+SELECT * FROM pending_registrations WHERE id = $1;                -- relue sous le verrou : supprimée si un autre lien a servi
 INSERT INTO users (email, full_name, role, password_hash, email_verified_at) VALUES (…, now());
 DELETE FROM pending_registrations WHERE email = $email;
+INSERT INTO sessions (…);                                          -- la personne arrive connectée
 ```
 
-Le même verrou protège le plafond de 3 tentatives par adresse et par heure à l'inscription. `users.email_verified_at` est `NOT NULL` sans valeur par défaut : une ligne de `users` est toujours une adresse prouvée (les comptes antérieurs à la migration `0009` ont reçu leur date de création).
+Le même verrou protège le plafond de 3 demandes par adresse et par heure. `users.email_verified_at` est `NOT NULL` sans valeur par défaut : une ligne de `users` est toujours une adresse prouvée (les comptes antérieurs à la migration `0009` ont reçu leur date de création).
 
-Contraintes : `pending_registrations_role_registrable` (jamais `admin`), `pending_registrations_expiry_after_creation`. Index : `(email, created_at)` pour le plafond et la suppression, `(expires_at)` pour la purge horaire des tentatives expirées.
+Contrainte : `pending_registrations_expiry_after_creation`. Index : `(email, created_at)` pour le plafond et la suppression, `(expires_at)` pour la purge horaire des demandes expirées.
 
 ## Sessions et refresh token rotatif
 
