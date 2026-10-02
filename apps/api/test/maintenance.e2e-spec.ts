@@ -198,17 +198,15 @@ describe('jobs de ménage', () => {
   });
 
   it('purge les inscriptions en attente dont le lien a expiré, garde les autres', async () => {
-    const attempt = { fullName: 'Léa', role: 'customer' as const, passwordHash: 'hash' };
     await db()
       .insert(pendingRegistrations)
       .values([
         {
-          ...attempt,
           email: 'expiree@test.dev',
           createdAt: sql`now() - interval '25 hours'`,
           expiresAt: sql`now() - interval '1 hour'`,
         },
-        { ...attempt, email: 'valable@test.dev', expiresAt: sql`now() + interval '23 hours'` },
+        { email: 'valable@test.dev', expiresAt: sql`now() + interval '23 hours'` },
       ]);
 
     expect(await maintenance().purgePendingRegistrations()).toBe(1);

@@ -67,7 +67,7 @@ export class RegistrationWorker implements OnModuleInit {
     const pendingRegistrationId = parsed.data.pendingRegistrationId;
     const base = { pendingRegistrationId, jobId: job.id };
     const pending = await this.pending.findById(pendingRegistrationId);
-    // Adresse confirmée entre-temps par un autre lien, ou tentative expirée : plus rien à envoyer.
+    // Compte créé entre-temps par un autre lien, ou demande expirée : plus rien à envoyer.
     if (!pending || pending.expiresAt <= new Date()) {
       this.logger.log({ event: 'auth.registration_email_skipped', ...base, reason: 'obsolete' });
       return;
@@ -92,7 +92,7 @@ export class RegistrationWorker implements OnModuleInit {
       }
       // Jeton dans le fragment (#) : le navigateur ne l'envoie pas au serveur web, il n'apparaît
       // donc ni dans ses logs ni dans un en-tête Referer.
-      const url = `${this.config.WEB_ORIGIN}/verify-email#${this.tokens.formatToken(pending.id, secret)}`;
+      const url = `${this.config.WEB_ORIGIN}/register/complete#${this.tokens.formatToken(pending.id, secret)}`;
       message = {
         to: pending.email,
         ...verificationEmail(url),

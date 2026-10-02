@@ -19,7 +19,7 @@ export class PendingRegistrationsRepository {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(lower(${email}), 1))`);
   }
 
-  /** Tentatives de la dernière heure pour cette adresse (une tentative = un email envoyé). */
+  /** Demandes de la dernière heure pour cette adresse (une demande = un email envoyé). */
   async countLastHour(email: string, tx: Database): Promise<number> {
     const [row] = await tx
       .select({ total: count() })
@@ -34,13 +34,7 @@ export class PendingRegistrationsRepository {
   }
 
   async create(
-    values: {
-      email: string;
-      fullName: string;
-      role: 'customer' | 'provider';
-      passwordHash: string;
-      expiresAt: Date;
-    },
+    values: { email: string; expiresAt: Date },
     tx: Database,
   ): Promise<PendingRegistrationRow> {
     const [row] = await tx.insert(pendingRegistrations).values(values).returning();
@@ -68,7 +62,7 @@ export class PendingRegistrationsRepository {
     return rows.length > 0;
   }
 
-  /** À la confirmation : toutes les tentatives de l'adresse disparaissent, leurs liens avec. */
+  /** À la création du compte : toutes les demandes de l'adresse disparaissent, leurs liens avec. */
   async deleteByEmail(email: string, tx: Database): Promise<void> {
     await tx.delete(pendingRegistrations).where(eq(pendingRegistrations.email, email));
   }

@@ -12,9 +12,6 @@ const DAY_MS = 24 * 60 * 60_000;
 const attempt = (patch: Partial<typeof pendingRegistrations.$inferInsert> = {}) =>
   db.insert(pendingRegistrations).values({
     email: 'lea@test.dev',
-    fullName: 'Léa',
-    role: 'customer',
-    passwordHash: 'hash',
     expiresAt: new Date(Date.now() + DAY_MS),
     ...patch,
   });
@@ -36,7 +33,7 @@ afterAll(async () => {
 });
 
 describe('pending_registrations', () => {
-  it('accepte plusieurs tentatives pour la même adresse, casse différente comprise', async () => {
+  it('accepte plusieurs demandes pour la même adresse, casse différente comprise', async () => {
     await attempt();
     await expect(attempt({ email: 'LEA@test.dev' })).resolves.toBeDefined();
     const rows = await db
@@ -44,10 +41,6 @@ describe('pending_registrations', () => {
       .from(pendingRegistrations)
       .where(sql`${pendingRegistrations.email} = 'lea@TEST.dev'`);
     expect(rows).toHaveLength(2);
-  });
-
-  it('refuse le rôle admin (23514)', async () => {
-    await expectSqlState(attempt({ role: 'admin' }), '23514');
   });
 
   it('refuse une échéance antérieure à la création (23514)', async () => {

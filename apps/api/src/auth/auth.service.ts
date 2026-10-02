@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { type DbHandle, sqlState } from '@creno/db';
 import {
+  type CompleteRegistrationInput,
   EMAIL_VERIFICATION_TTL_HOURS,
   type LoginInput,
   type PublicUser,
@@ -58,37 +59,26 @@ export class AuthService {
   ) {}
 
   /**
-   * Demande d'inscription : aucun compte n'est créé ici, seulement une inscription en attente et
-   * le job qui enverra l'email. La requête ne lit pas `users` et fait le même travail que
-   * l'adresse ait déjà un compte ou non (hash compris) : sa réponse et sa durée ne révèlent rien.
+   * Demande d'inscription : une adresse, rien d'autre. Aucun compte n'est créé ici, seulement une
+   * demande en attente et le job qui enverra l'email. La requête ne lit pas `users` : sa réponse et
+   * sa durée sont les mêmes que l'adresse ait déjà un compte ou non.
    */
   async register(input: RegisterInput): Promise<void> {
-    const passwordHash = await this.hasher.hash(input.password);
     const pendingRegistrationId = await this.handle.db.transaction(async (tx) => {
       await this.pending.lockEmail(input.email, tx);
       const recent = await this.pending.countLastHour(input.email, tx);
       if (recent >= MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR) return undefined;
       const row = await this.pending.create(
-        {
-          email: input.email,
-          fullName: input.fullName,
-          role: input.role,
-          passwordHash,
-          expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
-        },
+        { email: input.email, expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS) },
         tx,
       );
-      // Le job naît avec la ligne (outbox transactionnelle) : pas d'inscription sans email.
+      // Le job naît avec la ligne (outbox transactionnelle) : pas de demande sans email.
       const job: RegistrationEmailJob = { pendingRegistrationId: row.id };
       await this.jobs.send(REGISTRATION_EMAIL_QUEUE, job, { tx });
       return row.id;
     });
     if (pendingRegistrationId) {
-      this.logger.log({
-        event: 'auth.registration_requested',
-        pendingRegistrationId,
-        role: input.role,
-      });
+      this.logger.log({ event: 'auth.registration_requested', pendingRegistrationId });
     } else {
       // Même réponse pour l'appelant, mais aucun email de plus ne part vers cette adresse.
       this.logger.warn({ event: 'auth.registration_capped' });
@@ -96,39 +86,50 @@ export class AuthService {
   }
 
   /**
-   * Confirmation de l'adresse : crée le compte avec le nom, le rôle et le mot de passe de la
-   * tentative dont vient le lien, puis supprime toutes les tentatives de cette adresse. N'ouvre
-   * pas de session : avoir le lien prouve l'accès à la boîte mail, pas la connaissance du mot de
-   * passe (qui a pu être choisi par quelqu'un d'autre).
+   * Fin de l'inscription, depuis le lien : le jeton prouve l'accès à la boîte mail, et c'est son
+   * titulaire qui choisit ici nom, rôle et mot de passe. Le compte est créé avec une première
+   * session, et toutes les demandes en attente de l'adresse disparaissent (leurs liens avec).
    */
-  async verifyEmail(rawToken: string): Promise<void> {
-    const parts = this.tokens.parseToken(rawToken);
-    if (!parts) throw this.verificationRejected('malformed');
+  async completeRegistration(
+    input: CompleteRegistrationInput,
+    userAgent: string | undefined,
+  ): Promise<AuthResult> {
+    const parts = this.tokens.parseToken(input.token);
+    if (!parts) throw this.registrationLinkRejected('malformed');
     const presented = this.tokens.hashSecret(parts.secret);
+    // Lien vérifié avant de calculer le hash : un jeton bidon ne coûte pas un argon2.
+    this.usablePending(await this.pending.findById(parts.id), presented);
+    const passwordHash = await this.hasher.hash(input.password);
+    const secret = this.tokens.newSecret();
     try {
-      const user = await this.handle.db.transaction(async (tx) => {
-        const seen = this.usablePending(await this.pending.findById(parts.id, tx), presented);
-        // Deux liens d'une même adresse confirmés en même temps : le second attend ici, puis
+      const { user, session } = await this.handle.db.transaction(async (tx) => {
+        // Deux liens d'une même adresse utilisés en même temps : le second attend ici, puis
         // constate à la relecture que sa ligne a été supprimée par le premier.
+        const seen = this.usablePending(await this.pending.findById(parts.id, tx), presented);
         await this.pending.lockEmail(seen.email, tx);
         const pending = this.usablePending(await this.pending.findById(parts.id, tx), presented);
         const user = await this.users.create(
           {
             email: pending.email,
-            fullName: pending.fullName,
-            role: pending.role,
-            passwordHash: pending.passwordHash,
+            fullName: input.fullName,
+            role: input.role,
+            passwordHash,
             emailVerifiedAt: new Date(),
           },
           tx,
         );
         await this.pending.deleteByEmail(pending.email, tx);
-        return user;
+        const session = await this.sessions.create(
+          this.newSessionValues(user.id, secret, userAgent),
+          tx,
+        );
+        return { user, session };
       });
       this.logger.log({ event: 'auth.registered', userId: user.id, role: user.role });
+      return this.issue(user, session, secret);
     } catch (error) {
       // Filet de sécurité : un compte existe déjà pour cette adresse (créé hors de ce parcours).
-      if (sqlState(error) === '23505') throw this.verificationRejected('account_exists');
+      if (sqlState(error) === '23505') throw this.registrationLinkRejected('account_exists');
       throw error;
     }
   }
@@ -222,28 +223,29 @@ export class AuthService {
     this.logger.log({ event: 'auth.session_revoked', userId: current.id, sessionId });
   }
 
-  /** La tentative visée par un lien, si le lien est le bon et encore valable ; sinon l'erreur unique. */
+  /** La demande visée par un lien, si le lien est le bon et encore valable ; sinon l'erreur unique. */
   private usablePending(
     pending: PendingRegistrationRow | undefined,
     presentedHash: string,
   ): PendingRegistrationRow {
-    if (!pending) throw this.verificationRejected('unknown');
+    if (!pending) throw this.registrationLinkRejected('unknown');
     if (!this.tokens.sameHash(pending.tokenHash, presentedHash)) {
-      throw this.verificationRejected('bad_secret');
+      throw this.registrationLinkRejected('bad_secret');
     }
-    if (pending.expiresAt <= new Date()) throw this.verificationRejected('expired');
+    if (pending.expiresAt <= new Date()) throw this.registrationLinkRejected('expired');
     return pending;
   }
 
   /** Une seule erreur pour l'appelant, quelle que soit la raison (elle n'est que dans les logs). */
-  private verificationRejected(reason: string): DomainError {
-    this.logger.warn({ event: 'auth.verification_rejected', reason });
+  private registrationLinkRejected(reason: string): DomainError {
+    this.logger.warn({ event: 'auth.registration_link_rejected', reason });
     return new DomainError(
-      'VERIFICATION_LINK_INVALID',
+      'REGISTRATION_LINK_INVALID',
       400,
-      'Ce lien de confirmation est invalide ou a expiré.',
+      "Ce lien d'inscription est invalide ou a expiré.",
     );
   }
+
 
   private async refreshWithinGrace(
     session: SessionRow | undefined,

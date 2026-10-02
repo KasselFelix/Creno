@@ -1,5 +1,5 @@
 {
-  "id": "c0deb900-9c3a-4f29-bb2a-c338e4fcf566",
+  "id": "a54b333d-b921-4252-a159-2f89440c9085",
   "prevId": "12f173bf-ca79-4531-9f31-7630c1c5a296",
   "version": "7",
   "dialect": "postgresql",
@@ -757,25 +757,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "full_name": {
-          "name": "full_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "user_role",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "password_hash": {
-          "name": "password_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "token_hash": {
           "name": "token_hash",
           "type": "text",
@@ -839,10 +820,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "pending_registrations_role_registrable": {
-          "name": "pending_registrations_role_registrable",
-          "value": "\"pending_registrations\".\"role\" IN ('customer', 'provider')"
-        },
         "pending_registrations_expiry_after_creation": {
           "name": "pending_registrations_expiry_after_creation",
           "value": "\"pending_registrations\".\"expires_at\" > \"pending_registrations\".\"created_at\""

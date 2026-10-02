@@ -2,19 +2,19 @@ import { EMAIL_VERIFICATION_TTL_HOURS } from '@creno/shared';
 import { type RenderedEmail, renderParts } from '../notifications/templates.js';
 
 /**
- * Lien de confirmation : le compte n'existe pas encore, il sera créé au clic. Aucun texte saisi
- * dans le formulaire (le nom) n'y figure : n'importe qui peut demander une inscription pour
- * l'adresse d'un autre, et ferait ainsi envoyer par Creno le message de son choix.
+ * Lien pour terminer l'inscription : le compte n'existe pas encore, il sera créé depuis ce lien.
+ * Aucun texte saisi par l'auteur de la demande n'y figure (il n'a donné qu'une adresse) : personne
+ * ne peut faire envoyer par Creno le message de son choix.
  */
-export function verificationEmail(verifyUrl: string): RenderedEmail {
+export function verificationEmail(completeUrl: string): RenderedEmail {
   return renderParts(null, {
-    subject: 'Confirmez votre adresse email',
-    title: 'Confirmez votre adresse email',
+    subject: 'Terminez votre inscription sur Creno',
+    title: 'Terminez votre inscription',
     paragraphs: [
-      `Pour créer votre compte Creno, confirmez cette adresse avec le lien ci-dessous. Il est valable ${EMAIL_VERIFICATION_TTL_HOURS} heures.`,
+      `Pour créer votre compte Creno, ouvrez le lien ci-dessous : vous y choisirez votre nom et votre mot de passe. Il est valable ${EMAIL_VERIFICATION_TTL_HOURS} heures.`,
       "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : aucun compte ne sera créé.",
     ],
-    action: { label: 'Confirmer mon adresse', url: verifyUrl },
+    action: { label: 'Terminer mon inscription', url: completeUrl },
   });
 }
 

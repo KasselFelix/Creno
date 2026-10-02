@@ -1,13 +1,9 @@
 CREATE TABLE "pending_registrations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"email" "citext" NOT NULL,
-	"full_name" text NOT NULL,
-	"role" "user_role" NOT NULL,
-	"password_hash" text NOT NULL,
 	"token_hash" text,
 	"expires_at" timestamp with time zone NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "pending_registrations_role_registrable" CHECK ("pending_registrations"."role" IN ('customer', 'provider')),
 	CONSTRAINT "pending_registrations_expiry_after_creation" CHECK ("pending_registrations"."expires_at" > "pending_registrations"."created_at")
 );
 --> statement-breakpoint

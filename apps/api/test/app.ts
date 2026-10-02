@@ -43,6 +43,8 @@ export interface TestAppOptions {
   databaseUrl?: string;
   /** Limite de requêtes d'auth par minute (très haute par défaut pour ne pas gêner les autres tests). */
   authRateLimit?: number;
+  /** Limite des demandes d'inscription par heure (très haute par défaut). */
+  registrationRateLimit?: number;
   /** Limite des lectures publiques par minute (très haute par défaut). */
   publicRateLimit?: number;
   /** Capture les logs JSON de l'application. */
@@ -65,6 +67,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     WEB_ORIGIN,
     JWT_ACCESS_SECRET: 'secret-de-test-secret-de-test-secret-de-test',
     AUTH_RATE_LIMIT_PER_MINUTE: String(options.authRateLimit ?? 1000),
+    REGISTRATION_RATE_LIMIT_PER_HOUR: String(options.registrationRateLimit ?? 100_000),
     PUBLIC_RATE_LIMIT_PER_MINUTE: String(options.publicRateLimit ?? 100_000),
     BOOKING_RATE_LIMIT_PER_MINUTE: '100000',
     LOG_LEVEL: 'info',
@@ -200,10 +203,10 @@ export function loginAsAdmin(app: INestApplication) {
   return createAccount(app, 'admin', 'Admin');
 }
 
-/** Jeton du lien de confirmation contenu dans un email d'inscription. */
-export function verificationTokenOf(message: { text: string }): string {
-  const match = /\/verify-email#([\w.-]+)/.exec(message.text);
-  if (!match) throw new Error('Aucun lien de confirmation dans cet email');
+/** Jeton du lien contenu dans un email d'inscription. */
+export function registrationTokenOf(message: { text: string }): string {
+  const match = /\/register\/complete#([\w.-]+)/.exec(message.text);
+  if (!match) throw new Error("Aucun lien d'inscription dans cet email");
   return match[1]!;
 }
 

@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { pendingRegistrations, users } from '@creno/db';
-import { apiErrorSchema, authResponseSchema } from '@creno/shared';
+import { AUTH_COOKIES, apiErrorSchema, authResponseSchema } from '@creno/shared';
 import {
   MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR,
   REGISTRATION_EMAIL_DEAD_QUEUE,
@@ -16,17 +16,19 @@ import {
   dbOf,
   fakeEmailGateway,
   registerAs,
+  registrationTokenOf,
   resetDatabase,
   runJobs,
+  setCookieLine,
   TEST_PASSWORD,
   uniqueEmail,
-  verificationTokenOf,
   WEB_ORIGIN,
 } from './app.js';
 
 const OTHER_PASSWORD = 'un-autre-mot-de-passe';
+const PROFILE = { password: TEST_PASSWORD, fullName: 'Léa Petit', role: 'customer' } as const;
 
-describe('inscription et confirmation de l’adresse', () => {
+describe('inscription par lien envoyé par email', () => {
   let app: INestApplication;
   const email = fakeEmailGateway();
   const logs: string[] = [];
@@ -45,17 +47,11 @@ describe('inscription et confirmation de l’adresse', () => {
     await app.close();
   });
 
-  const register = (address: string, patch: Record<string, unknown> = {}) =>
+  const register = (address: string) => http().post('/v1/auth/register').send({ email: address });
+  const complete = (token: string, profile: Record<string, unknown> = {}) =>
     http()
-      .post('/v1/auth/register')
-      .send({
-        email: address,
-        password: TEST_PASSWORD,
-        fullName: 'Léa Petit',
-        role: 'customer',
-        ...patch,
-      });
-  const verify = (token: string) => http().post('/v1/auth/email/verify').send({ token });
+      .post('/v1/auth/register/complete')
+      .send({ token, ...PROFILE, ...profile });
   const login = (address: string, password = TEST_PASSWORD) =>
     http().post('/v1/auth/login').send({ email: address, password });
   const sentEmails = () => email.send.mock.calls.map(([message]) => message);
@@ -68,43 +64,43 @@ describe('inscription et confirmation de l’adresse', () => {
       .filter((l) => l.event === event);
 
   /** Demande d'inscription, envoi de l'email, et jeton du lien reçu. */
-  async function registerAndGetToken(address: string, patch: Record<string, unknown> = {}) {
-    await register(address, patch).expect(202);
+  async function requestLink(address: string) {
+    await register(address).expect(202);
     await runJobs(app, REGISTRATION_EMAIL_QUEUE);
-    return verificationTokenOf(sentEmails().at(-1)!);
+    return registrationTokenOf(sentEmails().at(-1)!);
   }
 
   describe('POST /v1/auth/register', () => {
-    it('répond 202 sans corps ni cookie, ne crée pas de compte, et envoie un lien de confirmation', async () => {
+    it('répond 202 sans corps ni cookie, ne crée pas de compte, et envoie un lien', async () => {
       const address = uniqueEmail();
-      const res = await register(address, { role: 'provider' }).expect(202);
+      const res = await register(address).expect(202);
 
       expect(res.text).toBe('');
       expect(res.headers['set-cookie']).toBeUndefined();
       expect(await accountsOf(address)).toHaveLength(0);
       const [pending] = await pendingOf(address);
-      expect(pending).toMatchObject({ fullName: 'Léa Petit', role: 'provider', tokenHash: null });
-      expect(pending!.passwordHash).toMatch(/^\$argon2id\$/);
+      expect(pending).toMatchObject({ email: address, tokenHash: null });
 
       expect(await runJobs(app, REGISTRATION_EMAIL_QUEUE)).toBe(1);
       const messages = sentEmails();
       expect(messages).toHaveLength(1);
-      expect(messages[0]).toMatchObject({ to: address, subject: 'Confirmez votre adresse email' });
-      const token = verificationTokenOf(messages[0]!);
-      expect(messages[0]!.text).toContain(`${WEB_ORIGIN}/verify-email#${token}`);
-      expect(messages[0]!.html).toContain(`${WEB_ORIGIN}/verify-email#${token}`);
+      expect(messages[0]).toMatchObject({
+        to: address,
+        subject: 'Terminez votre inscription sur Creno',
+      });
+      const token = registrationTokenOf(messages[0]!);
+      expect(messages[0]!.text).toContain(`${WEB_ORIGIN}/register/complete#${token}`);
+      expect(messages[0]!.html).toContain(`${WEB_ORIGIN}/register/complete#${token}`);
       // Seul le hash du secret est en base.
       const [after] = await pendingOf(address);
       expect(after!.tokenHash).toMatch(/^[0-9a-f]{64}$/);
       expect(token).not.toContain(after!.tokenHash!);
     });
 
-    it('adresse déjà inscrite (casse différente comprise) : même réponse, email « déjà un compte » sans lien, compte inchangé', async () => {
+    it('adresse déjà inscrite (casse différente comprise) : même réponse, email « déjà un compte » sans lien', async () => {
       const { user } = await registerAs(app);
       const fresh = await register(uniqueEmail()).expect(202);
-      const taken = await register(user.email.toUpperCase(), { password: OTHER_PASSWORD }).expect(
-        202,
-      );
+      const taken = await register(user.email.toUpperCase()).expect(202);
 
       expect(taken.text).toBe(fresh.text);
       expect(taken.headers['set-cookie']).toBeUndefined();
@@ -113,20 +109,11 @@ describe('inscription et confirmation de l’adresse', () => {
       await runJobs(app, REGISTRATION_EMAIL_QUEUE);
       const message = sentEmails().find((m) => m.to === user.email);
       expect(message).toMatchObject({ subject: 'Vous avez déjà un compte Creno' });
-      expect(message!.text).not.toContain('verify-email');
+      expect(message!.text).not.toContain('/register/complete');
       expect(message!.text).toContain(`${WEB_ORIGIN}/login`);
-      // La tentative n'est confirmable par personne, et le mot de passe du compte n'a pas changé.
+      // La demande n'est utilisable par personne, et le compte n'a pas changé.
       expect((await pendingOf(user.email))[0]).toMatchObject({ tokenHash: null });
-      expect(await accountsOf(user.email)).toHaveLength(1);
       await login(user.email).expect(200);
-      await login(user.email, OTHER_PASSWORD).expect(401);
-    });
-
-    it('l’email de confirmation ne reprend pas le nom saisi dans le formulaire', async () => {
-      await register(uniqueEmail(), { fullName: 'Gagnez 1000 euros sur evil.example' }).expect(202);
-      await runJobs(app, REGISTRATION_EMAIL_QUEUE);
-      const [message] = sentEmails();
-      expect(`${message!.subject}${message!.text}${message!.html}`).not.toContain('evil.example');
     });
 
     it(`au-delà de ${MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR} demandes par heure pour une adresse : 202, mais ni ligne ni email de plus`, async () => {
@@ -143,7 +130,7 @@ describe('inscription et confirmation de l’adresse', () => {
       );
       expect(logged('auth.registration_capped')).toHaveLength(1);
 
-      // Le plafond glisse : une tentative de plus d'une heure ne compte plus.
+      // Le plafond glisse : une demande de plus d'une heure ne compte plus.
       await db()
         .update(pendingRegistrations)
         .set({ createdAt: sql`now() - interval '61 minutes'` })
@@ -158,59 +145,62 @@ describe('inscription et confirmation de l’adresse', () => {
       expect(await pendingOf(address)).toHaveLength(MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR);
     });
 
-    it.each([
-      ['mot de passe trop court', { password: 'court' }, 'password'],
-      ['email invalide', { email: 'pas-un-email' }, 'email'],
-      ['rôle admin', { role: 'admin' }, 'role'],
-    ])('400 VALIDATION_FAILED : %s', async (_label, patch, field) => {
-      const res = await register(uniqueEmail(), patch).expect(400);
+    it('400 VALIDATION_FAILED : email invalide', async () => {
+      const res = await register('pas-un-email').expect(400);
       const body = apiErrorSchema.parse(res.body);
       expect(body.code).toBe('VALIDATION_FAILED');
-      expect(body.details).toMatchObject({ fieldErrors: { [field]: expect.any(Array) } });
+      expect(body.details).toMatchObject({ fieldErrors: { email: expect.any(Array) } });
     });
   });
 
-  describe('POST /v1/auth/email/verify', () => {
-    it('crée le compte confirmé, sans ouvrir de session ; la connexion fonctionne ensuite', async () => {
+  describe('POST /v1/auth/register/complete', () => {
+    it('crée le compte avec le profil saisi depuis le lien et ouvre une session', async () => {
       const address = uniqueEmail();
-      await login(address).expect(401); // pas de compte avant la confirmation
-      const token = await registerAndGetToken(address, { role: 'provider' });
-      const denied = await login(address).expect(401);
-      expect(apiErrorSchema.parse(denied.body).code).toBe('INVALID_CREDENTIALS');
+      const token = await requestLink(address);
+      const before = await login(address).expect(401); // pas de compte avant la fin de l'inscription
+      expect(apiErrorSchema.parse(before.body).code).toBe('INVALID_CREDENTIALS');
 
-      const res = await verify(token).expect(204);
+      const agent = request.agent(app.getHttpServer());
+      const res = await agent
+        .post('/v1/auth/register/complete')
+        .send({ token, ...PROFILE, role: 'provider' })
+        .expect(200);
 
-      expect(res.headers['set-cookie']).toBeUndefined();
+      const { user } = authResponseSchema.parse(res.body);
+      expect(user).toMatchObject({ email: address, fullName: 'Léa Petit', role: 'provider' });
+      expect(JSON.stringify(res.body)).not.toMatch(/hash|password|token/i);
+      expect(setCookieLine(res, AUTH_COOKIES.access)).toMatch(/HttpOnly/i);
+      expect(setCookieLine(res, AUTH_COOKIES.refresh)).toMatch(/SameSite=Strict/i);
+      await agent.get('/v1/users/me').expect(200);
+
       const [account] = await accountsOf(address);
-      expect(account).toMatchObject({ email: address, fullName: 'Léa Petit', role: 'provider' });
+      expect(account!.passwordHash).toMatch(/^\$argon2id\$/);
       expect(Date.now() - account!.emailVerifiedAt.getTime()).toBeLessThan(60_000);
       expect(await pendingOf(address)).toHaveLength(0);
-      const session = await login(address).expect(200);
-      expect(authResponseSchema.parse(session.body).user).toMatchObject({
-        id: account!.id,
-        role: 'provider',
-      });
-      expect(logged('auth.registered')).toMatchObject([{ userId: account!.id, role: 'provider' }]);
+      await login(address).expect(200);
+      expect(logged('auth.registered')).toMatchObject([{ userId: user.id, role: 'provider' }]);
     });
 
-    it('lien rejoué, abîmé, inconnu ou au mauvais secret → 400 VERIFICATION_LINK_INVALID, aucun compte', async () => {
+    it('lien rejoué, abîmé, inconnu ou au mauvais secret → 400 REGISTRATION_LINK_INVALID, aucun compte', async () => {
       const address = uniqueEmail();
-      const token = await registerAndGetToken(address);
+      const token = await requestLink(address);
       const [id, secret] = token.split('.') as [string, string];
       const wrongSecret = `${id}.${secret.startsWith('A') ? 'B' : 'A'}${secret.slice(1)}`;
       const unknown = `00000000-0000-4000-8000-000000000000.${secret}`;
 
       for (const bad of [wrongSecret, unknown, 'pas-un-jeton', id]) {
-        const res = await verify(bad).expect(400);
-        expect(apiErrorSchema.parse(res.body).code).toBe('VERIFICATION_LINK_INVALID');
+        const res = await complete(bad).expect(400);
+        expect(apiErrorSchema.parse(res.body).code).toBe('REGISTRATION_LINK_INVALID');
+        expect(res.headers['set-cookie']).toBeUndefined();
       }
       expect(await accountsOf(address)).toHaveLength(0);
 
-      await verify(token).expect(204);
-      const replay = await verify(token).expect(400);
-      expect(apiErrorSchema.parse(replay.body).code).toBe('VERIFICATION_LINK_INVALID');
+      await complete(token).expect(200);
+      const replay = await complete(token, { password: OTHER_PASSWORD }).expect(400);
+      expect(apiErrorSchema.parse(replay.body).code).toBe('REGISTRATION_LINK_INVALID');
       expect(await accountsOf(address)).toHaveLength(1);
-      expect(logged('auth.verification_rejected').map((l) => l.reason)).toEqual([
+      await login(address, OTHER_PASSWORD).expect(401);
+      expect(logged('auth.registration_link_rejected').map((l) => l.reason)).toEqual([
         'bad_secret',
         'unknown',
         'malformed',
@@ -221,7 +211,7 @@ describe('inscription et confirmation de l’adresse', () => {
 
     it('lien expiré → 400, aucun compte', async () => {
       const address = uniqueEmail();
-      const token = await registerAndGetToken(address);
+      const token = await requestLink(address);
       await db()
         .update(pendingRegistrations)
         .set({
@@ -230,62 +220,76 @@ describe('inscription et confirmation de l’adresse', () => {
         })
         .where(eq(pendingRegistrations.email, address));
 
-      const res = await verify(token).expect(400);
-      expect(apiErrorSchema.parse(res.body).code).toBe('VERIFICATION_LINK_INVALID');
+      const res = await complete(token).expect(400);
+      expect(apiErrorSchema.parse(res.body).code).toBe('REGISTRATION_LINK_INVALID');
       expect(await accountsOf(address)).toHaveLength(0);
     });
 
-    it('sans jeton → 400 VALIDATION_FAILED', async () => {
-      const res = await http().post('/v1/auth/email/verify').send({}).expect(400);
-      expect(apiErrorSchema.parse(res.body).code).toBe('VALIDATION_FAILED');
+    it.each([
+      ['mot de passe trop court', { password: 'court' }, 'password'],
+      ['rôle admin', { role: 'admin' }, 'role'],
+      ['nom vide', { fullName: ' ' }, 'fullName'],
+      ['sans jeton', { token: '' }, 'token'],
+    ])('400 VALIDATION_FAILED : %s, et le lien reste utilisable', async (_label, patch, field) => {
+      const address = uniqueEmail();
+      const token = await requestLink(address);
+      const res = await complete(token, patch).expect(400);
+      const body = apiErrorSchema.parse(res.body);
+      expect(body.code).toBe('VALIDATION_FAILED');
+      expect(body.details).toMatchObject({ fieldErrors: { [field]: expect.any(Array) } });
+      await complete(token).expect(200);
     });
 
-    it('deux inscriptions en attente pour une adresse : le lien confirmé fixe le mot de passe, l’autre lien meurt', async () => {
+    it('plafond saturé par un tiers : le titulaire de la boîte termine quand même, avec son propre mot de passe', async () => {
       const address = uniqueEmail();
-      const first = await registerAndGetToken(address);
-      const second = await registerAndGetToken(address, {
-        password: OTHER_PASSWORD,
-        fullName: 'Quelqu’un d’autre',
-      });
+      // Le tiers épuise le plafond de l'adresse ; la demande du titulaire ne crée alors rien.
+      for (let i = 0; i < MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR; i++) {
+        await register(address).expect(202);
+      }
+      await register(address).expect(202);
+      await runJobs(app, REGISTRATION_EMAIL_QUEUE);
 
-      await verify(first).expect(204);
+      // N'importe lequel des liens reçus convient : aucun ne porte de mot de passe ni de profil.
+      const [first, second] = sentEmails().map(registrationTokenOf);
+      await complete(second!, { password: OTHER_PASSWORD }).expect(200);
 
-      await login(address, TEST_PASSWORD).expect(200);
-      await login(address, OTHER_PASSWORD).expect(401);
-      expect((await accountsOf(address))[0]).toMatchObject({ fullName: 'Léa Petit' });
-      await verify(second).expect(400);
+      await login(address, OTHER_PASSWORD).expect(200);
+      await login(address, TEST_PASSWORD).expect(401);
+      await complete(first!).expect(400);
       expect(await accountsOf(address)).toHaveLength(1);
     });
 
-    it('deux liens d’une même adresse confirmés en même temps : un 204, un 400, un seul compte', async () => {
+    it('deux liens d’une même adresse utilisés en même temps : un 200, un 400, un seul compte', async () => {
       const address = uniqueEmail();
-      const first = await registerAndGetToken(address);
-      const second = await registerAndGetToken(address, { password: OTHER_PASSWORD });
+      const first = await requestLink(address);
+      const second = await requestLink(address);
 
-      const statuses = (await Promise.all([verify(first), verify(second)])).map((r) => r.status);
+      const statuses = (
+        await Promise.all([complete(first), complete(second, { password: OTHER_PASSWORD })])
+      ).map((r) => r.status);
 
-      expect(statuses.sort()).toEqual([204, 400]);
+      expect(statuses.sort()).toEqual([200, 400]);
       expect(await accountsOf(address)).toHaveLength(1);
       expect(await pendingOf(address)).toHaveLength(0);
     });
 
-    it('le même lien dans deux onglets : un 204, un 400, un seul compte', async () => {
+    it('le même lien dans deux onglets : un 200, un 400, un seul compte', async () => {
       const address = uniqueEmail();
-      const token = await registerAndGetToken(address);
+      const token = await requestLink(address);
 
-      const statuses = (await Promise.all([verify(token), verify(token)])).map((r) => r.status);
+      const statuses = (await Promise.all([complete(token), complete(token)])).map((r) => r.status);
 
-      expect(statuses.sort()).toEqual([204, 400]);
+      expect(statuses.sort()).toEqual([200, 400]);
       expect(await accountsOf(address)).toHaveLength(1);
     });
   });
 
   describe('job d’email d’inscription', () => {
-    it('adresse confirmée avant l’envoi d’une autre tentative : rien ne part', async () => {
+    it('compte créé avant l’envoi d’une autre demande : rien ne part', async () => {
       const address = uniqueEmail();
-      const token = await registerAndGetToken(address);
-      await register(address).expect(202); // seconde tentative, job en attente
-      await verify(token).expect(204);
+      const token = await requestLink(address);
+      await register(address).expect(202); // seconde demande, job en attente
+      await complete(token).expect(200);
       email.send.mockClear();
 
       expect(await runJobs(app, REGISTRATION_EMAIL_QUEUE)).toBe(1);
@@ -297,17 +301,17 @@ describe('inscription et confirmation de l’adresse', () => {
       email.send.mockRejectedValueOnce(new DeliveryError('timeout', true));
       await register(address).expect(202);
       await runJobs(app, REGISTRATION_EMAIL_QUEUE);
-      const lost = verificationTokenOf(sentEmails()[0]!);
+      const lost = registrationTokenOf(sentEmails()[0]!);
       expect(logged('auth.registration_email_retry')).toHaveLength(1);
 
       // La reprise est planifiée 30 s plus tard : on l'exécute tout de suite.
       await runJobs(app, REGISTRATION_EMAIL_QUEUE);
-      const token = verificationTokenOf(sentEmails()[1]!);
+      const token = registrationTokenOf(sentEmails()[1]!);
 
       expect(token).not.toBe(lost);
       expect(sentEmails()[0]!.idempotencyKey).not.toBe(sentEmails()[1]!.idempotencyKey);
-      await verify(lost).expect(400);
-      await verify(token).expect(204);
+      await complete(lost).expect(400);
+      await complete(token).expect(200);
     });
 
     it('adresse refusée par le fournisseur : pas de reprise, log error', async () => {
@@ -344,9 +348,9 @@ describe('inscription et confirmation de l’adresse', () => {
 
   it('ne journalise ni adresse, ni mot de passe, ni hash, ni jeton', async () => {
     const address = uniqueEmail();
-    const token = await registerAndGetToken(address);
-    await verify(`${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`).expect(400);
-    await verify(token).expect(204);
+    const token = await requestLink(address);
+    await complete(`${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`).expect(400);
+    await complete(token).expect(200);
     const { user } = await registerAs(app);
     await register(user.email).expect(202);
     await runJobs(app, REGISTRATION_EMAIL_QUEUE);
@@ -356,7 +360,7 @@ describe('inscription et confirmation de l’adresse', () => {
       expect.arrayContaining([
         'auth.registration_requested',
         'auth.registration_email_sent',
-        'auth.verification_rejected',
+        'auth.registration_link_rejected',
         'auth.registered',
       ]),
     );
@@ -365,22 +369,33 @@ describe('inscription et confirmation de l’adresse', () => {
     for (const sensitive of [address, user.email, TEST_PASSWORD, '$argon2id', secret]) {
       expect(all).not.toContain(sensitive);
     }
+    expect(all).not.toMatch(/creno_(at|rt)=/);
   });
 });
 
-describe('inscription : rate limit', () => {
+describe('inscription : limites par IP', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    app = await createTestApp({ authRateLimit: 5 });
+    app = await createTestApp({ authRateLimit: 5, registrationRateLimit: 3 });
   });
   afterAll(async () => {
     await app.close();
   });
 
-  it('la confirmation partage la limite des routes d’identifiants → 429', async () => {
+  it('demandes d’inscription : limite horaire par IP, même sur des adresses toutes différentes → 429', async () => {
     const attempt = () =>
-      request(app.getHttpServer()).post('/v1/auth/email/verify').send({ token: 'x' });
+      request(app.getHttpServer()).post('/v1/auth/register').send({ email: uniqueEmail() });
+    for (let i = 0; i < 3; i++) await attempt().expect(202);
+    const res = await attempt().expect(429);
+    expect(apiErrorSchema.parse(res.body).code).toBe('TOO_MANY_REQUESTS');
+  });
+
+  it('fin d’inscription : partage la limite des routes d’identifiants → 429', async () => {
+    const attempt = () =>
+      request(app.getHttpServer())
+        .post('/v1/auth/register/complete')
+        .send({ token: 'x', ...PROFILE });
     for (let i = 0; i < 5; i++) await attempt().expect(400);
     const res = await attempt().expect(429);
     expect(apiErrorSchema.parse(res.body).code).toBe('TOO_MANY_REQUESTS');

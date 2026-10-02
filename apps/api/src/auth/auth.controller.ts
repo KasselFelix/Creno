@@ -18,13 +18,13 @@ import type { Request, Response } from 'express';
 import {
   AUTH_COOKIES,
   type AuthResponse,
+  type CompleteRegistrationInput,
+  completeRegistrationSchema,
   type LoginInput,
   loginSchema,
   type RegisterInput,
   registerSchema,
   type SessionList,
-  type VerifyEmailInput,
-  verifyEmailSchema,
 } from '@creno/shared';
 import { DomainError } from '../common/domain-error.js';
 import { ApiZodBody, ZodValidationPipe } from '../common/zod.js';
@@ -44,8 +44,9 @@ export class AuthController {
   ) {}
 
   // 202 sans corps ni cookie, que l'adresse ait déjà un compte ou non : la suite se passe par email.
+  // Deux limites par IP : à la minute (rafales), et à l'heure (une boîte visée par des alias).
   @Public()
-  @OnlyThrottle('credentials')
+  @OnlyThrottle('credentials', 'registration')
   @Post('register')
   @HttpCode(202)
   @ApiZodBody(registerSchema)
@@ -53,16 +54,20 @@ export class AuthController {
     await this.auth.register(body);
   }
 
-  // Publique : le lien s'ouvre souvent sur un autre appareil que celui de l'inscription.
+  // Publique : le lien s'ouvre souvent sur un autre appareil que celui de la demande.
   @Public()
   @OnlyThrottle('credentials')
-  @Post('email/verify')
-  @HttpCode(204)
-  @ApiZodBody(verifyEmailSchema)
-  async verifyEmail(
-    @Body(new ZodValidationPipe(verifyEmailSchema)) body: VerifyEmailInput,
-  ): Promise<void> {
-    await this.auth.verifyEmail(body.token);
+  @Post('register/complete')
+  @HttpCode(200)
+  @ApiZodBody(completeRegistrationSchema)
+  async completeRegistration(
+    @Body(new ZodValidationPipe(completeRegistrationSchema)) body: CompleteRegistrationInput,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<AuthResponse> {
+    const result = await this.auth.completeRegistration(body, userAgent);
+    this.cookies.set(res, result);
+    return { user: result.user };
   }
 
   @Public()
