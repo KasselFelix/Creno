@@ -113,7 +113,7 @@ export const envSchema = z
       ctx.addIssue({ code: 'custom', path: ['MAILPIT_URL'], message: 'interdite en production' });
     }
     // L'expéditeur de démonstration de Resend n'écrit qu'à l'adresse du compte : tout échouerait.
-    if (/@resend\.dev>?$/.test(env.EMAIL_FROM)) {
+    if (/@resend\.dev>?$/i.test(env.EMAIL_FROM)) {
       ctx.addIssue({
         code: 'custom',
         path: ['EMAIL_FROM'],

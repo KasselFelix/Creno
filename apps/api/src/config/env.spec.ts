@@ -110,9 +110,9 @@ describe('loadConfig', () => {
     });
 
     it('refuse l’expéditeur de démonstration de Resend en production', () => {
-      expect(() => loadConfig({ ...prod, EMAIL_FROM: 'Creno <onboarding@resend.dev>' })).toThrow(
-        /EMAIL_FROM/,
-      );
+      for (const from of ['Creno <onboarding@resend.dev>', 'test@Resend.DEV']) {
+        expect(() => loadConfig({ ...prod, EMAIL_FROM: from })).toThrow(/EMAIL_FROM/);
+      }
     });
 
     it('limite les SMS aux mobiles français par défaut', () => {

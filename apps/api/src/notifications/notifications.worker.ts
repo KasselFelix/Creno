@@ -115,7 +115,10 @@ export class NotificationsWorker implements OnModuleInit {
         this.logger.warn({ event: 'notification.skipped', ...base, reason: error.reason });
         return;
       }
-      if (!error.retryable) {
+      // Délai dépassé sur un SMS : Twilio a peut-être envoyé le message, et sans clé d'idempotence
+      // un nouvel essai le doublerait. Mieux vaut un rappel perdu que six rappels reçus.
+      const ambiguousSms = context.channel === 'sms' && error.reason === 'timeout';
+      if (!error.retryable || ambiguousSms) {
         // Le fournisseur refuse ce message (adresse ou numéro invalide) : action requise.
         await this.notifications.close(id, 'failed', error.reason);
         this.logger.error({ event: 'notification.failed', ...base, reason: error.reason, attempt });

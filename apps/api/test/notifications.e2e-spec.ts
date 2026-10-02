@@ -297,6 +297,23 @@ describe('notifications', () => {
       expect((await rows()).filter((row) => row.kind === 'booking_cancelled')).toHaveLength(1);
     });
 
+    it('délai dépassé pendant l’envoi d’un SMS → `failed` sans reprise (il est peut-être parti)', async () => {
+      const { agent } = await customerWithPhone();
+      await confirmedBooking(agent);
+      await runJobs(app, SEND_QUEUE);
+      await makeRemindersDue();
+      await app.get(NotificationsService).dispatchDue();
+      sms.send.mockRejectedValueOnce(new DeliveryError('timeout', true));
+
+      await runJobs(app, SEND_QUEUE);
+
+      expect(
+        (await rows()).find((row) => row.kind === 'booking_reminder' && row.channel === 'sms'),
+      ).toMatchObject({ status: 'failed', reason: 'timeout', attempts: 1 });
+      expect(await runJobs(app, SEND_QUEUE)).toBe(0);
+      expect(sms.send).toHaveBeenCalledTimes(1);
+    });
+
     it('SMS parti mais statut impossible à écrire → pas de rejeu (Twilio n’a pas de clé d’idempotence)', async () => {
       const { agent } = await customerWithPhone();
       await confirmedBooking(agent);

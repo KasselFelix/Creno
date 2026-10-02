@@ -126,6 +126,7 @@ export class JobsService implements OnApplicationShutdown {
   }
 
   private async run(name: string, handler: JobHandler, job: ReceivedJob): Promise<void> {
+    let failure: string | undefined;
     try {
       await handler({ id: job.id, data: job.data, retryCount: job.retryCount });
     } catch (error) {
@@ -138,10 +139,12 @@ export class JobsService implements OnApplicationShutdown {
         attempt: job.retryCount + 1,
         err: describeError(error),
       });
-      // pg-boss enregistre l'erreur dans la sortie du job : on ne lui donne que le message nettoyé
-      // (une erreur Drizzle porte les paramètres de la requête).
-      throw new Error(describeError(error).message ?? 'Échec du job');
+      failure = describeError(error).message ?? 'Échec du job';
     }
+    // pg-boss enregistre l'erreur du handler dans la sortie du job, `cause` comprise : on ne lui
+    // donne qu'une erreur neuve avec le message nettoyé (une erreur Drizzle porte les paramètres
+    // de la requête).
+    if (failure !== undefined) throw new Error(failure);
   }
 
   async onApplicationShutdown(): Promise<void> {
