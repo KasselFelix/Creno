@@ -346,9 +346,12 @@ export class BookingsService {
     return row;
   }
 
-  /** Page de retour après Stripe. Construite ici, jamais à partir d'une valeur du client. */
+  /**
+   * Adresse de retour après Stripe, construite ici, jamais à partir d'une valeur du client. Elle
+   * passe par la page publique `/stripe/return`, qui rejoint ensuite la réservation : voir cette page.
+   */
   private confirmationUrl(bookingId: string, outcome: 'success' | 'cancelled'): string {
-    return `${this.config.WEB_ORIGIN}/bookings/${bookingId}/confirmation?checkout=${outcome}`;
+    return `${this.config.WEB_ORIGIN}/stripe/return?booking=${bookingId}&checkout=${outcome}`;
   }
 
   private logGatewayFailure(operation: string, bookingId: string, error: unknown): void {

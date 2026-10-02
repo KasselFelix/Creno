@@ -116,8 +116,8 @@ describe('bookings : paiement, liste, annulation', () => {
         currency: 'EUR',
         destinationAccountId: provider.stripeAccountId,
         customerEmail: user.email,
-        successUrl: `${WEB_ORIGIN}/bookings/${booking.id}/confirmation?checkout=success`,
-        cancelUrl: `${WEB_ORIGIN}/bookings/${booking.id}/confirmation?checkout=cancelled`,
+        successUrl: `${WEB_ORIGIN}/stripe/return?booking=${booking.id}&checkout=success`,
+        cancelUrl: `${WEB_ORIGIN}/stripe/return?booking=${booking.id}&checkout=cancelled`,
       });
 
       // Le hold est prolongé jusqu'à la fin de la session Stripe (au moins 30 min).

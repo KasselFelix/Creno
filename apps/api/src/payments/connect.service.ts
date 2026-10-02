@@ -36,8 +36,8 @@ export class ConnectService {
       }
       const { url } = await this.gateway.createAccountLink({
         accountId: provider.stripeAccountId!,
-        refreshUrl: `${this.config.WEB_ORIGIN}/dashboard?stripe=refresh`,
-        returnUrl: `${this.config.WEB_ORIGIN}/dashboard?stripe=return`,
+        refreshUrl: `${this.config.WEB_ORIGIN}/stripe/return?connect=refresh`,
+        returnUrl: `${this.config.WEB_ORIGIN}/stripe/return?connect=return`,
       });
       this.logger.log({ event: 'provider.payments_onboarding_started', providerId: provider.id });
       return { url };

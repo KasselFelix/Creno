@@ -56,8 +56,8 @@ describe('payments : compte Stripe Connect du prestataire', () => {
     expect(gateway.createConnectAccount).toHaveBeenCalledWith({ providerId: provider.id });
     expect(gateway.createAccountLink).toHaveBeenCalledWith({
       accountId: stripeAccountId,
-      refreshUrl: `${WEB_ORIGIN}/dashboard?stripe=refresh`,
-      returnUrl: `${WEB_ORIGIN}/dashboard?stripe=return`,
+      refreshUrl: `${WEB_ORIGIN}/stripe/return?connect=refresh`,
+      returnUrl: `${WEB_ORIGIN}/stripe/return?connect=return`,
     });
 
     // Second appel (formulaire abandonné puis repris) : même compte, nouveau lien.
