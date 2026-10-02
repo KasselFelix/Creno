@@ -3,7 +3,7 @@ import { type ApiError, apiErrorSchema, type ErrorCode } from '@creno/shared';
 /** Messages utilisateur par code d'erreur de l'API (jamais le message technique brut). */
 const messages: Partial<Record<ErrorCode, string>> = {
   INVALID_CREDENTIALS: 'Email ou mot de passe incorrect.',
-  VERIFICATION_LINK_INVALID: 'Ce lien de confirmation est invalide ou a expiré.',
+  REGISTRATION_LINK_INVALID: "Ce lien d'inscription est invalide ou a expiré.",
   SESSION_EXPIRED: 'Votre session a expiré. Reconnectez-vous.',
   UNAUTHORIZED: 'Connectez-vous pour continuer.',
   FORBIDDEN: "Vous n'avez pas accès à cette page.",

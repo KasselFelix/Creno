@@ -40,12 +40,12 @@ export function LoginForm({ next }: { next: string | undefined }) {
             <CircleAlert aria-hidden />
             <AlertDescription>
               <p>{errorMessage(login.error)}</p>
-              {/* Un compte pas encore confirmé n'existe pas : même erreur qu'un mauvais mot de passe. */}
+              {/* Une inscription pas encore terminée n'a pas de compte : même erreur qu'un mauvais mot de passe. */}
               {login.error instanceof ApiClientError &&
                 login.error.code === 'INVALID_CREDENTIALS' && (
                   <p>
-                    Compte tout juste créé ? Confirmez d&apos;abord votre adresse avec le lien reçu
-                    par email.
+                    Inscription en cours ? Terminez-la d&apos;abord avec le lien reçu par email : le
+                    compte n&apos;existe qu&apos;ensuite.
                   </p>
                 )}
             </AlertDescription>

@@ -16,8 +16,9 @@ import {
 import { RegisterForm } from './register-form';
 
 /**
- * Inscription en deux temps : le formulaire, puis « vérifiez votre boîte mail ». Le second écran
+ * Première étape de l'inscription : l'adresse, puis « vérifiez votre boîte mail ». Le second écran
  * est le même que l'adresse ait déjà un compte ou non : c'est l'email reçu qui fait la différence.
+ * Le profil et le mot de passe se choisissent depuis le lien (`/register/complete`).
  */
 export function RegisterCard() {
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -45,8 +46,8 @@ export function RegisterCard() {
         </CardHeader>
         <CardContent className="text-muted-foreground flex flex-col gap-2 text-sm">
           <p>
-            Ouvrez-le et suivez le lien pour terminer l&apos;inscription. Il est valable{' '}
-            {EMAIL_VERIFICATION_TTL_HOURS} heures.
+            Ouvrez-le et suivez le lien pour choisir votre mot de passe et terminer
+            l&apos;inscription. Il est valable {EMAIL_VERIFICATION_TTL_HOURS} heures.
           </p>
           <p>Rien reçu au bout de quelques minutes ? Regardez dans les indésirables.</p>
         </CardContent>
@@ -65,7 +66,7 @@ export function RegisterCard() {
         <CardTitle>
           <h1>Créer un compte</h1>
         </CardTitle>
-        <CardDescription>Gratuit, en moins d&apos;une minute.</CardDescription>
+        <CardDescription>Gratuit. Commencez par votre adresse email.</CardDescription>
       </CardHeader>
       <CardContent>
         <RegisterForm onSent={setSentTo} />

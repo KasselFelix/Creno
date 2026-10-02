@@ -2,38 +2,14 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CircleAlert, LoaderCircle } from 'lucide-react';
-import { Controller, useForm } from 'react-hook-form';
-import { PASSWORD_MIN_LENGTH, type RegisterInput, registerSchema } from '@creno/shared';
+import { useForm } from 'react-hook-form';
+import { type RegisterInput, registerSchema } from '@creno/shared';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  FieldTitle,
-} from '@/components/ui/field';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ApiClientError, errorMessage } from '@/lib/api/errors';
 import { useRegister } from '../api';
-
-const roles = [
-  {
-    value: 'customer',
-    title: 'Je veux réserver',
-    description: 'Trouver un prestataire et réserver un créneau.',
-  },
-  {
-    value: 'provider',
-    title: 'Je propose mes services',
-    description: 'Publier mes disponibilités et être payé en ligne.',
-  },
-] as const;
 
 /** `onSent` : la demande est acceptée, un email part vers l'adresse saisie. */
 export function RegisterForm({ onSent }: { onSent: (email: string) => void }) {
@@ -41,7 +17,7 @@ export function RegisterForm({ onSent }: { onSent: (email: string) => void }) {
   const form = useForm<RegisterInput>({
     resolver: zodResolver(registerSchema),
     mode: 'onTouched',
-    defaultValues: { email: '', password: '', fullName: '', role: 'customer' },
+    defaultValues: { email: '' },
   });
   const { errors } = form.formState;
 
@@ -49,12 +25,8 @@ export function RegisterForm({ onSent }: { onSent: (email: string) => void }) {
     registerUser.mutate(values, {
       onSuccess: () => onSent(values.email),
       onError: (error) => {
-        // Les erreurs par champ de l'API s'affichent sous le champ concerné.
-        if (!(error instanceof ApiClientError)) return;
-        for (const field of ['email', 'password', 'fullName', 'role'] as const) {
-          const message = error.fieldErrors[field]?.[0];
-          if (message) form.setError(field, { message });
-        }
+        const message = error instanceof ApiClientError ? error.fieldErrors.email?.[0] : undefined;
+        if (message) form.setError('email', { message });
       },
     });
   }
@@ -72,42 +44,6 @@ export function RegisterForm({ onSent }: { onSent: (email: string) => void }) {
             <AlertDescription>{errorMessage(registerUser.error)}</AlertDescription>
           </Alert>
         )}
-        <Controller
-          control={form.control}
-          name="role"
-          render={({ field }) => (
-            <FieldSet>
-              <FieldLegend variant="label">Vous êtes ici pour…</FieldLegend>
-              <RadioGroup
-                value={field.value}
-                onValueChange={field.onChange}
-                className="grid gap-3 sm:grid-cols-2"
-              >
-                {roles.map((role) => (
-                  <FieldLabel key={role.value} htmlFor={`role-${role.value}`}>
-                    <Field orientation="horizontal">
-                      <FieldContent>
-                        <FieldTitle>{role.title}</FieldTitle>
-                        <FieldDescription>{role.description}</FieldDescription>
-                      </FieldContent>
-                      <RadioGroupItem id={`role-${role.value}`} value={role.value} />
-                    </Field>
-                  </FieldLabel>
-                ))}
-              </RadioGroup>
-            </FieldSet>
-          )}
-        />
-        <Field data-invalid={!!errors.fullName}>
-          <FieldLabel htmlFor="fullName">Nom complet</FieldLabel>
-          <Input
-            id="fullName"
-            autoComplete="name"
-            aria-invalid={!!errors.fullName}
-            {...form.register('fullName')}
-          />
-          <FieldError errors={[errors.fullName]} />
-        </Field>
         <Field data-invalid={!!errors.email}>
           <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
@@ -115,31 +51,19 @@ export function RegisterForm({ onSent }: { onSent: (email: string) => void }) {
             type="email"
             autoComplete="email"
             aria-invalid={!!errors.email}
+            aria-describedby={errors.email ? undefined : 'email-help'}
             {...form.register('email')}
           />
-          <FieldError errors={[errors.email]} />
-        </Field>
-        <Field data-invalid={!!errors.password}>
-          <FieldLabel htmlFor="password">Mot de passe</FieldLabel>
-          <Input
-            id="password"
-            type="password"
-            autoComplete="new-password"
-            aria-invalid={!!errors.password}
-            aria-describedby={errors.password ? undefined : 'password-rule'}
-            {...form.register('password')}
-          />
-          {/* La règle n'est pas répétée quand elle s'affiche déjà comme erreur. */}
-          {!errors.password && (
-            <FieldDescription id="password-rule">
-              {PASSWORD_MIN_LENGTH} caractères minimum.
+          {!errors.email && (
+            <FieldDescription id="email-help">
+              Vous choisirez votre mot de passe depuis le lien que nous vous envoyons.
             </FieldDescription>
           )}
-          <FieldError errors={[errors.password]} />
+          <FieldError errors={[errors.email]} />
         </Field>
         <Button type="submit" className="h-11" disabled={registerUser.isPending}>
           {registerUser.isPending && <LoaderCircle aria-hidden className="size-4 animate-spin" />}
-          Créer mon compte
+          Recevoir le lien d&apos;inscription
         </Button>
       </FieldGroup>
     </form>

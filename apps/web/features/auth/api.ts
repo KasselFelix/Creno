@@ -3,12 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   authResponseSchema,
+  type CompleteRegistrationInput,
   type LoginInput,
   publicUserSchema,
   type RegisterInput,
   sessionListSchema,
   type UpdateMeInput,
-  type VerifyEmailInput,
 } from '@creno/shared';
 import { apiFetch } from '@/lib/api/client';
 
@@ -29,10 +29,14 @@ export function useRegister() {
   });
 }
 
-export function useVerifyEmail() {
+export function useCompleteRegistration() {
   return useMutation({
-    mutationFn: (input: VerifyEmailInput) =>
-      apiFetch('/v1/auth/email/verify', { method: 'POST', body: input }),
+    mutationFn: (input: CompleteRegistrationInput) =>
+      apiFetch('/v1/auth/register/complete', {
+        method: 'POST',
+        body: input,
+        schema: authResponseSchema,
+      }),
   });
 }
 
