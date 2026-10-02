@@ -1,4 +1,16 @@
+import type { UserRole } from '@creno/shared';
+
 export const DEFAULT_AFTER_LOGIN = '/account';
+
+/** Page d'arrivée après connexion quand aucune destination n'est demandée : chacun dans son espace. */
+export function homeFor(role: UserRole): string {
+  return role === 'provider' ? '/dashboard' : DEFAULT_AFTER_LOGIN;
+}
+
+/** Destination après connexion : `?next=` s'il désigne une page interne, sinon l'espace du rôle. */
+export function afterLoginPath(next: string | null | undefined, role: UserRole): string {
+  return next ? safeNextPath(next) : homeFor(role);
+}
 
 const PLACEHOLDER_ORIGIN = 'http://creno.invalid';
 // Caractères de contrôle (dont tabulation et saut de ligne) et antislash.

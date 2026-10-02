@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const SLOT_MINUTES_MIN = 5;
 export const SLOT_MINUTES_MAX = 1440;
 export const PRICE_CENTS_MAX = 10_000_000;
+/** Stripe refuse un paiement par carte de moins de 0,50 € : un prix est gratuit (0) ou d'au moins 50 centimes. */
+export const MIN_PAID_PRICE_CENTS = 50;
 export const MAX_RESOURCES_PER_PROVIDER = 50;
 
 /** Vrai pour un fuseau IANA connu du moteur JavaScript (ex. `Europe/Paris`), ou `UTC`. */
@@ -39,7 +41,10 @@ export const createResourceSchema = z.object({
     .number({ error: 'Prix requis' })
     .int({ error: 'Prix en centimes entiers' })
     .min(0, { error: 'Prix positif ou nul' })
-    .max(PRICE_CENTS_MAX, { error: 'Prix trop élevé' }),
+    .max(PRICE_CENTS_MAX, { error: 'Prix trop élevé' })
+    .refine((cents) => cents === 0 || cents >= MIN_PAID_PRICE_CENTS, {
+      error: 'Gratuit, ou 0,50 € au minimum',
+    }),
 });
 export type CreateResourceInput = z.infer<typeof createResourceSchema>;
 

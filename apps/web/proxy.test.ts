@@ -16,6 +16,15 @@ describe('proxy', () => {
     );
   });
 
+  it('protège aussi les réservations, et garde la page de retour de Stripe comme destination', async () => {
+    const path = '/bookings/3f0c2f0e-6a52-4d53-9a5e-1f7f6f0c9a11/confirmation?checkout=success';
+    const res = await proxy(request(path));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(
+      `http://localhost:3000/login?next=${encodeURIComponent(path)}`,
+    );
+  });
+
   it('laisse passer une page protégée quand un access token est présent', async () => {
     const res = await proxy(request('/account', 'creno_at=un-jeton'));
     expect(res.headers.get('location')).toBeNull();

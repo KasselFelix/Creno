@@ -2,7 +2,7 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation) et **recherche géographique** (prestataires dans un rayon, liste et carte).
+> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) et **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée).
 
 ## Démarrer
 
@@ -19,7 +19,7 @@ docker compose up
 | API (NestJS)         | http://localhost:4000 — `/health`, `/health/ready`, Swagger sur `/docs` |
 | PostgreSQL + PostGIS | `localhost:5432` (bases `creno` et `creno_test`)                        |
 
-Pour chercher un prestataire : http://localhost:3000/search (liste et carte ; la carte demande un token Mapbox, voir ci-dessous). Pour voir les créneaux d'un prestataire de démo : http://localhost:3000/providers/studio-lumiere. Connecté avec le compte prestataire, l'« Espace prestataire » (`/dashboard`) permet de gérer ressources, horaires et fermetures.
+Pour chercher un prestataire : http://localhost:3000/search (liste et carte ; la carte demande un token Mapbox, voir ci-dessous). Pour voir les créneaux d'un prestataire de démo : http://localhost:3000/providers/studio-lumiere. Connecté en client, « Mes réservations » (`/bookings`) liste les réservations. Connecté avec le compte prestataire, l'« Espace prestataire » (`/dashboard`) permet de gérer ressources, horaires et fermetures.
 
 Au démarrage, l'API applique les migrations et, si la base est vide, charge un jeu de données de démo (24 prestataires autour de Paris, Lyon et Bordeaux). `pnpm db:seed` remet ce jeu de données à zéro à la demande.
 
@@ -32,6 +32,18 @@ Au démarrage, l'API applique les migrations et, si la base est vide, charge un 
 | Admin       | `admin@creno.dev`            |
 
 **Carte** : créer un token public (`pk.…`) sur https://account.mapbox.com, le restreindre par URL, puis le mettre dans `.env` (`NEXT_PUBLIC_MAPBOX_TOKEN`). Sans token, la recherche fonctionne en liste seule.
+
+**Paiements (facultatif)** : sans clé Stripe, tout démarre et les routes de paiement répondent 503. Pour payer une réservation en local, il faut un compte Stripe en **mode test** avec Connect activé :
+
+```bash
+# 1. Clé secrète de test (https://dashboard.stripe.com/test/apikeys) dans .env : STRIPE_SECRET_KEY=sk_test_…
+# 2. Démarrer avec le relais de webhooks (Stripe CLI dans un conteneur)
+docker compose --profile stripe up -d
+docker compose logs stripe-cli | grep whsec_     # → STRIPE_WEBHOOK_SECRET dans .env
+docker compose up -d api                         # relit .env
+```
+
+Ensuite : connecté en prestataire, « Espace prestataire » → « Activer les paiements » (formulaire Stripe de test) ; connecté en client, réserver un créneau et payer avec la carte `4242 4242 4242 4242`. Pour ne pas refaire l'onboarding après chaque `pnpm db:seed`, mettre l'identifiant du compte créé (`acct_…`) dans `SEED_STRIPE_ACCOUNT_ID`.
 
 > Après un changement de dépendances (`package.json`), reconstruire avec `docker compose up -d --build -V` : sans `-V`, Compose réutilise les anciens `node_modules` des conteneurs.
 
@@ -80,6 +92,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Cookies `HttpOnly` + sessions en base avec refresh token rotatif** : tokens hors de portée d'un XSS, révocation par appareil, détection de token volé. → [ADR 0005](docs/adr/0005-auth-cookies-rotating-refresh.md)
 - **Recherche par cercle (centre + rayon), plafonnée à 50 résultats** : `ST_DWithin` sur l'index GiST, filtres dans l'URL, pas de pagination ni de clustering. → [ADR 0007](docs/adr/0007-radius-search.md)
 - **Géocodage par l'API Adresse de l'État, derrière une interface** : sans clé, coordonnées stockables, appelée par l'API (timeout, repli, faux en test). → [ADR 0008](docs/adr/0008-geocoding-provider.md)
+- **Stripe Connect en destination charge, webhook comme seule source de vérité** : le prestataire reçoit le prix moins la commission, le hold est aligné sur la session Checkout, un événement rejoué ne fait rien. → [ADR 0009](docs/adr/0009-stripe-connect-payments.md)
 - _À venir : choix du modèle IA, retry / circuit breaker / fallback de la recherche._
 
 ## Recherche géographique
@@ -107,8 +120,22 @@ LIMIT 50;
 - Un prestataire crée son profil, ses ressources, leurs **horaires hebdomadaires en heure locale** (plusieurs plages par jour) et ses fermetures exceptionnelles.
 - `GET /v1/resources/:id/slots?from=&to=` renvoie les créneaux par jour local de la ressource ; un créneau occupé est marqué `available: false`.
 - `POST /v1/bookings` pose un **hold de 15 minutes** (booking `pending`) : 409 si le créneau est pris, 422 s'il n'est pas proposé. Un hold expiré ne bloque plus rien, sans attendre de tâche de nettoyage.
-- Garde-fous : 5 holds actifs par client (verrou par client, la limite tient face à des demandes simultanées), 200 fermetures à venir par ressource, limites de débit par IP sur les lectures publiques et sur les réservations.
-- Le paiement et la confirmation arrivent à l'étape suivante ; la fiche publique affiche la grille sans bouton de réservation.
+- Garde-fous : 5 holds actifs par client et 2 par ressource, 5 réservations gratuites à venir par client (verrou par client, la limite tient face à des demandes simultanées), 200 fermetures à venir par ressource, limites de débit par IP sur les lectures publiques et sur les réservations.
+
+## Paiement
+
+```sql
+INSERT INTO stripe_events (id, type) VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+RETURNING id;   -- rien de renvoyé : événement déjà traité
+```
+
+- **Prestataire** : la carte « Paiements » de son espace ouvre un compte Stripe Connect Express (formulaire hébergé par Stripe). Tant que le compte n'est pas actif, ses ressources payantes ne sont pas réservables.
+- **Client** : « Réserver et payer » bloque le créneau, puis redirige vers Stripe Checkout. Le prix vient de la base, la commission (`STRIPE_PLATFORM_FEE_BPS`, 10 % par défaut) est calculée par le serveur. Le hold de 15 min est prolongé une fois à 31 min au lancement du paiement, et la session Stripe expire au même instant.
+- **Confirmation** : seul le webhook `POST /v1/payments/webhook` confirme une réservation. Signature vérifiée sur le corps brut (sinon 400), événement enregistré et traité dans la même transaction : rejoué, il ne fait rien ; en échec, il n'est pas enregistré et Stripe le renvoie. La page de retour interroge l'API jusqu'à « Confirmée ».
+- **Paiement arrivé trop tard** : si le créneau a été repris, la contrainte d'exclusion le signale et le client est remboursé automatiquement (log `payment.late_refund`).
+- **Annulation** : dans « Mes réservations », remboursement total jusqu'à 24 h avant le début ; le prestataire peut toujours annuler (API). Le remboursement est demandé avant de libérer le créneau, et reprend le versement au prestataire et la commission.
+- Tests : signature invalide, événement rejoué ou reçu deux fois en même temps, paiement tardif, remboursement en échec ([apps/api/test/payments-webhook.e2e-spec.ts](apps/api/test/payments-webhook.e2e-spec.ts)) ; checkout, annulation et accès à la réservation d'un autre ([apps/api/test/bookings-payments.e2e-spec.ts](apps/api/test/bookings-payments.e2e-spec.ts)).
 
 ## Authentification et autorisations
 
@@ -125,6 +152,7 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 
 ## Observabilité
 
+- Paiements : `payment.late_refund` et `payment.gateway_failed` en `warn`, `payment.amount_mismatch` en `error` ; ni email, ni identifiant de compte, ni corps d'événement Stripe dans les logs.
 - Logs JSON (pino) avec un `requestId` par requête (repris de l'en-tête `x-request-id` s'il est fourni) et un champ `event` pour les événements métier ; emails, téléphones, cookies et en-têtes d'authentification sont masqués, ainsi que la query string des routes de recherche et de géocodage (position du visiteur, adresse saisie).
 - `GET /health` (liveness, ne dépend pas de la base) et `GET /health/ready` (readiness, 503 si la base est injoignable).
 - _Sentry : à venir._
@@ -149,6 +177,11 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 | `BOOKING_RATE_LIMIT_PER_MINUTE` | api              | `20`                                               | demandes de réservation par minute et par IP                                                                 |
 | `TRUST_PROXY`                   | api              | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
 | `GEOCODER_URL`                  | api              | `https://data.geopf.fr/geocodage`                  | géocodeur d'adresses (API Adresse de l'État, sans clé)                                                       |
+| `STRIPE_SECRET_KEY`             | api, stripe-cli  | vide                                               | clé secrète Stripe ; vide : paiements indisponibles (503). Clé de test obligatoire hors production           |
+| `STRIPE_WEBHOOK_SECRET`         | api              | vide                                               | secret de signature du webhook (`whsec_…`), affiché par le service `stripe-cli`                              |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | api              | vide                                               | production : secret de l'endpoint « Connect » (`account.updated`)                                            |
+| `STRIPE_PLATFORM_FEE_BPS`       | api              | `1000`                                             | commission Creno en points de base (1000 = 10 %)                                                             |
+| `SEED_STRIPE_ACCOUNT_ID`        | seed             | vide                                               | compte Express de test rattaché à « Studio Lumière » par le seed                                             |
 | `NEXT_PUBLIC_MAPBOX_TOKEN`      | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé              |
 
 La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Les variables lues par le navigateur le sont dans `apps/web/lib/env.ts`. Aucun secret n'est versionné.

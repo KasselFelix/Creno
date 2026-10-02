@@ -1,6 +1,6 @@
 'use client';
 
-import { LayoutDashboard, LogOut, UserRound } from 'lucide-react';
+import { CalendarCheck, LayoutDashboard, LogOut, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -66,6 +66,10 @@ export function UserMenu({ user }: { user: PublicUser }) {
         <DropdownMenuItem className="min-h-11 sm:min-h-8" render={<Link href="/account" />}>
           <UserRound aria-hidden className="size-4" />
           Mon compte
+        </DropdownMenuItem>
+        <DropdownMenuItem className="min-h-11 sm:min-h-8" render={<Link href="/bookings" />}>
+          <CalendarCheck aria-hidden className="size-4" />
+          Mes réservations
         </DropdownMenuItem>
         {user.role === 'provider' && (
           <DropdownMenuItem className="min-h-11 sm:min-h-8" render={<Link href="/dashboard" />}>

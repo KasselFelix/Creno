@@ -26,6 +26,7 @@ function insertBooking(
     customerId,
     during: toRange(values.start, values.end),
     status: values.status,
+    cancelledAt: values.status === 'cancelled' ? new Date() : null,
     expiresAt: values.expiresAt ?? null,
     priceCents: 4500,
   });
@@ -41,7 +42,7 @@ async function expectSqlState(promise: Promise<unknown>, code: string) {
 
 beforeEach(async () => {
   await db.execute(
-    sql`TRUNCATE sessions, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
   );
   const [owner, customer] = await db
     .insert(users)

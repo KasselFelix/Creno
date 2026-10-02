@@ -18,6 +18,11 @@ const messages: Partial<Record<ErrorCode, string>> = {
   LIMIT_REACHED: "Limite atteinte. Supprimez des éléments avant d'en ajouter.",
   HOLD_LIMIT_REACHED: 'Vous avez trop de réservations en attente de paiement.',
   GEOCODING_UNAVAILABLE: "La recherche d'adresse est momentanément indisponible.",
+  BOOKING_NOT_PAYABLE: "Cette réservation n'est plus en attente de paiement.",
+  PROVIDER_PAYMENTS_NOT_READY: "Ce prestataire n'accepte pas encore le paiement en ligne.",
+  PAYMENT_PROVIDER_UNAVAILABLE:
+    'Le paiement est momentanément indisponible. Réessayez dans un instant.',
+  CANCELLATION_NOT_ALLOWED: 'Cette réservation ne peut plus être annulée en ligne.',
 };
 
 const FALLBACK = 'Une erreur est survenue. Réessayez.';

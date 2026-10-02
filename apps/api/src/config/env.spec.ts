@@ -8,6 +8,16 @@ const base = {
   JWT_ACCESS_SECRET: EXAMPLE_JWT_SECRET,
 };
 
+// Fausses clés construites à l'exécution : aucune chaîne en forme de secret dans le dépôt.
+const stripeKey = (mode: 'test' | 'live') => ['sk', mode, 'x'.repeat(24)].join('_');
+const webhookSecret = ['whsec', 'x'.repeat(24)].join('_');
+const prodBase = { ...base, NODE_ENV: 'production', JWT_ACCESS_SECRET: 'x'.repeat(48) };
+const prod = {
+  ...prodBase,
+  STRIPE_SECRET_KEY: stripeKey('live'),
+  STRIPE_WEBHOOK_SECRET: webhookSecret,
+};
+
 describe('loadConfig', () => {
   it('accepte la config de dev et normalise WEB_ORIGIN', () => {
     const config = loadConfig(base);
@@ -29,9 +39,38 @@ describe('loadConfig', () => {
   });
 
   it('refuse TRUST_PROXY=true en production (X-Forwarded-For falsifiable)', () => {
-    const prod = { ...base, NODE_ENV: 'production', JWT_ACCESS_SECRET: 'x'.repeat(48) };
     expect(() => loadConfig({ ...prod, TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/);
     expect(loadConfig({ ...prod, TRUST_PROXY: '2' }).TRUST_PROXY).toBe(2);
+  });
+
+  describe('Stripe', () => {
+    it('est facultatif hors production, et une variable vide vaut absente', () => {
+      const config = loadConfig({ ...base, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '' });
+      expect(config.STRIPE_SECRET_KEY).toBeUndefined();
+      expect(config.STRIPE_WEBHOOK_SECRET).toBeUndefined();
+      expect(config.STRIPE_PLATFORM_FEE_BPS).toBe(1000);
+    });
+
+    it('refuse une clé live hors production, sans afficher sa valeur', () => {
+      const live = stripeKey('live');
+      expect(() => loadConfig({ ...base, STRIPE_SECRET_KEY: live })).toThrow(/STRIPE_SECRET_KEY/);
+      expect(() => loadConfig({ ...base, STRIPE_SECRET_KEY: live })).not.toThrow(new RegExp(live));
+      expect(loadConfig({ ...base, STRIPE_SECRET_KEY: stripeKey('test') }).STRIPE_SECRET_KEY).toBe(
+        stripeKey('test'),
+      );
+    });
+
+    it('exige la clé et le secret de webhook en production', () => {
+      expect(() => loadConfig(prodBase)).toThrow(/STRIPE_SECRET_KEY.*STRIPE_WEBHOOK_SECRET/);
+      expect(loadConfig(prod).STRIPE_CONNECT_WEBHOOK_SECRET).toBeUndefined();
+    });
+
+    it('borne la commission entre 0 et 50 %', () => {
+      expect(loadConfig({ ...base, STRIPE_PLATFORM_FEE_BPS: '0' }).STRIPE_PLATFORM_FEE_BPS).toBe(0);
+      expect(() => loadConfig({ ...base, STRIPE_PLATFORM_FEE_BPS: '5001' })).toThrow(
+        /STRIPE_PLATFORM_FEE_BPS/,
+      );
+    });
   });
 
   it('interprète TRUST_PROXY', () => {

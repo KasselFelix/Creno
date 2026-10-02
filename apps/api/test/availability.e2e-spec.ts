@@ -61,6 +61,7 @@ describe('availability', () => {
         customerId,
         during: toRange(start, new Date(start.getTime() + 60 * 60_000)),
         status,
+        cancelledAt: status === 'cancelled' ? new Date() : null,
         expiresAt:
           expiresInMinutes === undefined
             ? null

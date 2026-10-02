@@ -7,7 +7,7 @@ import { SiteHeader } from '@/components/site-header';
 import { Badge } from '@/components/ui/badge';
 import { SlotPicker } from '@/features/availability/components/slot-picker';
 import { categoryLabels } from '@/features/providers/labels';
-import { serverFetch } from '@/lib/api/server';
+import { getCurrentUser, serverFetch } from '@/lib/api/server';
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -22,7 +22,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function ProviderPage({ params }: Props) {
-  const provider = await getProvider((await params).slug);
+  const [provider, user] = await Promise.all([getProvider((await params).slug), getCurrentUser()]);
   if (!provider) notFound();
 
   return (
@@ -45,7 +45,12 @@ export default async function ProviderPage({ params }: Props) {
             Ce prestataire ne propose pas encore de réservation en ligne.
           </p>
         ) : (
-          <SlotPicker resources={provider.resources} />
+          <SlotPicker
+            resources={provider.resources}
+            isAuthenticated={user !== null}
+            onlinePayment={provider.onlinePayment}
+            providerPath={`/providers/${provider.slug}`}
+          />
         )}
       </main>
     </>

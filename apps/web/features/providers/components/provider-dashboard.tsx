@@ -16,12 +16,13 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PaymentsCard, type StripeReturn } from '@/features/payments/components/payments-card';
 import { formatDuration, formatPrice } from '@/lib/format';
 import { useMyProvider, useMyResources } from '../api';
 import { categoryLabels } from '../labels';
 import { ProviderForm } from './provider-form';
 
-export function ProviderDashboard() {
+export function ProviderDashboard({ stripeReturn }: { stripeReturn: StripeReturn }) {
   const provider = useMyProvider();
 
   if (provider.isPending) {
@@ -63,6 +64,7 @@ export function ProviderDashboard() {
   return (
     <>
       <ProfileCard provider={provider.data} />
+      <PaymentsCard stripeReturn={stripeReturn} />
       <ResourcesCard />
     </>
   );

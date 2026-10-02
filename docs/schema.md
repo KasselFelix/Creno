@@ -11,6 +11,7 @@ erDiagram
   resources ||--o{ availability_rules : "horaires hebdo"
   resources ||--o{ availability_exceptions : fermetures
   resources ||--o{ bookings : "est réservée"
+  bookings ||--o| payments : "est payée par"
 
   users {
     uuid id PK
@@ -41,7 +42,9 @@ erDiagram
     text address
     text city
     geography location "Point 4326, index GiST"
-    text stripe_account_id "nullable"
+    text stripe_account_id UK "compte Connect Express, nullable"
+    boolean stripe_charges_enabled "peut recevoir des paiements"
+    boolean stripe_details_submitted "formulaire Stripe rempli"
   }
   resources {
     uuid id PK
@@ -76,21 +79,42 @@ erDiagram
     timestamptz expires_at "fin du hold, si pending"
     int price_cents
     char currency
+    timestamptz checkout_started_at "paiement lancé, hold prolongé"
+    text stripe_checkout_session_id UK "nullable"
+    timestamptz cancelled_at "obligatoire si cancelled"
+  }
+  payments {
+    uuid id PK
+    uuid booking_id FK,UK
+    text stripe_payment_intent_id UK
+    int amount_cents ">= 0"
+    int fee_cents "commission, 0..amount"
+    char currency
+    payment_status status "succeeded | refunded"
+    int refunded_cents "0..amount"
+    timestamptz refunded_at "nullable"
+  }
+  stripe_events {
+    text id PK "identifiant Stripe evt_…"
+    text type
+    timestamptz received_at
   }
 ```
 
-Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règles et exceptions de disponibilité. Montants en centimes (`integer`), dates en UTC (`timestamptz`), créneaux en `tstzrange` semi-ouverts `[début, fin)`.
+Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règles et exceptions de disponibilité et `stripe_events`. Montants en centimes (`integer`), dates en UTC (`timestamptz`), créneaux en `tstzrange` semi-ouverts `[début, fin)`.
 
 ## Migrations
 
-| Fichier                                             | Contenu                                                                                               |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                     |
-| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                          |
-| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                        |
-| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises |
-| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                               |
-| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                       |
+| Fichier                                             | Contenu                                                                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                        |
+| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                             |
+| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                           |
+| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises    |
+| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                  |
+| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                          |
+| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`   |
+| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation » |
 
 ## La contrainte `bookings_no_overlap`
 
@@ -141,7 +165,56 @@ SELECT lower(during), upper(during) FROM bookings
    AND (status = 'confirmed' OR (status = 'pending' AND expires_at > now()));
 ```
 
-**Hold de paiement** (`POST /v1/bookings`) : dans une même transaction, rejouée par `retryOnDeadlock`, l'API passe à `expired` les holds dépassés qui chevauchent le créneau, puis insère le booking `pending` avec `expires_at = now() + 15 min` (horloge de la base). Un verrou consultatif par client (`pg_advisory_xact_lock`) sérialise ses demandes : la limite de 5 holds actifs tient même face à des requêtes parallèles. C'est `bookings_no_overlap` qui départage deux demandes simultanées : test `apps/api/test/bookings.e2e-spec.ts` (un 201, un 409).
+**Hold de paiement** (`POST /v1/bookings`) : dans une même transaction, rejouée par `retryOnDeadlock`, l'API passe à `expired` les holds dépassés qui chevauchent le créneau, puis insère le booking `pending` avec `expires_at = now() + 15 min` (horloge de la base). Un verrou consultatif par client (`pg_advisory_xact_lock`) sérialise ses demandes : la limite de 5 holds actifs (2 sur une même ressource) tient même face à des requêtes parallèles. C'est `bookings_no_overlap` qui départage deux demandes simultanées : test `apps/api/test/bookings.e2e-spec.ts` (un 201, un 409).
+
+## Paiement et webhook Stripe
+
+Décisions : [ADR 0009](adr/0009-stripe-connect-payments.md). Trois règles tiennent dans le schéma.
+
+**1. Un événement Stripe n'est traité qu'une fois.** Stripe renvoie un événement tant qu'il n'a pas reçu de 200, et peut l'envoyer deux fois. La clé primaire de `stripe_events` est l'identifiant de l'événement :
+
+```sql
+INSERT INTO stripe_events (id, type) VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+RETURNING id;   -- aucune ligne renvoyée = déjà traité → 200, rien d'autre
+```
+
+L'insertion et le traitement sont dans **la même transaction** : si le traitement échoue, l'insertion est annulée, l'API répond 500 et Stripe renvoie l'événement. Deux envois simultanés du même événement s'attendent sur la clé primaire ; le second voit le conflit une fois le premier validé.
+
+**2. Un seul paiement par réservation.** `payments.booking_id` et `payments.stripe_payment_intent_id` sont `UNIQUE` : deux événements différents pour la même session ne créent pas deux lignes. Les lignes de `payments` ne sont écrites que par le webhook ; `status` ne passe à `refunded` qu'à la réception de `charge.refunded`.
+
+**3. Un paiement tardif ne vole pas un créneau.** À la réception de `checkout.session.completed`, la réservation est verrouillée (`SELECT … FOR UPDATE`) puis :
+
+| Statut de la réservation                                                      | Effet                                                                                                                                                            |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pending` (même si `expires_at` est passé : la ligne tient encore le créneau) | `confirmed`, `expires_at = NULL`                                                                                                                                 |
+| `expired`                                                                     | retour à `confirmed` dans un **savepoint** ; si `bookings_no_overlap` lève `23P01` (créneau repris), la réservation reste `expired` et le paiement est remboursé |
+| `cancelled`                                                                   | remboursement                                                                                                                                                    |
+| `confirmed`                                                                   | rien                                                                                                                                                             |
+
+Quand un remboursement est nécessaire, la transaction est annulée sans rien enregistrer, Stripe est appelé **hors transaction** (aucun verrou ni connexion tenus pendant l'appel réseau), puis une seconde transaction enregistre l'événement et le paiement. Si l'appel échoue, rien n'est enregistré et Stripe renvoie l'événement.
+
+Un savepoint est un point de reprise à l'intérieur d'une transaction : quand la contrainte refuse la mise à jour, seule cette mise à jour est annulée, et la transaction continue (sans lui, Postgres refuserait toute requête suivante).
+
+**Hold et session Checkout.** Au premier `POST /v1/bookings/:id/checkout`, une seule requête prolonge le hold, et seulement s'il court encore et n'a jamais été prolongé :
+
+```sql
+UPDATE bookings
+   SET expires_at = now() + make_interval(mins => 31), checkout_started_at = now()
+ WHERE id = $1 AND status = 'pending' AND expires_at > now() AND checkout_started_at IS NULL;
+```
+
+La session Stripe reçoit cette même échéance. `checkout_started_at` sert aussi au suivi des paniers abandonnés :
+
+```sql
+-- Holds expirés : jamais arrivés au paiement, ou abandonnés sur la page Stripe
+SELECT count(*) FILTER (WHERE checkout_started_at IS NULL)     AS sans_paiement_lance,
+       count(*) FILTER (WHERE checkout_started_at IS NOT NULL) AS abandonnes_chez_stripe
+  FROM bookings b
+ WHERE status = 'expired' AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id);
+```
+
+**Compte du prestataire.** `providers.stripe_charges_enabled` recopie l'état du compte Stripe (capacité de transfert active : le prestataire peut recevoir l'argent des réservations) (webhook `account.updated`, ou relecture au retour du formulaire). `CHECK (NOT stripe_charges_enabled OR stripe_account_id IS NOT NULL)` : pas de paiements actifs sans compte vers lequel verser. `stripe_account_id` ne sort jamais de l'API.
 
 ## Recherche par rayon
 

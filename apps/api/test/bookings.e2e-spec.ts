@@ -8,6 +8,7 @@ import {
   bookingSchema,
   HOLD_MINUTES,
   MAX_ACTIVE_HOLDS,
+  MAX_ACTIVE_HOLDS_PER_RESOURCE,
   type Resource,
   slotsResponseSchema,
 } from '@creno/shared';
@@ -20,6 +21,7 @@ import {
   localDateIn,
   registerAs,
   resetDatabase,
+  RESOURCE_INPUT,
 } from './app.js';
 
 const DAY = 7;
@@ -178,17 +180,49 @@ describe('bookings (hold de paiement)', () => {
     expect(apiErrorSchema.parse(res.body).code).toBe('SLOT_NOT_OFFERED');
   });
 
-  it(`409 HOLD_LIMIT_REACHED au-delà de ${MAX_ACTIVE_HOLDS} holds actifs`, async () => {
-    await providerAgent
-      .put(`/v1/resources/${resource.id}/availability-rules`)
-      .send({ rules: everyDay('09:00', '18:00') })
-      .expect(200);
-    const { agent } = await registerAs(app, 'customer');
-    for (let hour = 9; hour < 9 + MAX_ACTIVE_HOLDS; hour++) {
-      await hold(agent, `${String(hour).padStart(2, '0')}:00`).expect(201);
+  it(`409 HOLD_LIMIT_REACHED au-delà de ${MAX_ACTIVE_HOLDS} holds actifs, toutes ressources confondues`, async () => {
+    // Trois ressources du même prestataire : la limite par ressource (2) ne gêne pas.
+    const resourceIds = [resource.id];
+    for (const name of ['Studio B', 'Studio C']) {
+      const created = await providerAgent
+        .post('/v1/resources')
+        .send({ ...RESOURCE_INPUT, name })
+        .expect(201);
+      const id = (created.body as Resource).id;
+      await providerAgent
+        .put(`/v1/resources/${id}/availability-rules`)
+        .send({ rules: everyDay('09:00', '12:00') })
+        .expect(200);
+      resourceIds.push(id);
     }
-    const res = await hold(agent, '16:00').expect(409);
+    const { agent } = await registerAs(app, 'customer');
+    const holdOn = (index: number, time: string) =>
+      agent
+        .post('/v1/bookings')
+        .send({ resourceId: resourceIds[index], start: instantIn(DAY, time).toISOString() });
+
+    const slots: [number, string][] = [
+      [0, '09:00'],
+      [0, '10:00'],
+      [1, '09:00'],
+      [1, '10:00'],
+      [2, '09:00'],
+    ];
+    expect(slots).toHaveLength(MAX_ACTIVE_HOLDS);
+    for (const [index, time] of slots) await holdOn(index, time).expect(201);
+    const res = await holdOn(2, '10:00').expect(409);
     expect(apiErrorSchema.parse(res.body).code).toBe('HOLD_LIMIT_REACHED');
+  });
+
+  it(`409 HOLD_LIMIT_REACHED au-delà de ${MAX_ACTIVE_HOLDS_PER_RESOURCE} holds actifs sur la même ressource`, async () => {
+    const { agent } = await registerAs(app, 'customer');
+    await hold(agent, '09:00').expect(201);
+    await hold(agent, '10:00').expect(201);
+    const res = await hold(agent, '11:00').expect(409);
+    expect(apiErrorSchema.parse(res.body).code).toBe('HOLD_LIMIT_REACHED');
+    // Un autre client n'est pas concerné par cette limite.
+    const other = await registerAs(app, 'customer');
+    await hold(other.agent, '11:00').expect(201);
   });
 
   it('la limite de holds tient face à des demandes simultanées du même compte', async () => {
@@ -199,13 +233,35 @@ describe('bookings (hold de paiement)', () => {
     const { agent } = await registerAs(app, 'customer');
     const hours = Array.from({ length: 12 }, (_, i) => `${String(6 + i).padStart(2, '0')}:00`);
     const results = await Promise.all(hours.map((time) => hold(agent, time)));
-    expect(results.filter((r) => r.status === 201)).toHaveLength(MAX_ACTIVE_HOLDS);
+    expect(results.filter((r) => r.status === 201)).toHaveLength(MAX_ACTIVE_HOLDS_PER_RESOURCE);
     const refused = results.filter((r) => r.status !== 201);
-    expect(refused).toHaveLength(hours.length - MAX_ACTIVE_HOLDS);
+    expect(refused).toHaveLength(hours.length - MAX_ACTIVE_HOLDS_PER_RESOURCE);
     expect(refused.every((r) => apiErrorSchema.parse(r.body).code === 'HOLD_LIMIT_REACHED')).toBe(
       true,
     );
-    expect(await activeBookings()).toMatchObject({ rowCount: MAX_ACTIVE_HOLDS });
+    expect(await activeBookings()).toMatchObject({ rowCount: MAX_ACTIVE_HOLDS_PER_RESOURCE });
+  });
+
+  it('409 PROVIDER_PAYMENTS_NOT_READY chez un prestataire sans paiements actifs, sauf ressource gratuite', async () => {
+    const pending = await createProviderWithResource(app, {}, { payments: false });
+    const free = await pending.agent
+      .post('/v1/resources')
+      .send({ ...RESOURCE_INPUT, name: 'Visite gratuite', priceCents: 0 })
+      .expect(201);
+    const freeId = (free.body as Resource).id;
+    await pending.agent
+      .put(`/v1/resources/${freeId}/availability-rules`)
+      .send({ rules: everyDay('09:00', '12:00') })
+      .expect(200);
+    const { agent } = await registerAs(app, 'customer');
+    const start = instantIn(DAY, '10:00').toISOString();
+
+    const res = await agent
+      .post('/v1/bookings')
+      .send({ resourceId: pending.resource.id, start })
+      .expect(409);
+    expect(apiErrorSchema.parse(res.body).code).toBe('PROVIDER_PAYMENTS_NOT_READY');
+    await agent.post('/v1/bookings').send({ resourceId: freeId, start }).expect(201);
   });
 
   it('422 SLOT_NOT_OFFERED pour une date extrême, sans erreur serveur', async () => {

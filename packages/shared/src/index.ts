@@ -4,6 +4,7 @@ export * from './bookings.js';
 export * from './errors.js';
 export * from './geocoding.js';
 export * from './health.js';
+export * from './payments.js';
 export * from './providers.js';
 export * from './resources.js';
 export * from './search.js';

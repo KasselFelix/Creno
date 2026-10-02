@@ -7,6 +7,7 @@ import {
   availabilityExceptions,
   availabilityRules,
   bookings,
+  payments,
   providers,
   resources,
   toPoint,
@@ -15,6 +16,9 @@ import {
 
 const HOLD_MS = 15 * 60 * 1000;
 const TIMEZONE = 'Europe/Paris';
+
+/** Commission de démo (10 %), comme la valeur par défaut de `STRIPE_PLATFORM_FEE_BPS`. */
+const DEMO_FEE_BPS = 1000;
 
 /** Mot de passe de tous les comptes de démo (développement uniquement, documenté dans le README). */
 export const DEMO_PASSWORD = 'creno-demo-2026';
@@ -110,9 +114,15 @@ async function main(): Promise<void> {
       }
     }
     const passwordHash = await hash(DEMO_PASSWORD);
+    // Compte Stripe Express de test, créé une fois par l'onboarding : le rattacher ici évite de
+    // refaire l'onboarding après chaque seed. Sans lui, aucun prestataire de démo n'encaisse.
+    const demoStripeAccountId = process.env.SEED_STRIPE_ACCOUNT_ID?.trim() || null;
+    if (demoStripeAccountId && !/^acct_[A-Za-z0-9]+$/.test(demoStripeAccountId)) {
+      throw new Error('SEED_STRIPE_ACCOUNT_ID doit être un identifiant de compte Stripe (acct_…)');
+    }
     await db.transaction(async (tx) => {
       await tx.execute(
-        sql`TRUNCATE sessions, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+        sql`TRUNCATE sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
       );
 
       await tx
@@ -142,6 +152,14 @@ async function main(): Promise<void> {
             address: p.address,
             city: p.city,
             location: toPoint(p.lng, p.lat),
+            // Stripe confirmera l'état réel du compte au prochain `account.updated`.
+            ...(demoStripeAccountId && p.slug === 'studio-lumiere'
+              ? {
+                  stripeAccountId: demoStripeAccountId,
+                  stripeChargesEnabled: true,
+                  stripeDetailsSubmitted: true,
+                }
+              : {}),
           })
           .returning({ id: providers.id });
 
@@ -173,20 +191,34 @@ async function main(): Promise<void> {
         reason: 'Maintenance des éclairages',
       });
 
-      await tx.insert(bookings).values([
-        {
+      const [confirmed] = await tx
+        .insert(bookings)
+        .values({
           resourceId: studioA!,
           customerId: customers[0]!.id,
           during: parisRange(day, '10:00', '11:00'),
           status: 'confirmed',
           priceCents: 4500,
-        },
+        })
+        .returning({ id: bookings.id });
+      // Paiement fictif de la réservation confirmée : il n'existe pas chez Stripe, donc une
+      // annulation de cette réservation de démo échouera au remboursement.
+      await tx.insert(payments).values({
+        bookingId: confirmed!.id,
+        stripePaymentIntentId: 'pi_seed_demo',
+        amountCents: 4500,
+        feeCents: (4500 * DEMO_FEE_BPS) / 10_000,
+        currency: 'EUR',
+      });
+
+      await tx.insert(bookings).values([
         {
           // Chevauche la réservation confirmée : autorisé car une réservation annulée ne bloque plus le créneau.
           resourceId: studioA!,
           customerId: customers[1]!.id,
           during: parisRange(day, '10:30', '11:30'),
           status: 'cancelled',
+          cancelledAt: new Date(),
           priceCents: 4500,
         },
         {
