@@ -425,7 +425,7 @@ describe('webhook Stripe', () => {
     const account = (id: string, enabled: boolean) => ({
       id,
       object: 'account',
-      charges_enabled: enabled,
+      capabilities: { transfers: enabled ? 'active' : 'inactive' },
       details_submitted: true,
     });
 

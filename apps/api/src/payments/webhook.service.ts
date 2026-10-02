@@ -39,7 +39,8 @@ const chargeSchema = z.object({
 
 const accountSchema = z.object({
   id: z.string(),
-  charges_enabled: z.boolean(),
+  // Un compte « destinataire » reçoit des transferts : c'est cette capacité qui l'active chez nous.
+  capabilities: z.object({ transfers: z.string().optional() }).nullish(),
   details_submitted: z.boolean(),
 });
 
@@ -290,7 +291,10 @@ export class WebhookService {
     const account = parsed.data;
     const change = await this.payments.syncAccount(
       account.id,
-      { chargesEnabled: account.charges_enabled, detailsSubmitted: account.details_submitted },
+      {
+        chargesEnabled: account.capabilities?.transfers === 'active',
+        detailsSubmitted: account.details_submitted,
+      },
       tx,
     );
     if (!change) return unmatched('unknown_account');

@@ -43,7 +43,7 @@ erDiagram
     text city
     geography location "Point 4326, index GiST"
     text stripe_account_id UK "compte Connect Express, nullable"
-    boolean stripe_charges_enabled "peut encaisser"
+    boolean stripe_charges_enabled "peut recevoir des paiements"
     boolean stripe_details_submitted "formulaire Stripe rempli"
   }
   resources {
@@ -214,7 +214,7 @@ SELECT count(*) FILTER (WHERE checkout_started_at IS NULL)     AS sans_paiement_
  WHERE status = 'expired' AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id);
 ```
 
-**Compte du prestataire.** `providers.stripe_charges_enabled` recopie l'état du compte Stripe (webhook `account.updated`, ou relecture au retour du formulaire). `CHECK (NOT stripe_charges_enabled OR stripe_account_id IS NOT NULL)` : pas de paiements actifs sans compte vers lequel verser. `stripe_account_id` ne sort jamais de l'API.
+**Compte du prestataire.** `providers.stripe_charges_enabled` recopie l'état du compte Stripe (capacité de transfert active : le prestataire peut recevoir l'argent des réservations) (webhook `account.updated`, ou relecture au retour du formulaire). `CHECK (NOT stripe_charges_enabled OR stripe_account_id IS NOT NULL)` : pas de paiements actifs sans compte vers lequel verser. `stripe_account_id` ne sort jamais de l'API.
 
 ## Recherche par rayon
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { CircleCheck, Clock, CreditCard, LoaderCircle } from 'lucide-react';
+import { CircleCheck, Clock, CreditCard, LoaderCircle, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -86,7 +86,20 @@ export function PaymentsCard({ stripeReturn }: { stripeReturn: StripeReturn }) {
             onRetry={() => status.refetch()}
           />
         ) : (
-          <ConnectState status={status.data} busy={busy} onStart={startOnboarding} />
+          <ConnectState
+            status={status.data}
+            busy={busy}
+            onStart={startOnboarding}
+            onCheck={() =>
+              refresh(undefined, {
+                onSuccess: (fresh) => {
+                  if (fresh.status === 'active') toast.success('Paiements activés.');
+                  else toast.info('Votre compte Stripe n’est pas encore validé.');
+                },
+                onError: (error) => toast.error(errorMessage(error)),
+              })
+            }
+          />
         )}
       </CardContent>
     </Card>
@@ -97,10 +110,13 @@ function ConnectState({
   status,
   busy,
   onStart,
+  onCheck,
 }: {
   status: ConnectStatus;
   busy: boolean;
   onStart: () => void;
+  /** Relit l'état du compte chez Stripe, sans attendre son webhook. */
+  onCheck: () => void;
 }) {
   const action = (label: string) => (
     <Button className="h-11 w-full sm:w-fit" onClick={onStart} disabled={busy}>
@@ -139,9 +155,15 @@ function ConnectState({
             ? 'Stripe vérifie vos informations. Vos ressources payantes seront réservables dès que votre compte sera validé.'
             : "Il manque des informations à Stripe pour vous verser l'argent. Vos ressources payantes ne sont pas encore réservables."}
         </p>
-        {action(
-          status.detailsSubmitted ? 'Compléter mes informations' : 'Reprendre la configuration',
-        )}
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          {action(
+            status.detailsSubmitted ? 'Compléter mes informations' : 'Reprendre la configuration',
+          )}
+          <Button variant="outline" className="h-11" onClick={onCheck} disabled={busy}>
+            <RefreshCw aria-hidden className="size-4" />
+            Vérifier à nouveau
+          </Button>
+        </div>
       </div>
     );
   }

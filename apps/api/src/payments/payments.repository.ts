@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { type Database, type DbHandle, payments, providers, stripeEvents } from '@creno/db';
+import { type Database, type DbHandle, payments, providers, stripeEvents, users } from '@creno/db';
 import type { PaymentStatus } from '@creno/shared';
 import { DB } from '../database/database.module.js';
 
@@ -84,6 +84,16 @@ export class PaymentsRepository {
       .select(providerColumns)
       .from(providers)
       .where(eq(providers.userId, userId));
+    return row;
+  }
+
+  /** Nom du prestataire et email de son compte, transmis à Stripe à la création du compte connecté. */
+  async providerContact(providerId: string): Promise<{ name: string; email: string } | undefined> {
+    const [row] = await this.handle.db
+      .select({ name: providers.name, email: users.email })
+      .from(providers)
+      .innerJoin(users, eq(users.id, providers.userId))
+      .where(eq(providers.id, providerId));
     return row;
   }
 

@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import {
   type CheckoutSession,
   type CheckoutSessionInput,
+  type ConnectAccountInput,
   type ConnectAccountState,
   type PaymentsGateway,
   PaymentsGatewayError,
@@ -9,6 +10,14 @@ import {
 } from './payments-gateway.js';
 
 const TIMEOUT_MS = 10_000;
+
+/**
+ * Fenêtre de temps ajoutée aux clés d'idempotence. Stripe garde 24 h la réponse d'une clé, erreur
+ * comprise : avec une clé fixe, une erreur corrigée depuis (configuration du compte, par exemple)
+ * serait rejouée telle quelle pendant un jour. La fenêtre couvre le double clic et les rejeux
+ * rapprochés, puis laisse passer une nouvelle tentative.
+ */
+const attemptWindow = (minutes: number) => Math.floor(Date.now() / (minutes * 60_000));
 
 /** Traduit une erreur du SDK Stripe en échec loggable, sans le message (il peut citer un email). */
 export function toGatewayError(error: unknown): PaymentsGatewayError {
@@ -34,7 +43,7 @@ export function toGatewayError(error: unknown): PaymentsGatewayError {
   return new PaymentsGatewayError(reason, error.code);
 }
 
-/** Adapter Stripe Connect : comptes Express, sessions Checkout en « destination charge », remboursements. */
+/** Adapter Stripe Connect : comptes prestataires, sessions Checkout en « destination charge », remboursements. */
 export class StripePaymentsGateway implements PaymentsGateway {
   private readonly stripe: Stripe;
 
@@ -49,20 +58,31 @@ export class StripePaymentsGateway implements PaymentsGateway {
       });
   }
 
-  async createConnectAccount({
-    providerId,
-  }: {
-    providerId: string;
-  }): Promise<{ accountId: string }> {
+  /**
+   * Compte connecté créé avec l'API Accounts v2 (l'ancienne API est refusée aux nouvelles
+   * plateformes). Configuration « destinataire » : le compte reçoit des transferts depuis la
+   * plateforme, qui reste le marchand. La plateforme porte les frais et les soldes négatifs, et le
+   * prestataire a le tableau de bord Express : c'est l'équivalent d'un compte Express.
+   */
+  async createConnectAccount(input: ConnectAccountInput): Promise<{ accountId: string }> {
     const account = await this.call(() =>
-      this.stripe.accounts.create(
+      this.stripe.v2.core.accounts.create(
         {
-          type: 'express',
-          country: 'FR',
-          capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
-          metadata: { providerId },
+          contact_email: input.contactEmail,
+          display_name: input.displayName,
+          dashboard: 'express',
+          identity: { country: 'fr' },
+          defaults: {
+            responsibilities: { fees_collector: 'application', losses_collector: 'application' },
+          },
+          configuration: {
+            recipient: {
+              capabilities: { stripe_balance: { stripe_transfers: { requested: true } } },
+            },
+          },
+          metadata: { providerId: input.providerId },
         },
-        { idempotencyKey: `account-${providerId}` },
+        { idempotencyKey: `account-${input.providerId}-${attemptWindow(1)}` },
       ),
     );
     return { accountId: account.id };
@@ -74,11 +94,12 @@ export class StripePaymentsGateway implements PaymentsGateway {
     returnUrl: string;
   }): Promise<{ url: string }> {
     const link = await this.call(() =>
-      this.stripe.accountLinks.create({
+      this.stripe.v2.core.accountLinks.create({
         account: input.accountId,
-        type: 'account_onboarding',
-        refresh_url: input.refreshUrl,
-        return_url: input.returnUrl,
+        use_case: {
+          type: 'account_onboarding',
+          account_onboarding: { refresh_url: input.refreshUrl, return_url: input.returnUrl },
+        },
       }),
     );
     return { url: link.url };
@@ -87,7 +108,9 @@ export class StripePaymentsGateway implements PaymentsGateway {
   async retrieveAccount(accountId: string): Promise<ConnectAccountState> {
     const account = await this.call(() => this.stripe.accounts.retrieve(accountId));
     return {
-      chargesEnabled: account.charges_enabled,
+      // Un compte « destinataire » n'encaisse pas lui-même (`charges_enabled` reste faux) : ce qui
+      // compte, c'est qu'il puisse recevoir les transferts de la plateforme.
+      chargesEnabled: account.capabilities?.transfers === 'active',
       detailsSubmitted: account.details_submitted,
     };
   }
@@ -159,7 +182,7 @@ export class StripePaymentsGateway implements PaymentsGateway {
           refund_application_fee: true,
           metadata: { bookingId: input.bookingId },
         },
-        { idempotencyKey: `refund-${input.bookingId}` },
+        { idempotencyKey: `refund-${input.bookingId}-${attemptWindow(10)}` },
       );
     } catch (error) {
       if (error instanceof Stripe.errors.StripeError && error.code === 'charge_already_refunded') {

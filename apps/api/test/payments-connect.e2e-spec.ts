@@ -46,14 +46,18 @@ describe('payments : compte Stripe Connect du prestataire', () => {
   const newProvider = () => createProviderWithResource(app, {}, { payments: false });
 
   it('onboarding : crée le compte une seule fois et renvoie le lien Stripe', async () => {
-    const { agent, provider } = await newProvider();
+    const { agent, provider, user } = await newProvider();
     const first = connectOnboardingSchema.parse(
       (await agent.post('/v1/payments/connect/onboarding').expect(200)).body,
     );
     const { stripeAccountId } = await accountOf(provider.id);
     expect(stripeAccountId).toMatch(/^acct_fake_/);
     expect(first.url).toBe(`https://connect.stripe.test/setup/${stripeAccountId}`);
-    expect(gateway.createConnectAccount).toHaveBeenCalledWith({ providerId: provider.id });
+    expect(gateway.createConnectAccount).toHaveBeenCalledWith({
+      providerId: provider.id,
+      contactEmail: user.email,
+      displayName: provider.name,
+    });
     expect(gateway.createAccountLink).toHaveBeenCalledWith({
       accountId: stripeAccountId,
       refreshUrl: `${WEB_ORIGIN}/stripe/return?connect=refresh`,
@@ -65,6 +69,7 @@ describe('payments : compte Stripe Connect du prestataire', () => {
     expect(gateway.createConnectAccount).toHaveBeenCalledTimes(1);
     expect((await accountOf(provider.id)).stripeAccountId).toBe(stripeAccountId);
     expect(logs.join('\n')).not.toContain(stripeAccountId);
+    expect(logs.join('\n')).not.toContain(user.email);
   });
 
   it('statut : not_started → pending → active après relecture du compte chez Stripe', async () => {

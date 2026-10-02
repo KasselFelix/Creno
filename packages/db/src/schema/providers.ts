@@ -27,8 +27,9 @@ export const providers = pgTable(
     address: text('address').notNull(),
     city: text('city').notNull(),
     location: geographyPoint('location').notNull(),
-    // Compte Stripe Connect Express. Les deux drapeaux recopient l'état du compte chez Stripe
-    // (webhook `account.updated`) : le prestataire encaisse quand `stripe_charges_enabled` est vrai.
+    // Compte Stripe Connect. Les deux drapeaux recopient l'état du compte chez Stripe (webhook
+    // `account.updated`, ou relecture) : `stripe_charges_enabled` est vrai quand le prestataire peut
+    // recevoir l'argent des réservations (capacité de transfert active).
     stripeAccountId: text('stripe_account_id').unique(),
     stripeChargesEnabled: boolean('stripe_charges_enabled').notNull().default(false),
     stripeDetailsSubmitted: boolean('stripe_details_submitted').notNull().default(false),

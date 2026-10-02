@@ -204,7 +204,7 @@ describe('bookings : paiement, liste, annulation', () => {
       await postStripeEvent(app, 'account.updated', {
         id: provider.stripeAccountId,
         object: 'account',
-        charges_enabled: false,
+        capabilities: { transfers: 'inactive' },
         details_submitted: true,
       }).expect(200);
       expectCode(await checkout(agent, booking.id).expect(409), 'PROVIDER_PAYMENTS_NOT_READY');

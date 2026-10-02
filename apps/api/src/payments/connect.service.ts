@@ -23,15 +23,21 @@ export class ConnectService {
   ) {}
 
   /**
-   * Crée le compte Express au premier appel, puis renvoie un lien à usage unique vers le
-   * formulaire hébergé par Stripe (identité, IBAN). Creno ne voit jamais ces données.
+   * Crée le compte Stripe du prestataire au premier appel, puis renvoie un lien à usage unique
+   * vers le formulaire hébergé par Stripe (identité, IBAN). Creno ne voit jamais ces données.
    */
   async startOnboarding(current: AuthUser): Promise<ConnectOnboarding> {
     let provider = await this.requireProvider(current);
     try {
       if (!provider.stripeAccountId) {
-        // La clé d'idempotence (`account-<providerId>`) rend le même compte à deux appels simultanés.
-        const { accountId } = await this.gateway.createConnectAccount({ providerId: provider.id });
+        const contact = await this.payments.providerContact(provider.id);
+        if (!contact) throw new Error('Prestataire sans utilisateur');
+        // La clé d'idempotence, dérivée du prestataire, rend le même compte à deux appels simultanés.
+        const { accountId } = await this.gateway.createConnectAccount({
+          providerId: provider.id,
+          contactEmail: contact.email,
+          displayName: contact.name,
+        });
         provider = await this.payments.attachAccount(provider.id, accountId);
       }
       const { url } = await this.gateway.createAccountLink({

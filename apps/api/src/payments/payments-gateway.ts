@@ -2,10 +2,18 @@
 export const PAYMENTS_GATEWAY = Symbol('PAYMENTS_GATEWAY');
 
 export interface ConnectAccountState {
-  /** Stripe autorise le compte à encaisser. */
+  /** Le compte peut recevoir l'argent des réservations (capacité « transferts » active chez Stripe). */
   chargesEnabled: boolean;
   /** Le prestataire a rempli le formulaire d'inscription. */
   detailsSubmitted: boolean;
+}
+
+export interface ConnectAccountInput {
+  providerId: string;
+  /** Email du prestataire : Stripe l'exige pour un compte qui reçoit des fonds. Jamais loggué. */
+  contactEmail: string;
+  /** Nom du prestataire, affiché dans le tableau de bord Stripe. */
+  displayName: string;
 }
 
 export interface CheckoutSessionInput {
@@ -34,11 +42,11 @@ export interface CheckoutSession {
 
 /**
  * Prestataire de paiement (Stripe Connect). Chaque opération d'écriture porte une clé d'idempotence
- * dérivée de nos identifiants : la rejouer ne crée ni second compte, ni seconde session, ni second
- * remboursement.
+ * dérivée de nos identifiants : deux appels simultanés ne créent ni second compte, ni seconde
+ * session, ni second remboursement.
  */
 export interface PaymentsGateway {
-  createConnectAccount(input: { providerId: string }): Promise<{ accountId: string }>;
+  createConnectAccount(input: ConnectAccountInput): Promise<{ accountId: string }>;
   createAccountLink(input: {
     accountId: string;
     refreshUrl: string;

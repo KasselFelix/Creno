@@ -6,8 +6,8 @@ import { StripePaymentsGateway, toGatewayError } from './stripe-payments-gateway
 /** Faux client Stripe : seules les méthodes appelées par l'adapter existent. */
 function fakeStripe() {
   const client = {
-    accounts: { create: vi.fn(), retrieve: vi.fn() },
-    accountLinks: { create: vi.fn() },
+    accounts: { retrieve: vi.fn() },
+    v2: { core: { accounts: { create: vi.fn() }, accountLinks: { create: vi.fn() } } },
     checkout: { sessions: { create: vi.fn(), retrieve: vi.fn(), expire: vi.fn() } },
     refunds: { create: vi.fn() },
   };
@@ -74,33 +74,83 @@ describe('StripePaymentsGateway', () => {
     expect((await gateway.retrieveCheckoutSession('cs_test_1')).url).toBeNull();
   });
 
-  it('crée un compte Express français avec une clé d’idempotence par prestataire', async () => {
+  it('crée un compte destinataire (Accounts v2) : tableau de bord Express, plateforme responsable', async () => {
     const { client, gateway } = fakeStripe();
-    client.accounts.create.mockResolvedValue({ id: 'acct_test_1' });
-    expect(await gateway.createConnectAccount({ providerId: 'p1' })).toEqual({
-      accountId: 'acct_test_1',
-    });
-    const [params, options] = client.accounts.create.mock.calls[0]!;
-    expect(params).toMatchObject({
-      type: 'express',
-      country: 'FR',
+    client.v2.core.accounts.create.mockResolvedValue({ id: 'acct_test_1' });
+    const input = { providerId: 'p1', contactEmail: 'pro@test.dev', displayName: 'Studio' };
+    expect(await gateway.createConnectAccount(input)).toEqual({ accountId: 'acct_test_1' });
+    const [params, options] = client.v2.core.accounts.create.mock.calls[0]!;
+    expect(params).toEqual({
+      contact_email: 'pro@test.dev',
+      display_name: 'Studio',
+      dashboard: 'express',
+      identity: { country: 'fr' },
+      defaults: {
+        responsibilities: { fees_collector: 'application', losses_collector: 'application' },
+      },
+      configuration: {
+        recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } },
+      },
       metadata: { providerId: 'p1' },
     });
-    expect(options).toEqual({ idempotencyKey: 'account-p1' });
+    // Clé par prestataire et par minute : un double clic rend le même compte, une erreur n'est
+    // pas rejouée pendant 24 h.
+    expect((options as { idempotencyKey: string }).idempotencyKey).toMatch(/^account-p1-\d+$/);
+  });
+
+  it('demande un lien d’onboarding pour le compte', async () => {
+    const { client, gateway } = fakeStripe();
+    client.v2.core.accountLinks.create.mockResolvedValue({ url: 'https://connect.stripe.test/x' });
+    const link = await gateway.createAccountLink({
+      accountId: 'acct_test_1',
+      refreshUrl: 'http://localhost:3000/r',
+      returnUrl: 'http://localhost:3000/ok',
+    });
+    expect(link).toEqual({ url: 'https://connect.stripe.test/x' });
+    expect(client.v2.core.accountLinks.create).toHaveBeenCalledWith({
+      account: 'acct_test_1',
+      use_case: {
+        type: 'account_onboarding',
+        account_onboarding: {
+          refresh_url: 'http://localhost:3000/r',
+          return_url: 'http://localhost:3000/ok',
+        },
+      },
+    });
+  });
+
+  it('un compte est actif quand il peut recevoir des transferts, pas quand il encaisse lui-même', async () => {
+    const { client, gateway } = fakeStripe();
+    client.accounts.retrieve.mockResolvedValueOnce({
+      charges_enabled: false,
+      details_submitted: true,
+      capabilities: { transfers: 'active' },
+    });
+    expect(await gateway.retrieveAccount('acct_test_1')).toEqual({
+      chargesEnabled: true,
+      detailsSubmitted: true,
+    });
+    client.accounts.retrieve.mockResolvedValueOnce({
+      charges_enabled: false,
+      details_submitted: false,
+      capabilities: { transfers: 'inactive' },
+    });
+    expect((await gateway.retrieveAccount('acct_test_1')).chargesEnabled).toBe(false);
   });
 
   it('rembourse en reprenant le versement et la commission, avec une clé d’idempotence', async () => {
     const { client, gateway } = fakeStripe();
     client.refunds.create.mockResolvedValue({ id: 're_test_1' });
     await gateway.refund({ paymentIntentId: 'pi_test_1', bookingId: BOOKING_ID });
-    expect(client.refunds.create).toHaveBeenCalledWith(
-      {
-        payment_intent: 'pi_test_1',
-        reverse_transfer: true,
-        refund_application_fee: true,
-        metadata: { bookingId: BOOKING_ID },
-      },
-      { idempotencyKey: `refund-${BOOKING_ID}` },
+    const [params, options] = client.refunds.create.mock.calls[0]!;
+    expect(params).toEqual({
+      payment_intent: 'pi_test_1',
+      reverse_transfer: true,
+      refund_application_fee: true,
+      metadata: { bookingId: BOOKING_ID },
+    });
+    expect((options as { idempotencyKey: string }).idempotencyKey).toMatch(
+      new RegExp(`^refund-${BOOKING_ID}-\\d+$`),
     );
   });
 
