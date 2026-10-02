@@ -2,7 +2,7 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée) et **notifications** (emails et SMS de rappel par jobs pg-boss, outbox transactionnelle, tâches de ménage).
+> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée), **notifications** (emails et SMS de rappel par jobs pg-boss, outbox transactionnelle, tâches de ménage) et **confirmation de l'adresse email** (le compte naît au clic sur le lien, l'inscription ne révèle pas qui est inscrit).
 
 ## Démarrer
 
@@ -31,6 +31,8 @@ Au démarrage, l'API applique les migrations et, si la base est vide, charge un 
 | Client      | `lea.petit@example.com`      |
 | Prestataire | `studio.lumiere@example.com` |
 | Admin       | `admin@creno.dev`            |
+
+**Créer un compte en local** : après le formulaire d'inscription, le lien de confirmation arrive dans Mailpit (http://localhost:8025). Le compte n'existe qu'une fois ce lien confirmé.
 
 **Carte** : créer un token public (`pk.…`) sur https://account.mapbox.com, le restreindre par URL, puis le mettre dans `.env` (`NEXT_PUBLIC_MAPBOX_TOKEN`). Sans token, la recherche fonctionne en liste seule.
 
@@ -95,6 +97,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Géocodage par l'API Adresse de l'État, derrière une interface** : sans clé, coordonnées stockables, appelée par l'API (timeout, repli, faux en test). → [ADR 0008](docs/adr/0008-geocoding-provider.md)
 - **Stripe Connect en destination charge, webhook comme seule source de vérité** : le prestataire reçoit le prix moins la commission, le hold est aligné sur la session Checkout, un événement rejoué ne fait rien. → [ADR 0009](docs/adr/0009-stripe-connect-payments.md)
 - **Notifications par outbox transactionnelle sur pg-boss** : le message à envoyer est écrit dans la transaction qui confirme la réservation, puis envoyé par un job avec reprises ; pas de Redis. → [ADR 0010](docs/adr/0010-notifications-outbox-pg-boss.md)
+- **Inscription en attente plutôt que compte « non vérifié »** : la requête ne lit jamais `users`, donc sa réponse ne peut pas révéler qui est inscrit ; le compte est créé à la confirmation, avec le mot de passe de la tentative confirmée. → [ADR 0011](docs/adr/0011-pending-registration-uniform-signup.md)
 - _À venir : choix du modèle IA, retry / circuit breaker / fallback de la recherche._
 
 ## Recherche géographique
@@ -145,8 +148,8 @@ RETURNING id;   -- rien de renvoyé : événement déjà traité
 - **Outbox transactionnelle** : la ligne `notifications` et son job sont écrits dans la transaction qui change le statut de la réservation. Pas de notification pour un changement annulé, pas de changement sans notification, et aucun appel à un service externe pendant une requête ou un webhook.
 - **pg-boss** (file de jobs dans Postgres) : 5 reprises en backoff exponentiel, puis file morte → notification `failed` et log `error`. Un job ne contient que l'identifiant de la notification, jamais d'adresse ni de numéro.
 - **En local**, les emails arrivent dans Mailpit (http://localhost:8025) sans aucun compte. Avec `RESEND_API_KEY`, ils partent par Resend ; avec les trois variables `TWILIO_*`, le rappel part aussi par SMS. Sans rien, les notifications sont marquées `skipped`.
-- **Garde-fous** : SMS réservés aux préfixes autorisés (`SMS_ALLOWED_PREFIXES`, mobiles français par défaut), 5 SMS par jour et 30 emails par heure au plus pour un même destinataire ; au-delà, la notification est `skipped`. L'email et le téléphone ne sont pas encore vérifiés : ces plafonds bornent ce qu'un compte peut faire envoyer à un tiers.
-- **Tâches planifiées** : rappels dus et holds expirés toutes les 5 min, purge nocturne des sessions mortes et des événements Stripe de plus de 90 jours.
+- **Garde-fous** : SMS réservés aux préfixes autorisés (`SMS_ALLOWED_PREFIXES`, mobiles français par défaut), 5 SMS par jour et 30 emails par heure au plus pour un même destinataire ; au-delà, la notification est `skipped`. L'adresse email est confirmée à l'inscription ; le téléphone n'est pas encore vérifié : ces plafonds bornent ce qu'un compte peut faire envoyer à un tiers.
+- **Tâches planifiées** : rappels dus et holds expirés toutes les 5 min, purge horaire des inscriptions jamais confirmées, purge nocturne des sessions mortes et des événements Stripe de plus de 90 jours.
 - Tests : idempotence, transaction annulée, rappel, reprises et file morte ([apps/api/test/notifications.e2e-spec.ts](apps/api/test/notifications.e2e-spec.ts)) ; ménage ([apps/api/test/maintenance.e2e-spec.ts](apps/api/test/maintenance.e2e-spec.ts)).
 
 ```bash
@@ -157,7 +160,7 @@ docker compose exec db psql -U creno -c "select name, cron from pgboss.schedule;
 
 ## Authentification et autorisations
 
-- Inscription (client ou prestataire), connexion, « Mon compte » avec la liste des appareils connectés.
+- Inscription (client ou prestataire) **confirmée par email** : le compte n'est créé qu'au clic sur le lien reçu, et le formulaire répond la même chose que l'adresse soit déjà inscrite ou non. Connexion, « Mon compte » avec la liste des appareils connectés.
 - Access token JWT de 15 min et refresh token de 30 jours, tous deux en cookies `HttpOnly` ; le navigateur ne parle qu'au front (`/api/*` est réécrit vers l'API), les cookies restent donc first-party.
 - **Refresh rotatif** : chaque renouvellement remplace le refresh token (compare-and-swap en base). Un ancien token rejoué après 10 s révoque la session : c'est le signe d'un vol.
 - Mots de passe hachés en argon2id ; même réponse et même durée pour « mauvais mot de passe » et « email inconnu ».
