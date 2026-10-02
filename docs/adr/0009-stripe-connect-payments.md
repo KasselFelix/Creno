@@ -27,7 +27,7 @@ Un client paie un créneau à la réservation ; l'argent revient au prestataire,
 - Le remboursement tardif est appelé **hors transaction** : la transaction qui découvre le créneau perdu est annulée, Stripe est appelé, puis une seconde transaction enregistre l'événement et le paiement. Si Stripe échoue, rien n'est enregistré et l'événement est renvoyé. Un `charge.refunded` reçu avant l'enregistrement du paiement est refusé (503) pour être renvoyé plus tard.
 - En production, `account.updated` arrive sur un second endpoint (« Connect »), avec son propre secret : `STRIPE_CONNECT_WEBHOOK_SECRET`. Un événement venu d'un compte connecté n'est accepté que pour `account.updated` : un événement de paiement de cette origine est ignoré, quelles que soient ses métadonnées.
 - Stripe ne rend pas ses frais de traitement lors d'un remboursement : une annulation remboursée coûte ces frais à la plateforme. Accepté à ce stade ; un plafond d'annulations par client est une piste.
-- Pas de job : un hold expiré est libéré par la réservation suivante ou par `checkout.session.expired`. Le job de ménage arrive avec pg-boss (étape 6).
+- Pas de job : un hold expiré est libéré par la réservation suivante ou par `checkout.session.expired`. Depuis l'[ADR 0010](0010-notifications-outbox-pg-boss.md), un job de ménage passe en plus toutes les 5 minutes.
 
 ## Alternatives écartées
 

@@ -2,7 +2,7 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) et **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée).
+> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée) et **notifications** (emails et SMS de rappel par jobs pg-boss, outbox transactionnelle, tâches de ménage).
 
 ## Démarrer
 
@@ -18,6 +18,7 @@ docker compose up
 | Front (Next.js)      | http://localhost:3000                                                   |
 | API (NestJS)         | http://localhost:4000 — `/health`, `/health/ready`, Swagger sur `/docs` |
 | PostgreSQL + PostGIS | `localhost:5432` (bases `creno` et `creno_test`)                        |
+| Mailpit              | http://localhost:8025 — tous les emails envoyés par l'API en local      |
 
 Pour chercher un prestataire : http://localhost:3000/search (liste et carte ; la carte demande un token Mapbox, voir ci-dessous). Pour voir les créneaux d'un prestataire de démo : http://localhost:3000/providers/studio-lumiere. Connecté en client, « Mes réservations » (`/bookings`) liste les réservations. Connecté avec le compte prestataire, l'« Espace prestataire » (`/dashboard`) permet de gérer ressources, horaires et fermetures.
 
@@ -93,6 +94,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Recherche par cercle (centre + rayon), plafonnée à 50 résultats** : `ST_DWithin` sur l'index GiST, filtres dans l'URL, pas de pagination ni de clustering. → [ADR 0007](docs/adr/0007-radius-search.md)
 - **Géocodage par l'API Adresse de l'État, derrière une interface** : sans clé, coordonnées stockables, appelée par l'API (timeout, repli, faux en test). → [ADR 0008](docs/adr/0008-geocoding-provider.md)
 - **Stripe Connect en destination charge, webhook comme seule source de vérité** : le prestataire reçoit le prix moins la commission, le hold est aligné sur la session Checkout, un événement rejoué ne fait rien. → [ADR 0009](docs/adr/0009-stripe-connect-payments.md)
+- **Notifications par outbox transactionnelle sur pg-boss** : le message à envoyer est écrit dans la transaction qui confirme la réservation, puis envoyé par un job avec reprises ; pas de Redis. → [ADR 0010](docs/adr/0010-notifications-outbox-pg-boss.md)
 - _À venir : choix du modèle IA, retry / circuit breaker / fallback de la recherche._
 
 ## Recherche géographique
@@ -137,6 +139,21 @@ RETURNING id;   -- rien de renvoyé : événement déjà traité
 - **Annulation** : dans « Mes réservations », remboursement total jusqu'à 24 h avant le début ; le prestataire peut toujours annuler (API). Le remboursement est demandé avant de libérer le créneau, et reprend le versement au prestataire et la commission.
 - Tests : signature invalide, événement rejoué ou reçu deux fois en même temps, paiement tardif, remboursement en échec ([apps/api/test/payments-webhook.e2e-spec.ts](apps/api/test/payments-webhook.e2e-spec.ts)) ; checkout, annulation et accès à la réservation d'un autre ([apps/api/test/bookings-payments.e2e-spec.ts](apps/api/test/bookings-payments.e2e-spec.ts)).
 
+## Notifications et jobs
+
+- **Emails** : confirmation au client et avis au prestataire quand une réservation est confirmée, email d'annulation (avec le montant remboursé), email « paiement remboursé » quand un paiement arrive sur un créneau déjà repris. **Rappel** 24 h avant le créneau, par email et par SMS si le client a renseigné son téléphone.
+- **Outbox transactionnelle** : la ligne `notifications` et son job sont écrits dans la transaction qui change le statut de la réservation. Pas de notification pour un changement annulé, pas de changement sans notification, et aucun appel à un service externe pendant une requête ou un webhook.
+- **pg-boss** (file de jobs dans Postgres) : 5 reprises en backoff exponentiel, puis file morte → notification `failed` et log `error`. Un job ne contient que l'identifiant de la notification, jamais d'adresse ni de numéro.
+- **En local**, les emails arrivent dans Mailpit (http://localhost:8025) sans aucun compte. Avec `RESEND_API_KEY`, ils partent par Resend ; avec les trois variables `TWILIO_*`, le rappel part aussi par SMS. Sans rien, les notifications sont marquées `skipped`.
+- **Tâches planifiées** : rappels dus et holds expirés toutes les 5 min, purge nocturne des sessions mortes et des événements Stripe de plus de 90 jours.
+- Tests : idempotence, transaction annulée, rappel, reprises et file morte ([apps/api/test/notifications.e2e-spec.ts](apps/api/test/notifications.e2e-spec.ts)) ; ménage ([apps/api/test/maintenance.e2e-spec.ts](apps/api/test/maintenance.e2e-spec.ts)).
+
+```bash
+# Suivre les notifications et les tâches planifiées
+docker compose exec db psql -U creno -c "select kind, channel, status, reason, sent_at from notifications order by created_at desc limit 10;"
+docker compose exec db psql -U creno -c "select name, cron from pgboss.schedule;"
+```
+
 ## Authentification et autorisations
 
 - Inscription (client ou prestataire), connexion, « Mon compte » avec la liste des appareils connectés.
@@ -153,6 +170,7 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 ## Observabilité
 
 - Paiements : `payment.late_refund` et `payment.gateway_failed` en `warn`, `payment.amount_mismatch` en `error` ; ni email, ni identifiant de compte, ni corps d'événement Stripe dans les logs.
+- Notifications : `notification.sent` (latence, numéro d'essai), `notification.retry` et `notification.skipped` (canal non configuré) en `warn`, `notification.failed` en `error` ; les logs d'un job portent un `jobId` à la place du `requestId`, jamais de destinataire ni de contenu. Ménage : `maintenance.holds_expired`, `maintenance.sessions_purged`, `maintenance.stripe_events_purged`.
 - Logs JSON (pino) avec un `requestId` par requête (repris de l'en-tête `x-request-id` s'il est fourni) et un champ `event` pour les événements métier ; emails, téléphones, cookies et en-têtes d'authentification sont masqués, ainsi que la query string des routes de recherche et de géocodage (position du visiteur, adresse saisie).
 - `GET /health` (liveness, ne dépend pas de la base) et `GET /health/ready` (readiness, 503 si la base est injoignable).
 - _Sentry : à venir._
@@ -182,6 +200,13 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | api              | vide                                               | production : secret de l'endpoint « Connect » (`account.updated`)                                            |
 | `STRIPE_PLATFORM_FEE_BPS`       | api              | `1000`                                             | commission Creno en points de base (1000 = 10 %)                                                             |
 | `SEED_STRIPE_ACCOUNT_ID`        | seed             | vide                                               | compte Express de test rattaché à « Studio Lumière » par le seed                                             |
+| `RESEND_API_KEY`                | api              | vide                                               | clé API Resend (`re_…`) pour les emails ; obligatoire en production                                          |
+| `EMAIL_FROM`                    | api              | `Creno <onboarding@resend.dev>`                    | expéditeur des emails (domaine vérifié chez Resend)                                                          |
+| `MAILPIT_URL`                   | api              | `http://mailpit:8025` (docker compose)             | boîte de réception de dev, utilisée sans clé Resend ; refusée en production                                  |
+| `TWILIO_ACCOUNT_SID`            | api              | vide                                               | compte Twilio pour le SMS de rappel (les trois variables `TWILIO_*` ensemble, ou aucune)                     |
+| `TWILIO_AUTH_TOKEN`             | api              | vide                                               | jeton d'authentification Twilio                                                                              |
+| `TWILIO_FROM`                   | api              | vide                                               | numéro expéditeur (`+33…`) ou Messaging Service (`MG…`)                                                      |
+| `JOBS_WORKERS_ENABLED`          | api              | `true`                                             | `false` : l'instance crée des jobs sans les exécuter (ni workers, ni tâches planifiées)                      |
 | `NEXT_PUBLIC_MAPBOX_TOKEN`      | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé              |
 
 La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Les variables lues par le navigateur le sont dans `apps/web/lib/env.ts`. Aucun secret n'est versionné.

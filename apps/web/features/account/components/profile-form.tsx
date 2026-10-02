@@ -72,7 +72,7 @@ export function ProfileForm({ user }: { user: PublicUser }) {
             {...form.register('phone')}
           />
           <FieldDescription id="account-phone-help">
-            Format international. Sert aux confirmations par SMS.
+            Format international. Sert au rappel par SMS, la veille de vos réservations.
           </FieldDescription>
           <FieldError errors={[errors.phone]} />
         </Field>

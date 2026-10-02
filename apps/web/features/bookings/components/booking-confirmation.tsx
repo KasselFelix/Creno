@@ -150,8 +150,8 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
         title: 'Réservation confirmée',
         description:
           booking.priceCents === 0
-            ? 'Votre créneau est réservé.'
-            : 'Votre paiement est accepté et votre créneau est réservé.',
+            ? 'Votre créneau est réservé. Un email de confirmation vous a été envoyé.'
+            : 'Votre paiement est accepté et votre créneau est réservé. Un email de confirmation vous a été envoyé.',
         open: true,
       };
     case 'pending':
