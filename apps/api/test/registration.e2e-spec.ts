@@ -321,6 +321,17 @@ describe('inscription et confirmation de l’adresse', () => {
       ]);
     });
 
+    it('passerelle non configurée : pas de reprise, log warn', async () => {
+      email.send.mockRejectedValueOnce(new DeliveryError('not_configured', false));
+      await register(uniqueEmail()).expect(202);
+      await runJobs(app, REGISTRATION_EMAIL_QUEUE);
+
+      expect(await runJobs(app, REGISTRATION_EMAIL_QUEUE)).toBe(0);
+      expect(logged('auth.registration_email_skipped')).toMatchObject([
+        { level: 40, reason: 'not_configured' },
+      ]);
+    });
+
     it('reprises épuisées : la file morte le signale en error', async () => {
       const id = '00000000-0000-4000-8000-000000000000';
       await app.get(JobsService).send(REGISTRATION_EMAIL_DEAD_QUEUE, { pendingRegistrationId: id });
