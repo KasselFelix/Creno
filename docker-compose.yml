@@ -80,8 +80,14 @@ services:
   # STRIPE_WEBHOOK_SECRET. Sans ce profil, la stack démarre sans compte Stripe.
   stripe-cli:
     profiles: [stripe]
-    image: stripe/stripe-cli:latest
-    command: listen --forward-to http://api:4000/v1/payments/webhook
+    image: stripe/stripe-cli:v1.53.0
+    # Les quatre types d'événements que l'API traite ; ceux des comptes connectés (account.updated)
+    # sont relayés vers la même adresse.
+    command: >
+      listen --skip-update
+      --events checkout.session.completed,checkout.session.expired,charge.refunded,account.updated
+      --forward-to http://api:4000/v1/payments/webhook
+      --forward-connect-to http://api:4000/v1/payments/webhook
     environment:
       STRIPE_API_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_DEVICE_NAME: creno-dev
