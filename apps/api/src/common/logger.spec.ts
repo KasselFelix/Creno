@@ -23,9 +23,18 @@ describe('redaction des logs', () => {
       email: 'a@b.fr',
       user: { phone: '0600000000', profile: { email: 'c@d.fr' } },
       body: { refreshToken: 'secret-token' },
+      message: { to: 'dest@inataire.fr' },
       req: { headers: { authorization: 'Bearer x', cookie: 'sid=1' } },
     });
-    for (const secret of ['a@b.fr', '0600000000', 'c@d.fr', 'secret-token', 'Bearer x', 'sid=1']) {
+    for (const secret of [
+      'a@b.fr',
+      '0600000000',
+      'c@d.fr',
+      'secret-token',
+      'dest@inataire.fr',
+      'Bearer x',
+      'sid=1',
+    ]) {
       expect(line).not.toContain(secret);
     }
   });

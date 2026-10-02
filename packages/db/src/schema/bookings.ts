@@ -50,6 +50,10 @@ export const bookings = pgTable(
   },
   (t) => [
     index('bookings_customer_id_idx').on(t.customerId),
+    // Holds à expirer (job `maintenance.expire-holds`) : seules les lignes `pending` sont indexées.
+    index('bookings_pending_expires_at_idx')
+      .on(t.expiresAt)
+      .where(sql`${t.status} = 'pending'`),
     // L'index de l'EXCLUDE est partiel (pending/confirmed) : celui-ci couvre la clé étrangère et
     // les requêtes par ressource sur tous les statuts (historique, dashboard, occupation).
     index('bookings_resource_id_during_gix').using('gist', t.resourceId, t.during),

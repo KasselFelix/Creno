@@ -36,6 +36,8 @@ services:
       DATABASE_URL_TEST: postgres://creno:creno@db:5432/creno_test
       WEB_ORIGIN: http://localhost:3000
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-change-me-dev-only-change-me-0000}
+      # Sans clé Resend, les emails arrivent dans Mailpit (http://localhost:8025).
+      MAILPIT_URL: http://mailpit:8025
     ports:
       - '127.0.0.1:4000:4000'
     volumes:
@@ -49,6 +51,7 @@ services:
       - /app/packages/shared/node_modules
     depends_on:
       db: { condition: service_healthy }
+      mailpit: { condition: service_started }
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:4000/health || exit 1']
       interval: 5s
@@ -74,6 +77,13 @@ services:
       - /app/packages/shared/node_modules
     depends_on:
       api: { condition: service_healthy }
+
+  # Boîte de réception de développement : tous les emails de l'API s'y affichent
+  # (http://localhost:8025), aucun ne sort de la machine. Rien n'est conservé au redémarrage.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - '127.0.0.1:8025:8025'
 
   # Facultatif : `docker compose --profile stripe up`. Relaie les événements Stripe du mode test
   # vers le webhook local, et affiche au démarrage le secret `whsec_…` à copier dans

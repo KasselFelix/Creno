@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { char, check, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  char,
+  check,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { bookings } from './bookings.js';
 import { timestamps } from './timestamps.js';
 
@@ -35,8 +45,13 @@ export const payments = pgTable(
 
 // Événements Stripe déjà traités. La clé primaire est l'identifiant de l'événement (`evt_…`) :
 // un événement rejoué par Stripe ne peut pas être inséré deux fois, donc pas traité deux fois.
-export const stripeEvents = pgTable('stripe_events', {
-  id: text('id').primaryKey(),
-  type: text('type').notNull(),
-  receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const stripeEvents = pgTable(
+  'stripe_events',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  // Purge nocturne des vieux événements (job `maintenance.purge-stripe-events`).
+  (t) => [index('stripe_events_received_at_idx').on(t.receivedAt)],
+);

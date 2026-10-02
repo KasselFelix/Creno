@@ -16,6 +16,9 @@ const SENSITIVE_KEYS = [
   'token',
   'accessToken',
   'refreshToken',
+  // Destinataire d'une notification (adresse email ou numéro).
+  'to',
+  'recipient',
 ];
 
 /**

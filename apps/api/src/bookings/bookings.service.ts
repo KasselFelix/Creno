@@ -20,6 +20,7 @@ import type { AuthUser } from '../auth/auth.types.js';
 import { AvailabilityService } from '../availability/availability.service.js';
 import { DomainError } from '../common/domain-error.js';
 import { mapPgError } from '../common/pg-errors.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import { DB } from '../database/database.module.js';
@@ -103,6 +104,7 @@ export class BookingsService {
     private readonly bookings: BookingsRepository,
     private readonly resources: ResourcesService,
     private readonly availability: AvailabilityService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -223,7 +225,13 @@ export class BookingsService {
 
     // Ressource gratuite : rien à encaisser, la réservation est confirmée tout de suite.
     if (row.priceCents === 0) {
-      if (!(await this.bookings.confirmFree(id))) throw notPayable();
+      // La confirmation et ses notifications sont validées ensemble (outbox transactionnelle).
+      const confirmed = await this.handle.db.transaction(async (tx) => {
+        if (!(await this.bookings.confirmFree(id, tx))) return false;
+        await this.notifications.bookingConfirmed(id, tx);
+        return true;
+      });
+      if (!confirmed) throw notPayable();
       this.logger.log({ event: 'booking.confirmed', bookingId: id, paid: false });
       return { checkoutUrl: null, booking: toDetail(await this.reload(id), 'customer') };
     }
@@ -314,7 +322,12 @@ export class BookingsService {
         throw this.gatewayFailure('refund', id, error);
       }
     }
-    if (!(await this.bookings.cancel(id, 'confirmed'))) {
+    const cancelled = await this.handle.db.transaction(async (tx) => {
+      if (!(await this.bookings.cancel(id, 'confirmed', tx))) return false;
+      await this.notifications.bookingCancelled(id, viewer, tx);
+      return true;
+    });
+    if (!cancelled) {
       throw cancellationNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
     }
     this.logger.log({ event: 'booking.cancelled', bookingId: id, by: viewer, refunded: refund });

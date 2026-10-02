@@ -50,6 +50,45 @@ export const envSchema = z
     ),
     // Commission Creno en points de base : 1000 = 10 %.
     STRIPE_PLATFORM_FEE_BPS: z.coerce.number().int().min(0).max(5000).default(1000),
+    // Workers et tâches planifiées (pg-boss). `false` : l'instance crée des jobs sans en exécuter.
+    JOBS_WORKERS_ENABLED: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((value) => value === 'true'),
+    // Email. Resend en production ; sans clé, Mailpit (boîte de réception de dev) si son adresse est
+    // donnée ; sinon aucun email ne part et les notifications sont marquées `skipped`.
+    RESEND_API_KEY: optionalSecret(/^re_\w+$/, 'clé API Resend attendue'),
+    EMAIL_FROM: z
+      .string()
+      .regex(/^([^<>\r\n]+ <[^<>@\s]+@[^<>@\s]+>|[^<>@\s]+@[^<>@\s]+)$/, {
+        error: 'format attendu : Nom <adresse@domaine>',
+      })
+      .default('Creno <onboarding@resend.dev>'),
+    MAILPIT_URL: z.preprocess(
+      (value) => (value === '' ? undefined : value),
+      z.url({ protocol: /^https?$/ }).optional(),
+    ),
+    // SMS (Twilio) : les trois variables ensemble, ou aucune.
+    TWILIO_ACCOUNT_SID: optionalSecret(
+      /^AC[0-9a-fA-F]{32}$/,
+      'identifiant de compte Twilio attendu',
+    ),
+    TWILIO_AUTH_TOKEN: optionalSecret(
+      /^[0-9a-fA-F]{32}$/,
+      "jeton d'authentification Twilio attendu",
+    ),
+    // Préfixes des numéros qui peuvent recevoir un SMS (défaut : mobiles français). Un numéro
+    // hors liste ne reçoit rien : frein à la fraude vers des numéros surtaxés à l'étranger.
+    SMS_ALLOWED_PREFIXES: z
+      .string()
+      .regex(/^\+\d{1,6}(,\+\d{1,6})*$/, { error: 'liste de préfixes attendue, ex. +336,+337' })
+      .default('+336,+337')
+      .transform((value) => value.split(',')),
+    // Numéro expéditeur au format international, ou identifiant d'un Messaging Service.
+    TWILIO_FROM: optionalSecret(
+      /^(\+[1-9]\d{6,14}|MG[0-9a-fA-F]{32})$/,
+      'numéro E.164 ou Messaging Service attendu',
+    ),
   })
   .superRefine((env, ctx) => {
     // Une clé « live » encaisse de vrais paiements : jamais en développement ni en test.
@@ -60,8 +99,28 @@ export const envSchema = z
         message: 'clé de test (sk_test_…) obligatoire hors production',
       });
     }
+    const twilio = [env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN, env.TWILIO_FROM];
+    if (twilio.some(Boolean) && !twilio.every(Boolean)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TWILIO_ACCOUNT_SID'],
+        message: 'TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN et TWILIO_FROM vont ensemble',
+      });
+    }
     if (env.NODE_ENV !== 'production') return;
-    for (const name of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const) {
+    // Mailpit n'envoie rien : en production, il masquerait l'absence d'emails réels.
+    if (env.MAILPIT_URL) {
+      ctx.addIssue({ code: 'custom', path: ['MAILPIT_URL'], message: 'interdite en production' });
+    }
+    // L'expéditeur de démonstration de Resend n'écrit qu'à l'adresse du compte : tout échouerait.
+    if (/@resend\.dev>?$/i.test(env.EMAIL_FROM)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['EMAIL_FROM'],
+        message: 'expéditeur sur un domaine vérifié obligatoire en production',
+      });
+    }
+    for (const name of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'RESEND_API_KEY'] as const) {
       if (!env[name]) {
         ctx.addIssue({ code: 'custom', path: [name], message: 'obligatoire en production' });
       }

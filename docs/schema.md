@@ -12,6 +12,8 @@ erDiagram
   resources ||--o{ availability_exceptions : fermetures
   resources ||--o{ bookings : "est réservée"
   bookings ||--o| payments : "est payée par"
+  bookings ||--o{ notifications : "déclenche"
+  users ||--o{ notifications : "destinataire"
 
   users {
     uuid id PK
@@ -99,22 +101,38 @@ erDiagram
     text type
     timestamptz received_at
   }
+  notifications {
+    uuid id PK
+    uuid booking_id FK
+    uuid recipient_id FK
+    notification_kind kind "confirmation, rappel, annulation…"
+    notification_channel channel "email | sms"
+    notification_status status "scheduled | pending | sent | failed | skipped"
+    timestamptz scheduled_for "instant d'envoi voulu"
+    int attempts ">= 0"
+    text reason "motif de skipped / failed"
+    text provider_message_id "nullable"
+    timestamptz sent_at "obligatoire si sent"
+  }
 ```
 
 Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règles et exceptions de disponibilité et `stripe_events`. Montants en centimes (`integer`), dates en UTC (`timestamptz`), créneaux en `tstzrange` semi-ouverts `[début, fin)`.
 
 ## Migrations
 
-| Fichier                                             | Contenu                                                                                                  |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                        |
-| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                             |
-| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                           |
-| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises    |
-| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                  |
-| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                          |
-| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`   |
-| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation » |
+| Fichier                                             | Contenu                                                                                                              |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                                    |
+| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                                         |
+| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                                       |
+| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises                |
+| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                              |
+| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                                      |
+| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`               |
+| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »             |
+| `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events` |
+
+Le schéma `pgboss` (file de jobs) n'est pas dans ces migrations : pg-boss l'installe et le met à jour lui-même au démarrage de l'API.
 
 ## La contrainte `bookings_no_overlap`
 
@@ -215,6 +233,37 @@ SELECT count(*) FILTER (WHERE checkout_started_at IS NULL)     AS sans_paiement_
 ```
 
 **Compte du prestataire.** `providers.stripe_charges_enabled` recopie l'état du compte Stripe (capacité de transfert active : le prestataire peut recevoir l'argent des réservations) (webhook `account.updated`, ou relecture au retour du formulaire). `CHECK (NOT stripe_charges_enabled OR stripe_account_id IS NOT NULL)` : pas de paiements actifs sans compte vers lequel verser. `stripe_account_id` ne sort jamais de l'API.
+
+## Notifications et jobs
+
+Décisions : [ADR 0010](adr/0010-notifications-outbox-pg-boss.md).
+
+**Outbox transactionnelle.** `notifications` porte une ligne par message à envoyer. La ligne et son job d'envoi (table `pgboss.job`) sont écrits dans la transaction qui change le statut de la réservation : ils sont validés ou annulés avec elle. Le job ne contient que l'identifiant de la notification ; l'adresse et le numéro restent dans `users`.
+
+**Un message par destinataire, quoi qu'il arrive.** `UNIQUE (booking_id, kind, channel, recipient_id)` : un webhook Stripe rejoué n'insère rien, donc ne crée aucun job.
+
+```sql
+INSERT INTO notifications (booking_id, recipient_id, kind, channel) VALUES ($1, $2, 'booking_confirmed', 'email')
+ON CONFLICT DO NOTHING
+RETURNING id, status;   -- rien de renvoyé : déjà notifié
+```
+
+**Cycle de vie** : `scheduled` (rappel à venir, pas encore de job) → `pending` (un job existe) → `sent`, `failed` (action requise) ou `skipped` (plus lieu d'être, ou canal non configuré). `notifications_sent_has_date` et `notifications_closed_has_reason` imposent la date d'envoi et le motif.
+
+**Rappels.** La ligne du rappel est créée à la confirmation avec `scheduled_for = début − 24 h`. Toutes les 5 minutes, une tâche met en file celles qui sont dues ; l'index partiel `notifications_scheduled_for_idx … WHERE status = 'scheduled'` ne contient que les rappels à venir :
+
+```sql
+UPDATE notifications SET status = 'pending'
+ WHERE id = ANY(ARRAY(SELECT id FROM notifications
+                       WHERE status = 'scheduled' AND scheduled_for <= now()
+                       ORDER BY scheduled_for LIMIT 500
+                       FOR UPDATE SKIP LOCKED))
+RETURNING id;
+```
+
+`FOR UPDATE SKIP LOCKED` verrouille les lignes lues et saute celles qu'une autre transaction tient déjà : deux instances qui passent en même temps se partagent les lignes au lieu de s'attendre, et aucune n'envoie deux fois. `= ANY(ARRAY(…))` plutôt que `IN (…)` : la sous-requête est évaluée une fois et l'UPDATE passe par la clé primaire ; avec `IN`, Postgres choisissait une semi-jointure qui relisait toute la table (constaté à l'EXPLAIN sur 80 000 lignes).
+
+**Ménage.** Trois tâches planifiées : holds échus passés à `expired` (index partiel `bookings_pending_expires_at_idx`, même lecture `SKIP LOCKED` : une réservation ou un webhook en cours n'est jamais attendu), sessions expirées ou révoquées supprimées (parcours complet, une fois par nuit : le `OR` des deux conditions ne profiterait pas d'un index), événements Stripe de plus de 90 jours supprimés (`stripe_events_received_at_idx`). Aucune n'est nécessaire à la correction : un hold échu est déjà ignoré par le calcul des créneaux et libéré par la réservation suivante.
 
 ## Recherche par rayon
 

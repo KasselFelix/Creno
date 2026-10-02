@@ -12,6 +12,9 @@ import type { AppConfig } from './config/env.js';
 import { DatabaseModule } from './database/database.module.js';
 import { GeocodingModule } from './geocoding/geocoding.module.js';
 import { HealthModule } from './health/health.module.js';
+import { JobsModule } from './jobs/jobs.module.js';
+import { MaintenanceModule } from './maintenance/maintenance.module.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { ResourcesModule } from './resources/resources.module.js';
@@ -28,6 +31,7 @@ import { UsersModule } from './users/users.module.js';
         loggerParams(config, stream),
     }),
     DatabaseModule,
+    JobsModule,
     HealthModule,
     AuthModule,
     UsersModule,
@@ -38,6 +42,8 @@ import { UsersModule } from './users/users.module.js';
     PaymentsModule,
     SearchModule,
     GeocodingModule,
+    NotificationsModule,
+    MaintenanceModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })
