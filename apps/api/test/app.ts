@@ -17,6 +17,13 @@ import { GEOCODER, type Geocoder } from '../src/geocoding/geocoder.js';
 import { APP_CONFIG } from '../src/config/config.module.js';
 import type { AppConfig } from '../src/config/env.js';
 import { DB } from '../src/database/database.module.js';
+import { JobsService } from '../src/jobs/jobs.service.js';
+import {
+  EMAIL_GATEWAY,
+  type EmailGateway,
+  SMS_GATEWAY,
+  type SmsGateway,
+} from '../src/notifications/delivery.js';
 import { PAYMENTS_GATEWAY, type PaymentsGateway } from '../src/payments/payments-gateway.js';
 import { setupApp } from '../src/setup-app.js';
 
@@ -44,6 +51,10 @@ export interface TestAppOptions {
   geocoder?: Geocoder;
   /** Remplace Stripe. Sans cette option, la passerelle est « non configurée » (503), jamais le vrai Stripe. */
   payments?: PaymentsGateway;
+  /** Remplace l'envoi d'emails. Sans cette option, la passerelle est « non configurée » : rien ne part. */
+  email?: EmailGateway;
+  /** Remplace l'envoi de SMS. Sans cette option, la passerelle est « non configurée ». */
+  sms?: SmsGateway;
 }
 
 /** Démarre l'application complète sur la base de test (jamais de base mockée). */
@@ -62,6 +73,14 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     STRIPE_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
     STRIPE_CONNECT_WEBHOOK_SECRET: '',
     STRIPE_PLATFORM_FEE_BPS: '1000',
+    // Pas de worker ni de tâche planifiée : les tests exécutent les jobs eux-mêmes (`runJobs`).
+    JOBS_WORKERS_ENABLED: 'false',
+    // Vides = absentes : aucun test n'écrit à Resend, Mailpit ou Twilio, même si le .env local les configure.
+    RESEND_API_KEY: '',
+    MAILPIT_URL: '',
+    TWILIO_ACCOUNT_SID: '',
+    TWILIO_AUTH_TOKEN: '',
+    TWILIO_FROM: '',
   });
 
   const builder = Test.createTestingModule({ imports: [AppModule] });
@@ -72,6 +91,8 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
   }
   if (options.geocoder) builder.overrideProvider(GEOCODER).useValue(options.geocoder);
   if (options.payments) builder.overrideProvider(PAYMENTS_GATEWAY).useValue(options.payments);
+  if (options.email) builder.overrideProvider(EMAIL_GATEWAY).useValue(options.email);
+  if (options.sms) builder.overrideProvider(SMS_GATEWAY).useValue(options.sms);
   if (options.logs) {
     const logs = options.logs;
     builder.overrideProvider(LOG_STREAM).useValue(
@@ -100,8 +121,35 @@ export function dbOf(app: INestApplication): DbHandle {
 
 export async function resetDatabase(app: INestApplication): Promise<void> {
   await dbOf(app).db.execute(
-    sql`TRUNCATE sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
   );
+  await app.get(JobsService).clear();
+}
+
+/** Exécute les jobs en attente d'une file, comme le ferait un worker. Renvoie le nombre de jobs traités. */
+export function runJobs(app: INestApplication, queue: string): Promise<number> {
+  return app.get(JobsService).runPending(queue);
+}
+
+/** Fausses passerelles d'envoi : chaque message « part » et reste consultable dans `mock.calls`. */
+export function fakeEmailGateway() {
+  let sent = 0;
+  return {
+    send: vi.fn<EmailGateway['send']>(async () => {
+      sent += 1;
+      return { messageId: `email_fake_${sent}` };
+    }),
+  } satisfies EmailGateway;
+}
+
+export function fakeSmsGateway() {
+  let sent = 0;
+  return {
+    send: vi.fn<SmsGateway['send']>(async () => {
+      sent += 1;
+      return { messageId: `sms_fake_${sent}` };
+    }),
+  } satisfies SmsGateway;
 }
 
 let counter = 0;

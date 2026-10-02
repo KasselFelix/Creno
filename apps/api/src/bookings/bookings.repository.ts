@@ -278,8 +278,8 @@ export class BookingsRepository {
   }
 
   /** Confirme sans paiement un hold actif sur une ressource gratuite. Renvoie vrai si la ligne a changé. */
-  async confirmFree(id: string): Promise<boolean> {
-    const rows = await this.handle.db
+  async confirmFree(id: string, tx: Database): Promise<boolean> {
+    const rows = await tx
       .update(bookings)
       .set({ status: 'confirmed', expiresAt: null })
       .where(and(eq(bookings.id, id), activeHold, eq(bookings.priceCents, 0)))
@@ -288,8 +288,12 @@ export class BookingsRepository {
   }
 
   /** Annule une réservation si elle a encore le statut attendu. Renvoie vrai si la ligne a changé. */
-  async cancel(id: string, from: 'pending' | 'confirmed'): Promise<boolean> {
-    const rows = await this.handle.db
+  async cancel(
+    id: string,
+    from: 'pending' | 'confirmed',
+    tx: Database = this.handle.db,
+  ): Promise<boolean> {
+    const rows = await tx
       .update(bookings)
       .set({ status: 'cancelled', cancelledAt: sql`now()`, expiresAt: null })
       .where(and(eq(bookings.id, id), eq(bookings.status, from)))

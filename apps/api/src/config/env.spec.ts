@@ -11,11 +11,13 @@ const base = {
 // Fausses clés construites à l'exécution : aucune chaîne en forme de secret dans le dépôt.
 const stripeKey = (mode: 'test' | 'live') => ['sk', mode, 'x'.repeat(24)].join('_');
 const webhookSecret = ['whsec', 'x'.repeat(24)].join('_');
+const resendKey = ['re', 'x'.repeat(24)].join('_');
 const prodBase = { ...base, NODE_ENV: 'production', JWT_ACCESS_SECRET: 'x'.repeat(48) };
 const prod = {
   ...prodBase,
   STRIPE_SECRET_KEY: stripeKey('live'),
   STRIPE_WEBHOOK_SECRET: webhookSecret,
+  RESEND_API_KEY: resendKey,
 };
 
 describe('loadConfig', () => {
@@ -70,6 +72,45 @@ describe('loadConfig', () => {
       expect(() => loadConfig({ ...base, STRIPE_PLATFORM_FEE_BPS: '5001' })).toThrow(
         /STRIPE_PLATFORM_FEE_BPS/,
       );
+    });
+  });
+
+  describe('notifications', () => {
+    it('sont facultatives hors production : rien ne part sans clé', () => {
+      const config = loadConfig({ ...base, RESEND_API_KEY: '', MAILPIT_URL: '', TWILIO_FROM: '' });
+      expect(config.RESEND_API_KEY).toBeUndefined();
+      expect(config.MAILPIT_URL).toBeUndefined();
+      expect(config.JOBS_WORKERS_ENABLED).toBe(true);
+      expect(loadConfig({ ...base, JOBS_WORKERS_ENABLED: 'false' }).JOBS_WORKERS_ENABLED).toBe(
+        false,
+      );
+    });
+
+    it('exige Resend et refuse Mailpit en production', () => {
+      const { RESEND_API_KEY: _omit, ...withoutResend } = prod;
+      expect(() => loadConfig(withoutResend)).toThrow(/RESEND_API_KEY/);
+      expect(() => loadConfig({ ...prod, MAILPIT_URL: 'http://mailpit:8025' })).toThrow(
+        /MAILPIT_URL/,
+      );
+    });
+
+    it('exige les trois variables Twilio ensemble, sans afficher leur valeur', () => {
+      const sid = `AC${'a'.repeat(32)}`;
+      const token = 'b'.repeat(32);
+      expect(() => loadConfig({ ...base, TWILIO_ACCOUNT_SID: sid })).toThrow(/TWILIO/);
+      expect(() => loadConfig({ ...base, TWILIO_ACCOUNT_SID: sid })).not.toThrow(new RegExp(sid));
+      const config = loadConfig({
+        ...base,
+        TWILIO_ACCOUNT_SID: sid,
+        TWILIO_AUTH_TOKEN: token,
+        TWILIO_FROM: '+33600000000',
+      });
+      expect(config.TWILIO_FROM).toBe('+33600000000');
+    });
+
+    it('valide l’expéditeur des emails', () => {
+      expect(loadConfig(base).EMAIL_FROM).toBe('Creno <onboarding@resend.dev>');
+      expect(() => loadConfig({ ...base, EMAIL_FROM: 'pas une adresse' })).toThrow(/EMAIL_FROM/);
     });
   });
 

@@ -7,6 +7,7 @@ import { DomainError } from '../common/domain-error.js';
 import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import { DB } from '../database/database.module.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { PAYMENTS_GATEWAY, type PaymentsGateway } from './payments-gateway.js';
 import { PaymentsRepository } from './payments.repository.js';
 import {
@@ -91,6 +92,7 @@ export class WebhookService {
     private readonly verifier: StripeWebhookVerifier,
     private readonly payments: PaymentsRepository,
     private readonly bookings: BookingsRepository,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async receive(rawBody: Buffer | undefined, signature: string | undefined): Promise<void> {
@@ -210,6 +212,7 @@ export class WebhookService {
     // Le remboursement est fait : il ne reste qu'à garder la trace du paiement reçu. Le statut de
     // la réservation ne bouge pas, même si le créneau s'est libéré entre-temps.
     if (refunded?.bookingId === booking.id) {
+      await this.notifications.paymentRefundedLate(booking.id, tx);
       return { kind: 'late_refund', bookingId: booking.id, reason: refunded.reason };
     }
 
@@ -225,6 +228,8 @@ export class WebhookService {
       case 'pending':
         // Même si l'échéance du hold est passée : tant que la ligne est `pending`, elle tient le créneau.
         await this.bookings.confirmPaid(booking.id, session.id, tx);
+        // Dans la même transaction : pas de confirmation sans notification, ni l'inverse.
+        await this.notifications.bookingConfirmed(booking.id, tx);
         return confirmed(false);
       case 'expired':
         try {
@@ -233,11 +238,12 @@ export class WebhookService {
           await tx.transaction((savepoint) =>
             this.bookings.confirmPaid(booking.id, session.id, savepoint),
           );
-          return confirmed(true);
         } catch (error) {
           if (sqlState(error) !== '23P01') throw error;
+          throw new RefundRequired(booking.id, session.payment_intent, 'slot_taken');
         }
-        throw new RefundRequired(booking.id, session.payment_intent, 'slot_taken');
+        await this.notifications.bookingConfirmed(booking.id, tx);
+        return confirmed(true);
       case 'cancelled':
         throw new RefundRequired(booking.id, session.payment_intent, 'booking_cancelled');
     }
