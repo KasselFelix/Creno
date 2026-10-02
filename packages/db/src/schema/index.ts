@@ -1,5 +1,6 @@
 export * from './availability.js';
 export * from './bookings.js';
+export * from './notifications.js';
 export * from './payments.js';
 export * from './providers.js';
 export * from './resources.js';

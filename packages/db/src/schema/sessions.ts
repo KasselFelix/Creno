@@ -25,6 +25,8 @@ export const sessions = pgTable(
   },
   (t) => [
     index('sessions_user_id_idx').on(t.userId),
+    // Purge nocturne des sessions expirées (job `maintenance.purge-sessions`).
+    index('sessions_expires_at_idx').on(t.expiresAt),
     check('sessions_expiry_after_creation', sql`${t.expiresAt} > ${t.createdAt}`),
     check('sessions_user_agent_length', sql`char_length(${t.userAgent}) <= 200`),
   ],

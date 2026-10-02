@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     }
     await db.transaction(async (tx) => {
       await tx.execute(
-        sql`TRUNCATE sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+        sql`TRUNCATE notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
       );
 
       await tx
