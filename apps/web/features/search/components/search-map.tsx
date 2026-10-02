@@ -111,7 +111,8 @@ export default function SearchMap({
         }}
         onClick={() => setSelectedId(null)}
       >
-        <NavigationControl position="bottom-right" showCompass={false} />
+        {/* En haut : la carte peut dépasser le bas de l'écran, le zoom doit rester visible. */}
+        <NavigationControl position="top-right" showCompass={false} />
         {items.map((provider) => {
           const active = provider.id === activeId || provider.id === selectedId;
           return (
