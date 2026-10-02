@@ -16,6 +16,7 @@ const columns = {
   city: providers.city,
   latitude: sql<number>`ST_Y(${providers.location}::geometry)`,
   longitude: sql<number>`ST_X(${providers.location}::geometry)`,
+  stripeChargesEnabled: providers.stripeChargesEnabled,
 };
 
 export interface ProviderRow {
@@ -29,6 +30,8 @@ export interface ProviderRow {
   city: string;
   latitude: number;
   longitude: number;
+  /** Le compte Stripe du prestataire peut encaisser (l'identifiant du compte, lui, ne sort jamais d'ici). */
+  stripeChargesEnabled: boolean;
 }
 
 export interface ProviderValues {

@@ -13,6 +13,13 @@ const trustProxySchema = z
     return /^\d+$/.test(value) ? Number(value) : value;
   });
 
+/** Une variable laissée vide (`STRIPE_SECRET_KEY=` dans `.env`, ou transmise vide par docker compose) vaut absente. */
+const optionalSecret = (pattern: RegExp, format: string) =>
+  z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().regex(pattern, { error: format }).optional(),
+  );
+
 /** Variables d'environnement de l'API, validées au démarrage : l'API refuse de démarrer si l'une manque. */
 export const envSchema = z
   .object({
@@ -33,9 +40,32 @@ export const envSchema = z
     BOOKING_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(20),
     // Géocodeur d'adresses (Géoplateforme de l'IGN) : pas de clé, donc rien de secret ici.
     GEOCODER_URL: z.url({ protocol: /^https?$/ }).default('https://data.geopf.fr/geocodage'),
+    // Stripe. Sans clé (clone frais), l'API démarre et les routes de paiement répondent 503.
+    STRIPE_SECRET_KEY: optionalSecret(/^(sk|rk)_(test|live)_\w+$/, 'clé secrète Stripe attendue'),
+    STRIPE_WEBHOOK_SECRET: optionalSecret(/^whsec_\w+$/, 'secret de webhook Stripe attendu'),
+    // En production, `account.updated` arrive sur un endpoint « Connect », qui a son propre secret.
+    STRIPE_CONNECT_WEBHOOK_SECRET: optionalSecret(
+      /^whsec_\w+$/,
+      'secret de webhook Stripe attendu',
+    ),
+    // Commission Creno en points de base : 1000 = 10 %.
+    STRIPE_PLATFORM_FEE_BPS: z.coerce.number().int().min(0).max(5000).default(1000),
   })
   .superRefine((env, ctx) => {
+    // Une clé « live » encaisse de vrais paiements : jamais en développement ni en test.
+    if (env.NODE_ENV !== 'production' && /^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY ?? '')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STRIPE_SECRET_KEY'],
+        message: 'clé de test (sk_test_…) obligatoire hors production',
+      });
+    }
     if (env.NODE_ENV !== 'production') return;
+    for (const name of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const) {
+      if (!env[name]) {
+        ctx.addIssue({ code: 'custom', path: [name], message: 'obligatoire en production' });
+      }
+    }
     if (/change-me|dev-only/i.test(env.JWT_ACCESS_SECRET)) {
       ctx.addIssue({
         code: 'custom',

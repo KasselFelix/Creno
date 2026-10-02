@@ -46,6 +46,7 @@ describe('resources', () => {
       ['durée trop longue', { slotMinutes: 1441 }],
       ['prix négatif', { priceCents: -1 }],
       ['prix non entier', { priceCents: 45.5 }],
+      ['prix payant sous le minimum de Stripe (0,50 €)', { priceCents: 49 }],
     ])('400 VALIDATION_FAILED : %s', async (_label, patch) => {
       const { agent } = await createProviderWithResource(app);
       const res = await agent
@@ -97,7 +98,7 @@ describe('resources', () => {
         .expect(201);
       const res = await intruder.agent
         .patch(`/v1/resources/${owner.resource.id}`)
-        .send({ priceCents: 1 })
+        .send({ priceCents: 100 })
         .expect(403);
       expect(apiErrorSchema.parse(res.body).code).toBe('FORBIDDEN_OWNERSHIP');
 
@@ -111,11 +112,11 @@ describe('resources', () => {
       const { agent, resource } = await createProviderWithResource(app);
       await request(app.getHttpServer())
         .patch(`/v1/resources/${resource.id}`)
-        .send({ priceCents: 1 })
+        .send({ priceCents: 100 })
         .expect(401);
       await agent
         .patch('/v1/resources/00000000-0000-4000-8000-000000000000')
-        .send({ priceCents: 1 })
+        .send({ priceCents: 100 })
         .expect(404);
     });
   });

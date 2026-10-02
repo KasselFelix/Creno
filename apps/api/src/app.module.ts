@@ -12,6 +12,7 @@ import type { AppConfig } from './config/env.js';
 import { DatabaseModule } from './database/database.module.js';
 import { GeocodingModule } from './geocoding/geocoding.module.js';
 import { HealthModule } from './health/health.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { ResourcesModule } from './resources/resources.module.js';
 import { SearchModule } from './search/search.module.js';
@@ -34,6 +35,7 @@ import { UsersModule } from './users/users.module.js';
     ResourcesModule,
     AvailabilityModule,
     BookingsModule,
+    PaymentsModule,
     SearchModule,
     GeocodingModule,
   ],

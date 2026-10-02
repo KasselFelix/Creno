@@ -82,7 +82,11 @@ export class ProvidersService {
     const row = await this.providers.findBySlug(slug);
     if (!row) throw notFound();
     const rows = await this.resources.listByProvider(row.id, { activeOnly: true });
-    return { ...toProvider(row), resources: rows.map(toResource) };
+    return {
+      ...toProvider(row),
+      resources: rows.map(toResource),
+      onlinePayment: row.stripeChargesEnabled,
+    };
   }
 
   private async requireMine(current: AuthUser): Promise<ProviderRow> {

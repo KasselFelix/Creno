@@ -13,7 +13,8 @@ const rootEnv = path.resolve(import.meta.dirname, '../../../.env');
 if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // `rawBody` garde le corps brut de chaque requête : la signature du webhook Stripe porte dessus.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   const logger = app.get(Logger);
   app.useLogger(logger);
 
