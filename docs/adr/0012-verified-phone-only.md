@@ -28,6 +28,9 @@ Le rappel de la veille part par SMS au numéro du compte. Jusqu'ici, ce numéro 
 - Changer de numéro garde l'ancien actif jusqu'à la vérification du nouveau : pas de période sans rappel.
 - L'ancien titulaire d'un numéro transféré n'est pas prévenu (il garde ses rappels par email) ; un email « votre numéro a été retiré » est à envisager.
 - **Risque résiduel** : en cas de fuite de la base, un hash de code se casse hors ligne (10⁶ possibilités). Acceptable : le code expire en 10 minutes et ne sert qu'à prouver un numéro. Un HMAC avec une clé serveur l'éviterait, au prix d'un secret de plus.
+- **Avant la mise en production** (relevé par la review sécurité) : plafond global de SMS par jour et alerte de budget Twilio (plusieurs comptes et IP peuvent faire monter la facture vers des mobiles français) ; email à l'ancien titulaire lors d'un transfert.
+- Un tiers peut épuiser le plafond d'un numéro (5 codes par 24 h) : le titulaire reçoit ces SMS et doit attendre pour vérifier son numéro. Assumé : le plafond par numéro est ce qui empêche le harcèlement illimité.
+- Une reprise du job ne régénère le code que si la demande porte encore le hash de l'essai précédent : une demande consommée ou invalidée entre-temps ne repart pas.
 - La demande d'un code pour le numéro d'un tiers lui envoie un SMS (« ne le communiquez à personne ») : c'est le prix de toute vérification par SMS, borné par le plafond de 5 par numéro et par jour et par les préfixes autorisés.
 - L'état « code envoyé » n'est gardé que dans la page : la recharger revient à « pas de demande en cours » (on redemande un code).
 

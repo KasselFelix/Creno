@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, gt, isNotNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import { type Database, type DbHandle, phoneVerifications } from '@creno/db';
 import { PHONE_CODE_MAX_ATTEMPTS } from '@creno/shared';
 import { DB } from '../database/database.module.js';
@@ -78,12 +78,22 @@ export class PhoneVerificationsRepository {
     return row?.id;
   }
 
-  /** Hash du code qui va partir. `false` : la demande a disparu entre-temps. */
-  async setCodeHash(id: string, codeHash: string): Promise<boolean> {
+  /**
+   * Hash du code qui va partir. Premier envoi : seulement sur une demande vierge. Reprise : seulement
+   * si la demande porte encore le hash de l'essai précédent, c'est-à-dire si elle n'a été ni
+   * consommée ni invalidée entre-temps (retrait du numéro). `false` : plus rien à envoyer.
+   */
+  async setCodeHash(id: string, codeHash: string, retry: boolean): Promise<boolean> {
     const rows = await this.handle.db
       .update(phoneVerifications)
       .set({ codeHash })
-      .where(eq(phoneVerifications.id, id))
+      .where(
+        and(
+          eq(phoneVerifications.id, id),
+          eq(phoneVerifications.attempts, 0),
+          retry ? isNotNull(phoneVerifications.codeHash) : isNull(phoneVerifications.codeHash),
+        ),
+      )
       .returning({ id: phoneVerifications.id });
     return rows.length > 0;
   }

@@ -117,6 +117,7 @@ describe('vérification du téléphone', () => {
     it('numéro mal formé → 400 ; non connecté → 401 sur les trois routes', async () => {
       const { agent } = await registerAs(app);
       await requestCode(agent, '0639980001').expect(400);
+      await requestCode(agent, '+3363998000123').expect(400);
       const anonymous = request(app.getHttpServer());
       await anonymous.post('/v1/users/me/phone').send({ phone: PHONE }).expect(401);
       await anonymous.post('/v1/users/me/phone/verify').send({ code: '123456' }).expect(401);
@@ -374,6 +375,18 @@ describe('vérification du téléphone', () => {
       const code = lastCode();
       if (lost !== code) await verify(agent, lost).expect(400);
       await verify(agent, code).expect(200);
+    });
+
+    it('reprise après le retrait du numéro : la demande invalidée ne repart pas', async () => {
+      sms.send.mockRejectedValueOnce(new DeliveryError('http_503', true));
+      const { agent } = await registerAs(app);
+      await requestCode(agent).expect(202);
+      await runJobs(app, PHONE_CODE_QUEUE);
+      await agent.delete('/v1/users/me/phone').expect(204);
+
+      expect(await runJobs(app, PHONE_CODE_QUEUE)).toBe(1);
+      expect(sms.send).toHaveBeenCalledTimes(1);
+      expect(logged('user.phone_code_skipped')).toMatchObject([{ reason: 'obsolete' }]);
     });
 
     it(`au plus ${PHONE_CODE_RETRY_LIMIT} reprises ; la file morte le signale en error`, async () => {

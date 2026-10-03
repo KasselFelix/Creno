@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   completeRegistrationSchema,
+  phoneSchema,
   registerSchema,
   updateMeSchema,
   verifyPhoneSchema,
@@ -59,4 +60,18 @@ describe('verifyPhoneSchema', () => {
   it.each(['12345', '1234567', '12a456', '١٢٣٤٥٦'])('refuse %s', (code) => {
     expect(verifyPhoneSchema.safeParse({ code }).success).toBe(false);
   });
+});
+
+describe('phoneSchema', () => {
+  it('accepte un numéro E.164', () => {
+    expect(phoneSchema.parse(' +33612345678 ')).toBe('+33612345678');
+    expect(phoneSchema.safeParse('+447900000000').success).toBe(true);
+  });
+
+  it.each(['0612345678', '+330612345678', '+3361234567', '+3361234567890'])(
+    'refuse %s',
+    (phone) => {
+      expect(phoneSchema.safeParse(phone).success).toBe(false);
+    },
+  );
 });

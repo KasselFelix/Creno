@@ -108,10 +108,7 @@ function VerifiedPhone({ phone, onChange }: { phone: string; onChange: () => voi
           Vérifié
         </Badge>
       </div>
-      <p className="text-sm text-muted-foreground">
-        Vous recevez le rappel de vos réservations par SMS, la veille.
-      </p>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <Button variant="outline" className="h-11" onClick={onChange}>
           Changer de numéro
         </Button>
@@ -198,7 +195,7 @@ function PhoneForm({
           <FieldError errors={[errors.phone]} />
         </Field>
         {requestCode.isError && <ErrorAlert error={requestCode.error} />}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button type="submit" className="h-11" disabled={requestCode.isPending}>
             {requestCode.isPending && <LoaderCircle aria-hidden className="size-4 animate-spin" />}
             Recevoir un code
@@ -284,7 +281,7 @@ function CodeForm({
         </Field>
         {verify.isError && <ErrorAlert error={verify.error} />}
         {resend.isError && <ErrorAlert error={resend.error} />}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button type="submit" className="h-11" disabled={verify.isPending}>
             {verify.isPending && <LoaderCircle aria-hidden className="size-4 animate-spin" />}
             Vérifier

@@ -15,7 +15,12 @@ export const emailSchema = z
 export const phoneSchema = z
   .string()
   .trim()
-  .regex(/^\+[1-9]\d{6,14}$/, { error: 'Numéro au format international, ex. +33612345678' });
+  .regex(/^\+[1-9]\d{6,14}$/, { error: 'Numéro au format international, ex. +33612345678' })
+  // Numéro français : toujours 9 chiffres après +33 (sans le 0). Un numéro trop long serait
+  // refusé par l'opérateur au moment d'envoyer le SMS.
+  .refine((phone) => !phone.startsWith('+33') || /^\+33\d{9}$/.test(phone), {
+    error: 'Numéro français : +33 suivi de 9 chiffres, sans le 0, ex. +33612345678',
+  });
 
 export const fullNameSchema = z
   .string()

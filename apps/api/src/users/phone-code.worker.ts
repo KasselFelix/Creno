@@ -70,7 +70,8 @@ export class PhoneCodeWorker implements OnModuleInit {
     }
 
     const code = String(randomInt(0, 10 ** PHONE_CODE_LENGTH)).padStart(PHONE_CODE_LENGTH, '0');
-    if (!(await this.verifications.setCodeHash(request.id, hashPhoneCode(request.id, code)))) {
+    const codeHash = hashPhoneCode(request.id, code);
+    if (!(await this.verifications.setCodeHash(request.id, codeHash, job.retryCount > 0))) {
       this.logger.log({ event: 'user.phone_code_skipped', ...base, reason: 'obsolete' });
       return;
     }
