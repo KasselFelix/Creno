@@ -11,20 +11,20 @@ export const E164_PATTERN = '^\\+[1-9][0-9]{6,14}$';
 export const users = pgTable(
   'users',
   {
-  id: uuid('id').primaryKey().defaultRandom(),
-  email: citext('email').notNull().unique(),
-  // Un compte n'est créé qu'une fois son adresse confirmée (voir `pending_registrations`) : pas de
-  // valeur par défaut, celui qui insère une ligne affirme que l'adresse est prouvée.
-  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }).notNull(),
-  fullName: text('full_name').notNull(),
-  // Uniquement un numéro prouvé par un code SMS (voir `phone_verifications`), et à un seul compte :
-  // c'est ce qui garantit que les rappels ne partent jamais vers le téléphone d'un tiers.
-  phone: text('phone'),
-  phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
-  role: userRole('role').notNull().default('customer'),
-  // Hash argon2id. NULL = compte sans mot de passe (ex. futur OAuth) : connexion par mot de passe impossible.
-  passwordHash: text('password_hash'),
-  ...timestamps,
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: citext('email').notNull().unique(),
+    // Un compte n'est créé qu'une fois son adresse confirmée (voir `pending_registrations`) : pas de
+    // valeur par défaut, celui qui insère une ligne affirme que l'adresse est prouvée.
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }).notNull(),
+    fullName: text('full_name').notNull(),
+    // Uniquement un numéro prouvé par un code SMS (voir `phone_verifications`), et à un seul compte :
+    // c'est ce qui garantit que les rappels ne partent jamais vers le téléphone d'un tiers.
+    phone: text('phone'),
+    phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
+    role: userRole('role').notNull().default('customer'),
+    // Hash argon2id. NULL = compte sans mot de passe (ex. futur OAuth) : connexion par mot de passe impossible.
+    passwordHash: text('password_hash'),
+    ...timestamps,
   },
   (t) => [
     uniqueIndex('users_phone_unique').on(t.phone),
