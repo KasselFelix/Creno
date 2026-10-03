@@ -32,7 +32,7 @@ Jusqu'ici, l'inscription créait le compte et ouvrait la session tout de suite, 
 - Une reprise du job après un échec ambigu (délai dépassé) génère un nouveau secret : si le premier email était parti, son lien est mort et c'est le second qui fonctionne.
 - **Passerelle email non configurée** (ni Resend ni Mailpit) : le job s'arrête sans reprise avec un log `warn`, comme pour les notifications (ADR 0010) ; réessayer n'y changerait rien. Ce cas n'existe pas en production, où `RESEND_API_KEY` est obligatoire.
 - **Déploiement** : `users.email_verified_at` est `NOT NULL` sans valeur par défaut. Pendant une bascule progressive, une ancienne révision de l'API ne pourrait plus créer de compte tant qu'elle tourne. Sans effet aujourd'hui (aucune production) ; une évolution de ce type se fera ensuite en deux migrations (colonne nullable, puis `NOT NULL` à la version suivante).
-- Le téléphone n'est toujours pas vérifié : les garde-fous SMS de l'ADR 0010 restent en place jusqu'à l'étape `phone-verification`.
+- Le téléphone n'était pas encore vérifié à cette date : c'est fait depuis l'[ADR 0012](0012-verified-phone-only.md).
 - Les comptes créés avant cette migration sont considérés vérifiés à leur date de création (aucune production à cette date).
 
 ## Alternatives écartées

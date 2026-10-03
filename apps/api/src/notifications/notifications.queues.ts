@@ -6,9 +6,9 @@ export const DEAD_QUEUE = 'notifications.dead';
 export const DISPATCH_QUEUE = 'notifications.dispatch-due';
 
 /**
- * Plafonds par destinataire. L'adresse d'un compte est confirmée à l'inscription ; le téléphone ne
- * l'est pas encore (étape `phone-verification`) : un compte peut porter le numéro de quelqu'un
- * d'autre, et ces plafonds bornent ce qu'il peut lui faire recevoir.
+ * Plafonds par destinataire. L'adresse et le téléphone d'un compte sont prouvés (lien d'inscription,
+ * code SMS) et n'appartiennent qu'à lui : « par compte » vaut donc « par boîte mail » et « par
+ * numéro ». Ces plafonds bornent ce qu'un bug ou un abus de réservations pourrait faire envoyer.
  */
 export const MAX_EMAILS_PER_RECIPIENT_PER_HOUR = 30;
 export const MAX_SMS_PER_RECIPIENT_PER_DAY = 5;

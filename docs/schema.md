@@ -14,13 +14,15 @@ erDiagram
   bookings ||--o| payments : "est payée par"
   bookings ||--o{ notifications : "déclenche"
   users ||--o{ notifications : "destinataire"
+  users ||--o{ phone_verifications : "demandes de code SMS"
 
   users {
     uuid id PK
     citext email UK
     timestamptz email_verified_at "obligatoire : adresse confirmée"
     text full_name
-    text phone "nullable"
+    text phone "UK, nullable : uniquement un numéro vérifié"
+    timestamptz phone_verified_at "renseigné ssi phone l'est"
     user_role role "customer | provider | admin"
     text password_hash "argon2id, nullable"
   }
@@ -29,6 +31,14 @@ erDiagram
     citext email "pas unique : plusieurs demandes"
     text token_hash "sha256 du secret du lien, nullable"
     timestamptz expires_at "création + 24 h"
+  }
+  phone_verifications {
+    uuid id PK
+    uuid user_id FK
+    text phone "numéro visé, E.164"
+    text code_hash "sha256(id:code), nullable"
+    integer attempts "0 à 5"
+    timestamptz expires_at "création + 10 min"
   }
   sessions {
     uuid id PK
@@ -139,6 +149,7 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 | `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »              |
 | `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events`  |
 | `0009_email_verification.sql` (générée, ajustée)    | table `pending_registrations` ; `users.email_verified_at` ajoutée, reprise sur les comptes existants, puis `NOT NULL` |
+| `0010_phone_verification.sql` (générée, ajustée)    | table `phone_verifications` ; `users.phone_verified_at`, numéros non prouvés effacés, `users_phone_unique` et CHECK   |
 
 Le schéma `pgboss` (file de jobs) n'est pas dans ces migrations : pg-boss l'installe et le met à jour lui-même au démarrage de l'API.
 
@@ -335,6 +346,36 @@ INSERT INTO sessions (…);                                          -- la perso
 Le même verrou protège le plafond de 3 demandes par adresse et par heure. `users.email_verified_at` est `NOT NULL` sans valeur par défaut : une ligne de `users` est toujours une adresse prouvée (les comptes antérieurs à la migration `0009` ont reçu leur date de création).
 
 Contrainte : `pending_registrations_expiry_after_creation`. Index : `(email, created_at)` pour le plafond et la suppression, `(expires_at)` pour la purge horaire des demandes expirées.
+
+## Vérification du téléphone
+
+`users.phone` ne contient que des numéros prouvés par un code SMS, et chacun n'appartient qu'à un compte (ADR 0012). Trois contraintes le portent :
+
+- `users_phone_unique` : index unique (les `NULL` ne se gênent pas) ;
+- `users_phone_verified` : `(phone IS NULL) = (phone_verified_at IS NULL)` ;
+- `users_phone_e164` : `phone ~ '^\+[1-9][0-9]{6,14}$'` (même règle sur `phone_verifications.phone`).
+
+Le numéro en cours de vérification vit dans `phone_verifications` (clé étrangère vers `users`, `ON DELETE CASCADE`). Le code naît dans le worker qui envoie le SMS ; la base n'en garde que `sha256(id:code)`. Seule la demande la plus récente d'un compte est utilisable. La saisie d'un code compte la tentative **dans la même instruction** que le contrôle, ce qui borne les comparaisons même avec des requêtes parallèles :
+
+```sql
+UPDATE phone_verifications SET attempts = attempts + 1
+ WHERE id = (SELECT id FROM phone_verifications WHERE user_id = $me ORDER BY created_at DESC, id DESC LIMIT 1)
+   AND attempts < 5 AND expires_at > now() AND code_hash IS NOT NULL
+RETURNING id, phone, code_hash;
+```
+
+Puis, si le code est bon, dans une transaction :
+
+```sql
+SELECT pg_advisory_xact_lock(hashtextextended($phone, 2));                -- un titulaire à la fois par numéro
+UPDATE phone_verifications SET code_hash = NULL WHERE id = $1 AND code_hash IS NOT NULL; -- usage unique
+UPDATE users SET phone = NULL, phone_verified_at = NULL WHERE phone = $phone AND id <> $me; -- transfert
+UPDATE users SET phone = $phone, phone_verified_at = now() WHERE id = $me;
+```
+
+Les demandes ne sont **jamais supprimées** à la vérification ni au retrait du numéro (leur `code_hash` passe à `NULL`) : elles comptent dans les plafonds (3 par compte et par heure, 5 par numéro sur 24 h, sous verrous consultatifs du compte puis du numéro). Le ménage horaire les supprime 24 h après leur expiration. Index : `(user_id, created_at)`, `(phone, created_at)`, `(expires_at)`.
+
+La migration `0010` efface les numéros saisis avant cette étape : ils n'avaient jamais été prouvés et auraient pu violer l'unicité (aucune production à cette date).
 
 ## Sessions et refresh token rotatif
 
