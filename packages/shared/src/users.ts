@@ -34,11 +34,41 @@ export const publicUserSchema = z.object({
 });
 export type PublicUser = z.infer<typeof publicUserSchema>;
 
+// Strict : le téléphone ne passe plus par ici, seulement par la vérification d'un code.
 export const updateMeSchema = z
-  .object({ fullName: fullNameSchema, phone: phoneSchema.nullable() })
+  .strictObject({ fullName: fullNameSchema })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { error: 'Aucune modification' });
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
+
+/** Durée de validité d'un code de vérification du téléphone. */
+export const PHONE_CODE_TTL_MINUTES = 10;
+export const PHONE_CODE_LENGTH = 6;
+/** Tentatives de saisie par code, la bonne comprise. */
+export const PHONE_CODE_MAX_ATTEMPTS = 5;
+/** Plafonds de demandes de code : par compte et par heure, par numéro (tous comptes) sur 24 h. */
+export const PHONE_CODES_PER_ACCOUNT_PER_HOUR = 3;
+export const PHONE_CODES_PER_NUMBER_PER_DAY = 5;
+
+export const requestPhoneCodeSchema = z.object({ phone: phoneSchema });
+export type RequestPhoneCodeInput = z.infer<typeof requestPhoneCodeSchema>;
+
+export const phoneCodeRequestedSchema = z.object({ expiresAt: z.iso.datetime({ offset: true }) });
+export type PhoneCodeRequested = z.infer<typeof phoneCodeRequestedSchema>;
+
+export const verifyPhoneSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(new RegExp(`^\\d{${PHONE_CODE_LENGTH}}$`), {
+      error: `Code à ${PHONE_CODE_LENGTH} chiffres`,
+    }),
+});
+export type VerifyPhoneInput = z.infer<typeof verifyPhoneSchema>;
+
+/** Contenu du job d'envoi du code : un identifiant, jamais de numéro ni de code. */
+export const phoneCodeJobSchema = z.object({ phoneVerificationId: z.uuid() });
+export type PhoneCodeJob = z.infer<typeof phoneCodeJobSchema>;
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     }
     await db.transaction(async (tx) => {
       await tx.execute(
-        sql`TRUNCATE pending_registrations, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+        sql`TRUNCATE pending_registrations, phone_verifications, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
       );
 
       // Comptes de démo : adresses réputées confirmées (l'inscription réelle passe par un lien).
@@ -133,7 +133,14 @@ async function main(): Promise<void> {
       const customers = await tx
         .insert(users)
         .values([
-          { email: 'lea.petit@example.com', fullName: 'Léa Petit', ...account },
+          {
+            email: 'lea.petit@example.com',
+            fullName: 'Léa Petit',
+            // Plage réservée à la fiction par l'ARCEP (06 39 98 xx xx) : n'appartient à personne.
+            phone: '+33639980001',
+            phoneVerifiedAt: new Date(),
+            ...account,
+          },
           { email: 'tom.moreau@example.com', fullName: 'Tom Moreau', ...account },
         ])
         .returning({ id: users.id });

@@ -26,6 +26,8 @@ export const errorCodes = [
   'PAYMENT_PROVIDER_UNAVAILABLE',
   'CANCELLATION_NOT_ALLOWED',
   'INVALID_WEBHOOK_SIGNATURE',
+  'PHONE_NOT_ALLOWED',
+  'PHONE_CODE_INVALID',
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);
