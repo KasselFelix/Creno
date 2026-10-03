@@ -51,3 +51,10 @@ export function formatLocalDate(date: string, options: Intl.DateTimeFormatOption
     new Date(`${date}T00:00:00Z`),
   );
 }
+
+/** Numéro E.164 lisible : `+33639980001` → `+33 6 39 98 00 01` (les autres indicatifs restent tels quels). */
+export function formatPhone(phone: string): string {
+  const match = /^\+33(\d)(\d{8})$/.exec(phone);
+  if (!match) return phone;
+  return `+33 ${match[1]} ${match[2]!.replace(/(\d{2})(?=\d)/g, '$1 ')}`;
+}

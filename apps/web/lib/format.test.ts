@@ -3,6 +3,7 @@ import {
   addDays,
   formatDuration,
   formatLocalDate,
+  formatPhone,
   formatPrice,
   timeInZone,
   todayInZone,
@@ -35,5 +36,15 @@ describe('format', () => {
 
   it('nomme le jour d’une date locale', () => {
     expect(formatLocalDate('2026-10-05', { weekday: 'long' })).toBe('lundi');
+  });
+});
+
+describe('formatPhone', () => {
+  it('groupe un numéro français par deux chiffres', () => {
+    expect(formatPhone('+33639980001')).toBe('+33 6 39 98 00 01');
+  });
+
+  it('laisse les autres indicatifs tels quels', () => {
+    expect(formatPhone('+447900000000')).toBe('+447900000000');
   });
 });

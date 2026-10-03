@@ -23,6 +23,8 @@ const messages: Partial<Record<ErrorCode, string>> = {
   PAYMENT_PROVIDER_UNAVAILABLE:
     'Le paiement est momentanément indisponible. Réessayez dans un instant.',
   CANCELLATION_NOT_ALLOWED: 'Cette réservation ne peut plus être annulée en ligne.',
+  PHONE_NOT_ALLOWED: 'Seuls les numéros mobiles français (06 ou 07) sont acceptés pour l’instant.',
+  PHONE_CODE_INVALID: 'Code incorrect ou expiré.',
 };
 
 const FALLBACK = 'Une erreur est survenue. Réessayez.';
