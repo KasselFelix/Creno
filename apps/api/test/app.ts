@@ -45,6 +45,8 @@ export interface TestAppOptions {
   authRateLimit?: number;
   /** Limite des demandes d'inscription par heure (très haute par défaut). */
   registrationRateLimit?: number;
+  /** Limite des demandes de code SMS par heure (très haute par défaut). */
+  phoneRateLimit?: number;
   /** Limite des lectures publiques par minute (très haute par défaut). */
   publicRateLimit?: number;
   /** Capture les logs JSON de l'application. */
@@ -70,6 +72,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     REGISTRATION_RATE_LIMIT_PER_HOUR: String(options.registrationRateLimit ?? 100_000),
     PUBLIC_RATE_LIMIT_PER_MINUTE: String(options.publicRateLimit ?? 100_000),
     BOOKING_RATE_LIMIT_PER_MINUTE: '100000',
+    PHONE_CODE_RATE_LIMIT_PER_HOUR: String(options.phoneRateLimit ?? 100_000),
     LOG_LEVEL: 'info',
     // Vide = absente : même si le .env local contient une vraie clé de test, les tests ne l'utilisent pas.
     STRIPE_SECRET_KEY: '',
@@ -125,7 +128,7 @@ export function dbOf(app: INestApplication): DbHandle {
 
 export async function resetDatabase(app: INestApplication): Promise<void> {
   await dbOf(app).db.execute(
-    sql`TRUNCATE pending_registrations, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE pending_registrations, phone_verifications, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
   );
   await app.get(JobsService).clear();
 }
@@ -208,6 +211,28 @@ export function registrationTokenOf(message: { text: string }): string {
   const match = /\/register\/complete#([\w.-]+)/.exec(message.text);
   if (!match) throw new Error("Aucun lien d'inscription dans cet email");
   return match[1]!;
+}
+
+/** Code à 6 chiffres contenu dans un SMS de vérification. */
+export function phoneCodeOf(message: { body: string }): string {
+  const match = /code est (\d{6})/.exec(message.body);
+  if (!match) throw new Error('Aucun code dans ce SMS');
+  return match[1]!;
+}
+
+/**
+ * Écrit directement un numéro vérifié sur un compte. Le parcours réel (code par SMS) a ses propres
+ * tests dans `phone-verification.e2e-spec.ts`.
+ */
+export async function setVerifiedPhone(
+  app: INestApplication,
+  userId: string,
+  phone: string,
+): Promise<void> {
+  await dbOf(app)
+    .db.update(users)
+    .set({ phone, phoneVerifiedAt: new Date() })
+    .where(eq(users.id, userId));
 }
 
 /** Valeur d'un cookie dans les en-têtes Set-Cookie d'une réponse. */

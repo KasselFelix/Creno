@@ -31,6 +31,7 @@ import {
   resetDatabase,
   resetPaymentsGateway,
   runJobs,
+  setVerifiedPhone,
 } from './app.js';
 
 const DAY = 7;
@@ -94,7 +95,7 @@ describe('notifications', () => {
 
   async function customerWithPhone() {
     const customer = await registerAs(app, 'customer');
-    await customer.agent.patch('/v1/users/me').send({ phone: PHONE }).expect(200);
+    await setVerifiedPhone(app, customer.user.id, PHONE);
     return customer;
   }
 
@@ -411,7 +412,7 @@ describe('notifications', () => {
     it('créneau déjà commencé, ou téléphone retiré → `skipped`', async () => {
       const first = await customerWithPhone();
       await confirmedBooking(first.agent, '09:00');
-      await first.agent.patch('/v1/users/me').send({ phone: null }).expect(200);
+      await first.agent.delete('/v1/users/me/phone').expect(204);
       const second = await registerAs(app, 'customer');
       const started = await confirmedBooking(second.agent, '10:00');
       await db()
@@ -587,9 +588,10 @@ describe('notifications', () => {
   });
 
   describe('garde-fous contre l’abus', () => {
+    // Le numéro a été vérifié avant que la liste des préfixes ne change : le worker revérifie.
     it('numéro hors des préfixes autorisés → SMS `skipped`, l’email part', async () => {
       const customer = await registerAs(app, 'customer');
-      await customer.agent.patch('/v1/users/me').send({ phone: '+447900000000' }).expect(200);
+      await setVerifiedPhone(app, customer.user.id, '+447900000000');
       await confirmedBooking(customer.agent);
       await runJobs(app, SEND_QUEUE);
       await makeRemindersDue();
@@ -648,6 +650,24 @@ describe('notifications', () => {
       ).toMatchObject({ status: 'skipped', reason: 'rate_limited' });
       expect(logged('notification.skipped')).toMatchObject([{ level: 40, reason: 'rate_limited' }]);
     });
+  });
+
+  it('le numéro d’un autre compte ne reçoit rien : un numéro demandé mais non vérifié ne sert pas au rappel', async () => {
+    const owner = await customerWithPhone();
+    const intruder = await registerAs(app, 'customer');
+    // Le numéro reçoit un code, que l'intrus n'a pas : le numéro ne lui est jamais attribué.
+    await intruder.agent.post('/v1/users/me/phone').send({ phone: PHONE }).expect(202);
+    await intruder.agent.patch('/v1/users/me').send({ phone: PHONE }).expect(400);
+    const booking = await confirmedBooking(intruder.agent);
+    await runJobs(app, SEND_QUEUE);
+    await makeRemindersDue();
+    await app.get(NotificationsService).dispatchDue();
+    await runJobs(app, SEND_QUEUE);
+
+    expect(sms.send).not.toHaveBeenCalled();
+    expect((await rowsOf(booking.id)).filter((row) => row.channel === 'sms')).toEqual([]);
+    const me = await owner.agent.get('/v1/users/me').expect(200);
+    expect((me.body as { phone: string | null }).phone).toBe(PHONE);
   });
 
   it('les jobs ne portent qu’un identifiant, et les logs aucune donnée personnelle', async () => {

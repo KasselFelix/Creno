@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { SiteHeader } from '@/components/site-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { PhoneCard } from '@/features/account/components/phone-card';
 import { ProfileForm } from '@/features/account/components/profile-form';
 import { SessionsTable } from '@/features/account/components/sessions-table';
 import { getCurrentUser } from '@/lib/api/server';
@@ -37,6 +38,20 @@ export default async function AccountPage() {
           </CardHeader>
           <CardContent>
             <ProfileForm user={user} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Téléphone</h2>
+            </CardTitle>
+            <CardDescription>
+              Pour recevoir le rappel de vos réservations par SMS, la veille.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* key : après une vérification ou un retrait, la carte repart de l'état affiché. */}
+            <PhoneCard key={user.phone ?? 'none'} phone={user.phone} />
           </CardContent>
         </Card>
         <Card>

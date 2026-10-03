@@ -1,7 +1,14 @@
 import { SkipThrottle } from '@nestjs/throttler';
 
 /** Limites de débit nommées, déclarées dans `ThrottlerModule` (auth.module.ts). Compteur par IP. */
-export const THROTTLERS = ['credentials', 'refresh', 'registration', 'public', 'bookings'] as const;
+export const THROTTLERS = [
+  'credentials',
+  'refresh',
+  'registration',
+  'public',
+  'bookings',
+  'phone',
+] as const;
 export type ThrottlerName = (typeof THROTTLERS)[number];
 
 /**

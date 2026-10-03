@@ -1,6 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, isNotNull, lte, or, sql } from 'drizzle-orm';
-import { bookings, type DbHandle, pendingRegistrations, sessions, stripeEvents } from '@creno/db';
+import {
+  bookings,
+  type DbHandle,
+  pendingRegistrations,
+  phoneVerifications,
+  sessions,
+  stripeEvents,
+} from '@creno/db';
 import { STRIPE_EVENTS_RETENTION_DAYS } from '@creno/shared';
 import { DB } from '../database/database.module.js';
 
@@ -73,6 +80,18 @@ export class MaintenanceRepository {
       .delete(pendingRegistrations)
       .where(lte(pendingRegistrations.expiresAt, sql`now()`))
       .returning({ id: pendingRegistrations.id });
+    return rows.length;
+  }
+
+  /**
+   * Supprime les demandes de code expirées depuis plus de 24 h. Pas avant : elles comptent dans
+   * le plafond de codes par numéro, calculé sur 24 h.
+   */
+  async purgePhoneVerifications(): Promise<number> {
+    const rows = await this.handle.db
+      .delete(phoneVerifications)
+      .where(lte(phoneVerifications.expiresAt, sql`now() - interval '24 hours'`))
+      .returning({ id: phoneVerifications.id });
     return rows.length;
   }
 }

@@ -6,18 +6,15 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import { fullNameSchema, phoneSchema, type PublicUser } from '@creno/shared';
+import { fullNameSchema, type PublicUser } from '@creno/shared';
 import { Button } from '@/components/ui/button';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { errorMessage } from '@/lib/api/errors';
 import { useUpdateMe } from '@/features/auth/api';
 
-// Mêmes règles que l'API ; un champ téléphone vide signifie « pas de téléphone ».
-const profileFormSchema = z.object({
-  fullName: fullNameSchema,
-  phone: z.union([z.literal(''), phoneSchema]),
-});
+// Mêmes règles que l'API. Le téléphone a sa propre carte : il se vérifie par un code SMS.
+const profileFormSchema = z.object({ fullName: fullNameSchema });
 type ProfileFormValues = z.infer<typeof profileFormSchema>;
 
 export function ProfileForm({ user }: { user: PublicUser }) {
@@ -25,16 +22,16 @@ export function ProfileForm({ user }: { user: PublicUser }) {
   const updateMe = useUpdateMe();
   const form = useForm<ProfileFormValues>({
     resolver: zodResolver(profileFormSchema),
-    defaultValues: { fullName: user.fullName, phone: user.phone ?? '' },
+    defaultValues: { fullName: user.fullName },
   });
   const { errors, isDirty } = form.formState;
 
   function onSubmit(values: ProfileFormValues) {
     updateMe.mutate(
-      { fullName: values.fullName, phone: values.phone === '' ? null : values.phone },
+      { fullName: values.fullName },
       {
         onSuccess: (updated) => {
-          form.reset({ fullName: updated.fullName, phone: updated.phone ?? '' });
+          form.reset({ fullName: updated.fullName });
           toast.success('Profil mis à jour.');
           router.refresh();
         },
@@ -59,22 +56,6 @@ export function ProfileForm({ user }: { user: PublicUser }) {
             {...form.register('fullName')}
           />
           <FieldError errors={[errors.fullName]} />
-        </Field>
-        <Field data-invalid={!!errors.phone}>
-          <FieldLabel htmlFor="account-phone">Téléphone</FieldLabel>
-          <Input
-            id="account-phone"
-            type="tel"
-            autoComplete="tel"
-            placeholder="+33612345678"
-            aria-invalid={!!errors.phone}
-            aria-describedby="account-phone-help"
-            {...form.register('phone')}
-          />
-          <FieldDescription id="account-phone-help">
-            Format international. Sert au rappel par SMS, la veille de vos réservations.
-          </FieldDescription>
-          <FieldError errors={[errors.phone]} />
         </Field>
         <Button type="submit" className="h-11 sm:w-fit" disabled={!isDirty || updateMe.isPending}>
           {updateMe.isPending && <LoaderCircle aria-hidden className="size-4 animate-spin" />}
