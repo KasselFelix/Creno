@@ -2,7 +2,13 @@ import type { INestApplication } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { bookings, pendingRegistrations, sessions, stripeEvents } from '@creno/db';
+import {
+  bookings,
+  pendingRegistrations,
+  phoneVerifications,
+  sessions,
+  stripeEvents,
+} from '@creno/db';
 import {
   type Booking,
   type Resource,
@@ -14,6 +20,7 @@ import {
   EXPIRE_HOLDS_QUEUE,
   MaintenanceService,
   PURGE_PENDING_REGISTRATIONS_QUEUE,
+  PURGE_PHONE_VERIFICATIONS_QUEUE,
   PURGE_SESSIONS_QUEUE,
   PURGE_STRIPE_EVENTS_QUEUE,
 } from '../src/maintenance/maintenance.service.js';
@@ -218,6 +225,33 @@ describe('jobs de ménage', () => {
     expect(logged('maintenance.pending_registrations_purged')).toMatchObject([{ count: 1 }]);
   });
 
+  it('purge les demandes de code expirées depuis plus de 24 h, garde celles qui comptent encore', async () => {
+    const { user } = await registerAs(app, 'customer');
+    await db()
+      .insert(phoneVerifications)
+      .values([
+        {
+          userId: user.id,
+          phone: '+33639980001',
+          createdAt: sql`now() - interval '25 hours'`,
+          expiresAt: sql`now() - interval '24 hours 50 minutes'`,
+        },
+        // Expirée, mais encore dans la fenêtre du plafond par numéro (24 h).
+        {
+          userId: user.id,
+          phone: '+33639980002',
+          createdAt: sql`now() - interval '2 hours'`,
+          expiresAt: sql`now() - interval '1 hour 50 minutes'`,
+        },
+      ]);
+
+    expect(await maintenance().purgePhoneVerifications()).toBe(1);
+
+    const left = await db().select({ phone: phoneVerifications.phone }).from(phoneVerifications);
+    expect(left).toEqual([{ phone: '+33639980002' }]);
+    expect(logged('maintenance.phone_verifications_purged')).toMatchObject([{ count: 1 }]);
+  });
+
   it('chaque tâche est branchée sur sa file : un job reçu l’exécute', async () => {
     const { agent } = await registerAs(app, 'customer');
     const overdue = await hold(agent, '09:00');
@@ -228,6 +262,7 @@ describe('jobs de ménage', () => {
       PURGE_SESSIONS_QUEUE,
       PURGE_STRIPE_EVENTS_QUEUE,
       PURGE_PENDING_REGISTRATIONS_QUEUE,
+      PURGE_PHONE_VERIFICATIONS_QUEUE,
     ]) {
       await jobs.send(queue, {});
       expect(await runJobs(app, queue)).toBe(1);
@@ -237,5 +272,6 @@ describe('jobs de ménage', () => {
     expect(logged('maintenance.sessions_purged')).toHaveLength(1);
     expect(logged('maintenance.stripe_events_purged')).toHaveLength(1);
     expect(logged('maintenance.pending_registrations_purged')).toHaveLength(1);
+    expect(logged('maintenance.phone_verifications_purged')).toHaveLength(1);
   });
 });

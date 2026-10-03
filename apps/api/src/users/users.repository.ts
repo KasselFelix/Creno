@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, count, eq } from 'drizzle-orm';
+import { and, asc, count, eq, ne } from 'drizzle-orm';
 import { type Database, type DbHandle, users } from '@creno/db';
 import type { Pagination, UserRole } from '@creno/shared';
 import { DB } from '../database/database.module.js';
@@ -33,16 +33,40 @@ export class UsersRepository {
     return row!;
   }
 
-  async update(
-    id: string,
-    values: { fullName?: string; phone?: string | null },
-  ): Promise<UserRow | undefined> {
+  async update(id: string, values: { fullName?: string }): Promise<UserRow | undefined> {
     const [row] = await this.handle.db
       .update(users)
       .set(values)
       .where(eq(users.id, id))
       .returning();
     return row;
+  }
+
+  /**
+   * Retire un numéro vérifié des autres comptes (transfert vers celui qui vient de le prouver).
+   * Renvoie les comptes concernés (au plus un, grâce à `users_phone_unique`).
+   */
+  async releasePhone(phone: string, exceptUserId: string, tx: Database): Promise<string[]> {
+    const rows = await tx
+      .update(users)
+      .set({ phone: null, phoneVerifiedAt: null })
+      .where(and(eq(users.phone, phone), ne(users.id, exceptUserId)))
+      .returning({ id: users.id });
+    return rows.map((row) => row.id);
+  }
+
+  /** Seule écriture d'un numéro : celui dont le code vient d'être saisi. */
+  async setVerifiedPhone(id: string, phone: string, tx: Database): Promise<UserRow | undefined> {
+    const [row] = await tx
+      .update(users)
+      .set({ phone, phoneVerifiedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return row;
+  }
+
+  async clearPhone(id: string, tx: Database): Promise<void> {
+    await tx.update(users).set({ phone: null, phoneVerifiedAt: null }).where(eq(users.id, id));
   }
 
   async list({ page, pageSize }: Pagination): Promise<{ rows: UserRow[]; total: number }> {

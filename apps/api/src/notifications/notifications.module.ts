@@ -9,6 +9,7 @@ import {
   UnconfiguredGateway,
 } from './delivery.js';
 import { MailpitEmailGateway } from './mailpit-email-gateway.js';
+import { MailpitSmsGateway } from './mailpit-sms-gateway.js';
 import { NotificationsRepository } from './notifications.repository.js';
 import { NotificationsService } from './notifications.service.js';
 import { NotificationsWorker } from './notifications.worker.js';
@@ -36,17 +37,21 @@ import { TwilioSmsGateway } from './twilio-sms-gateway.js';
     {
       provide: SMS_GATEWAY,
       inject: [APP_CONFIG],
-      useFactory: (config: AppConfig): SmsGateway =>
-        config.TWILIO_ACCOUNT_SID && config.TWILIO_AUTH_TOKEN && config.TWILIO_FROM
-          ? new TwilioSmsGateway(
-              config.TWILIO_ACCOUNT_SID,
-              config.TWILIO_AUTH_TOKEN,
-              config.TWILIO_FROM,
-            )
-          : new UnconfiguredGateway(),
+      // Twilio si configuré ; sinon Mailpit en développement (SMS lus comme des emails) ; sinon rien.
+      useFactory: (config: AppConfig): SmsGateway => {
+        if (config.TWILIO_ACCOUNT_SID && config.TWILIO_AUTH_TOKEN && config.TWILIO_FROM) {
+          return new TwilioSmsGateway(
+            config.TWILIO_ACCOUNT_SID,
+            config.TWILIO_AUTH_TOKEN,
+            config.TWILIO_FROM,
+          );
+        }
+        if (config.MAILPIT_URL) return new MailpitSmsGateway(config.MAILPIT_URL);
+        return new UnconfiguredGateway();
+      },
     },
   ],
-  // La passerelle email sert aussi aux emails d'inscription (module auth).
-  exports: [NotificationsService, EMAIL_GATEWAY],
+  // Les passerelles servent aussi aux emails d'inscription (auth) et aux codes SMS (users).
+  exports: [NotificationsService, EMAIL_GATEWAY, SMS_GATEWAY],
 })
 export class NotificationsModule {}

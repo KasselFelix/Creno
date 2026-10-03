@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DeliveryError, UnconfiguredGateway } from './delivery.js';
 import { MailpitEmailGateway, parseSender } from './mailpit-email-gateway.js';
+import { MailpitSmsGateway } from './mailpit-sms-gateway.js';
 import { ResendEmailGateway } from './resend-email-gateway.js';
 import { TwilioSmsGateway } from './twilio-sms-gateway.js';
 
@@ -169,6 +170,24 @@ describe('MailpitEmailGateway', () => {
 
   it('accepte un expéditeur sans nom', () => {
     expect(parseSender('dev@creno.test')).toEqual({ Email: 'dev@creno.test' });
+  });
+});
+
+describe('MailpitSmsGateway', () => {
+  it('dépose le SMS dans Mailpit, adressé au numéro, texte échappé en HTML', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(json({ ID: 'mp_2' }));
+    const gateway = new MailpitSmsGateway('http://mailpit:8025', fetchFn);
+
+    expect(await gateway.send({ to: '+33639980001', body: 'Code <123456> & co' })).toEqual({
+      messageId: 'mp_2',
+    });
+
+    expect(JSON.parse(requestOf(fetchFn).body)).toMatchObject({
+      To: [{ Email: '+33639980001@sms.mailpit.local' }],
+      Subject: 'SMS pour +33639980001',
+      Text: 'Code <123456> & co',
+      HTML: '<pre>Code &#60;123456&#62; &#38; co</pre>',
+    });
   });
 });
 

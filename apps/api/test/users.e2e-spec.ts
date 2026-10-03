@@ -90,26 +90,23 @@ describe('users', () => {
   });
 
   describe('PATCH /v1/users/me', () => {
-    it('met à jour le nom et le téléphone', async () => {
+    it('met à jour le nom', async () => {
       const { agent } = await registerAs(app);
-      const res = await agent
-        .patch('/v1/users/me')
-        .send({ fullName: 'Léa P.', phone: '+33612345678' })
-        .expect(200);
-      expect(publicUserSchema.parse(res.body)).toMatchObject({
-        fullName: 'Léa P.',
-        phone: '+33612345678',
-      });
+      const res = await agent.patch('/v1/users/me').send({ fullName: 'Léa P.' }).expect(200);
+      expect(publicUserSchema.parse(res.body)).toMatchObject({ fullName: 'Léa P.', phone: null });
     });
 
-    it('refuse un téléphone mal formé et ignore un changement de rôle', async () => {
-      const { agent } = await registerAs(app);
-      await agent.patch('/v1/users/me').send({ phone: '0612345678' }).expect(400);
-      const res = await agent
-        .patch('/v1/users/me')
-        .send({ fullName: 'X', role: 'admin' })
-        .expect(200);
-      expect(publicUserSchema.parse(res.body).role).toBe('customer');
+    it('refuse le téléphone (il passe par un code SMS) et tout autre champ, comme le rôle', async () => {
+      const { agent, user } = await registerAs(app);
+      await agent.patch('/v1/users/me').send({ phone: '+33612345678' }).expect(400);
+      await agent.patch('/v1/users/me').send({ phone: null }).expect(400);
+      await agent.patch('/v1/users/me').send({ fullName: 'X', role: 'admin' }).expect(400);
+      const res = await agent.get('/v1/users/me').expect(200);
+      expect(publicUserSchema.parse(res.body)).toMatchObject({
+        id: user.id,
+        phone: null,
+        role: 'customer',
+      });
     });
   });
 });

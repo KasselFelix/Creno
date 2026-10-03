@@ -40,6 +40,8 @@ export const envSchema = z
     REGISTRATION_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(1).default(20),
     PUBLIC_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
     BOOKING_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(20),
+    // Demandes de code SMS par heure et par IP (en plus des plafonds par compte et par numéro).
+    PHONE_CODE_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(1).default(10),
     // Géocodeur d'adresses (Géoplateforme de l'IGN) : pas de clé, donc rien de secret ici.
     GEOCODER_URL: z.url({ protocol: /^https?$/ }).default('https://data.geopf.fr/geocodage'),
     // Stripe. Sans clé (clone frais), l'API démarre et les routes de paiement répondent 503.
