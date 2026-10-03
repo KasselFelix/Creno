@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   authResponseSchema,
+  type CompleteRegistrationInput,
   type LoginInput,
   publicUserSchema,
   type RegisterInput,
@@ -23,7 +24,19 @@ export function useLogin() {
 export function useRegister() {
   return useMutation({
     mutationFn: (input: RegisterInput) =>
-      apiFetch('/v1/auth/register', { method: 'POST', body: input, schema: authResponseSchema }),
+      // 202 sans corps : la suite se passe dans la boîte mail, quelle que soit l'adresse.
+      apiFetch('/v1/auth/register', { method: 'POST', body: input }),
+  });
+}
+
+export function useCompleteRegistration() {
+  return useMutation({
+    mutationFn: (input: CompleteRegistrationInput) =>
+      apiFetch('/v1/auth/register/complete', {
+        method: 'POST',
+        body: input,
+        schema: authResponseSchema,
+      }),
   });
 }
 

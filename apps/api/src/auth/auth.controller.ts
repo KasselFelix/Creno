@@ -18,6 +18,8 @@ import type { Request, Response } from 'express';
 import {
   AUTH_COOKIES,
   type AuthResponse,
+  type CompleteRegistrationInput,
+  completeRegistrationSchema,
   type LoginInput,
   loginSchema,
   type RegisterInput,
@@ -41,16 +43,33 @@ export class AuthController {
     private readonly cookies: AuthCookies,
   ) {}
 
+  // 202 sans corps ni cookie, que l'adresse ait déjà un compte ou non : la suite se passe par email.
+  // Deux limites par IP : à la minute (rafales), et à l'heure (une boîte visée par des alias).
+  @Public()
+  @OnlyThrottle('credentials', 'registration')
+  @Post('register')
+  @HttpCode(202)
+  @ApiZodBody(registerSchema)
+  async register(@Body(new ZodValidationPipe(registerSchema)) body: RegisterInput): Promise<void> {
+    await this.auth.register(body);
+  }
+
+  // Publique : le lien s'ouvre souvent sur un autre appareil que celui de la demande.
   @Public()
   @OnlyThrottle('credentials')
-  @Post('register')
-  @ApiZodBody(registerSchema)
-  async register(
-    @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
+  @Post('register/complete')
+  @HttpCode(200)
+  @ApiZodBody(completeRegistrationSchema)
+  async completeRegistration(
+    @Body(new ZodValidationPipe(completeRegistrationSchema)) body: CompleteRegistrationInput,
     @Headers('user-agent') userAgent: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponse> {
-    const result = await this.auth.register(body, userAgent);
+    const result = await this.auth.completeRegistration(body, userAgent);
+    // Quelqu'un d'autre était peut-être connecté dans ce navigateur (poste partagé) : sa session
+    // est fermée, pas seulement remplacée dans les cookies.
+    await this.auth.logout(req.cookies?.[AUTH_COOKIES.refresh]);
     this.cookies.set(res, result);
     return { user: result.user };
   }

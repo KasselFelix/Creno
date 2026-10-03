@@ -30,66 +30,6 @@ describe('auth', () => {
     await app.close();
   });
 
-  describe('POST /v1/auth/register', () => {
-    it('crée le compte, pose les cookies HttpOnly et connecte l’utilisateur', async () => {
-      const email = uniqueEmail();
-      const agent = request.agent(app.getHttpServer());
-      const res = await agent
-        .post('/v1/auth/register')
-        .send({ email, password: TEST_PASSWORD, fullName: 'Léa Petit', role: 'provider' })
-        .expect(201);
-
-      const { user } = authResponseSchema.parse(res.body);
-      expect(user).toMatchObject({ email, fullName: 'Léa Petit', role: 'provider', phone: null });
-      expect(JSON.stringify(res.body)).not.toMatch(/hash|password/i);
-      expect(setCookieLine(res, AUTH_COOKIES.access)).toMatch(/HttpOnly/i);
-      expect(setCookieLine(res, AUTH_COOKIES.access)).toMatch(/SameSite=Lax/i);
-      expect(setCookieLine(res, AUTH_COOKIES.refresh)).toMatch(
-        /HttpOnly.*SameSite=Strict|SameSite=Strict.*HttpOnly/i,
-      );
-
-      const me = await agent.get('/v1/users/me').expect(200);
-      expect(me.body).toMatchObject({ id: user.id, email });
-    });
-
-    it('refuse un email déjà pris, casse différente comprise (409 EMAIL_TAKEN)', async () => {
-      const email = uniqueEmail();
-      await http()
-        .post('/v1/auth/register')
-        .send({ email, password: TEST_PASSWORD, fullName: 'A', role: 'customer' });
-      const res = await http()
-        .post('/v1/auth/register')
-        .send({
-          email: email.toUpperCase(),
-          password: TEST_PASSWORD,
-          fullName: 'B',
-          role: 'customer',
-        })
-        .expect(409);
-      expect(apiErrorSchema.parse(res.body).code).toBe('EMAIL_TAKEN');
-    });
-
-    it.each([
-      ['mot de passe trop court', { password: 'court' }, 'password'],
-      ['email invalide', { email: 'pas-un-email' }, 'email'],
-      ['rôle admin', { role: 'admin' }, 'role'],
-    ])('400 VALIDATION_FAILED : %s', async (_label, patch, field) => {
-      const res = await http()
-        .post('/v1/auth/register')
-        .send({
-          email: uniqueEmail(),
-          password: TEST_PASSWORD,
-          fullName: 'X',
-          role: 'customer',
-          ...patch,
-        })
-        .expect(400);
-      const body = apiErrorSchema.parse(res.body);
-      expect(body.code).toBe('VALIDATION_FAILED');
-      expect(body.details).toMatchObject({ fieldErrors: { [field]: expect.any(Array) } });
-    });
-  });
-
   describe('POST /v1/auth/login', () => {
     it('connecte avec le bon mot de passe', async () => {
       const { user } = await registerAs(app);
@@ -98,8 +38,14 @@ describe('auth', () => {
         .send({ email: user.email, password: TEST_PASSWORD })
         .expect(200);
       expect(authResponseSchema.parse(res.body).user.id).toBe(user.id);
+      expect(JSON.stringify(res.body)).not.toMatch(/hash|password/i);
       expect(cookieValue(res, AUTH_COOKIES.access)).toBeTruthy();
       expect(cookieValue(res, AUTH_COOKIES.refresh)).toBeTruthy();
+      expect(setCookieLine(res, AUTH_COOKIES.access)).toMatch(/HttpOnly/i);
+      expect(setCookieLine(res, AUTH_COOKIES.access)).toMatch(/SameSite=Lax/i);
+      expect(setCookieLine(res, AUTH_COOKIES.refresh)).toMatch(
+        /HttpOnly.*SameSite=Strict|SameSite=Strict.*HttpOnly/i,
+      );
     });
 
     it('purge les sessions expirées ou révoquées de l’utilisateur à la connexion', async () => {
@@ -114,7 +60,7 @@ describe('auth', () => {
           createdAt: sql`now() - interval '1 day'`,
         })
         .where(eq(sessions.id, expired));
-      await agent.post('/v1/auth/logout').expect(204); // session d'inscription révoquée
+      await agent.post('/v1/auth/logout').expect(204); // première session révoquée
 
       await login().expect(200);
 

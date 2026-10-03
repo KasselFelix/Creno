@@ -6,11 +6,12 @@ import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import type { AccessTokenPayload } from './auth.types.js';
 
-const REFRESH_TOKEN_FORMAT =
+const OPAQUE_TOKEN_FORMAT =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/;
 
-export interface RefreshTokenParts {
-  sessionId: string;
+/** Jeton opaque `<id>.<secret>` : refresh token (id de session) ou lien d'inscription (id de la demande en attente). */
+export interface OpaqueTokenParts {
+  id: string;
   secret: string;
 }
 
@@ -34,19 +35,19 @@ export class TokensService {
     return this.jwt.signAsync(payload, { expiresIn: this.config.ACCESS_TOKEN_TTL_MINUTES * 60 });
   }
 
-  /** Nouveau secret de refresh (256 bits) ; seul son hash est stocké en base. */
-  newRefreshSecret(): string {
+  /** Nouveau secret (256 bits) ; seul son hash est stocké en base. */
+  newSecret(): string {
     return randomBytes(32).toString('base64url');
   }
 
-  formatRefreshToken(sessionId: string, secret: string): string {
-    return `${sessionId}.${secret}`;
+  formatToken(id: string, secret: string): string {
+    return `${id}.${secret}`;
   }
 
-  parseRefreshToken(token: unknown): RefreshTokenParts | undefined {
+  parseToken(token: unknown): OpaqueTokenParts | undefined {
     if (typeof token !== 'string') return undefined;
-    const match = REFRESH_TOKEN_FORMAT.exec(token);
-    return match ? { sessionId: match[1]!, secret: match[2]! } : undefined;
+    const match = OPAQUE_TOKEN_FORMAT.exec(token);
+    return match ? { id: match[1]!, secret: match[2]! } : undefined;
   }
 
   hashSecret(secret: string): string {

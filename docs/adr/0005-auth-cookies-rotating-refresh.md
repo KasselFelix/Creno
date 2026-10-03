@@ -24,7 +24,7 @@ Les utilisateurs doivent rester connectés d'une visite à l'autre, pouvoir déc
 - Le refresh token est `SameSite=Strict` : en arrivant depuis un autre site (lien dans un email) avec un access token expiré, l'utilisateur repasse par la page de connexion alors que sa session est valide. Compromis accepté pour ne jamais envoyer le refresh token sur une navigation cross-site.
 - Présenter un secret inconnu pour une session existante la révoque : c'est le prix de la détection de réutilisation (la base ne garde que les deux derniers hash). L'identifiant de session est un UUID aléatoire, visible seulement de son propriétaire.
 - Le rate limit est en mémoire : suffisant pour une instance, à déplacer dans un stockage partagé si l'API passe à plusieurs réplicas.
-- **Email déjà pris → 409 `EMAIL_TAKEN`** : choix d'ergonomie assumé, qui permet de tester l'existence d'un compte ; il est ralenti par le rate limit et sera revu quand la vérification d'email existera (réponse uniforme).
+- **Email déjà pris → 409 `EMAIL_TAKEN`** : choix d'ergonomie assumé, qui permet de tester l'existence d'un compte ; il est ralenti par le rate limit et sera revu quand la vérification d'email existera (réponse uniforme). **Remplacé par l'[ADR 0011](0011-pending-registration-uniform-signup.md)** : l'inscription répond désormais la même chose dans tous les cas.
 - L'API accepte aussi `Authorization: Bearer` pour l'access token, ce qui prépare l'application mobile.
 
 ## Alternatives écartées

@@ -1,30 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { registerSchema, updateMeSchema } from './index.js';
+import { completeRegistrationSchema, registerSchema, updateMeSchema } from './index.js';
 
 const valid = {
-  email: 'lea@example.com',
+  token: 'un-jeton',
   password: 'un-mot-de-passe-long',
   fullName: 'Léa',
   role: 'customer',
 };
 
 describe('registerSchema', () => {
-  it('accepte une inscription valide et nettoie les espaces', () => {
-    expect(
-      registerSchema.parse({ ...valid, email: '  lea@example.com ', fullName: ' Léa ' }),
-    ).toMatchObject({
+  it('ne demande qu’une adresse, et nettoie les espaces', () => {
+    expect(registerSchema.parse({ email: '  lea@example.com ' })).toEqual({
       email: 'lea@example.com',
+    });
+    expect(registerSchema.safeParse({ email: 'pas-un-email' }).success).toBe(false);
+  });
+});
+
+describe('completeRegistrationSchema', () => {
+  it('accepte un profil valide et nettoie les espaces', () => {
+    expect(completeRegistrationSchema.parse({ ...valid, fullName: ' Léa ' })).toMatchObject({
       fullName: 'Léa',
     });
   });
 
   it.each([
     ['mot de passe trop court', { password: 'court' }],
-    ['email invalide', { email: 'pas-un-email' }],
+    ['jeton absent', { token: '' }],
     ['rôle admin', { role: 'admin' }],
     ['nom vide', { fullName: '   ' }],
   ])('refuse : %s', (_label, patch) => {
-    expect(registerSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+    expect(completeRegistrationSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
   });
 });
 

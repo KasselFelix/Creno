@@ -36,6 +36,8 @@ export const envSchema = z
     ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(15),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
+    // Demandes d'inscription par heure et par IP : chacune envoie un email à une adresse non prouvée.
+    REGISTRATION_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(1).default(20),
     PUBLIC_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
     BOOKING_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(20),
     // Géocodeur d'adresses (Géoplateforme de l'IGN) : pas de clé, donc rien de secret ici.

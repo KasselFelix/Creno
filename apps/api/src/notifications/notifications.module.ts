@@ -46,6 +46,7 @@ import { TwilioSmsGateway } from './twilio-sms-gateway.js';
           : new UnconfiguredGateway(),
     },
   ],
-  exports: [NotificationsService],
+  // La passerelle email sert aussi aux emails d'inscription (module auth).
+  exports: [NotificationsService, EMAIL_GATEWAY],
 })
 export class NotificationsModule {}

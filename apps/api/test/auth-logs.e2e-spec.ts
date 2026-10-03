@@ -27,7 +27,7 @@ describe('auth : logs', () => {
       .map((line) => (JSON.parse(line) as { event?: string }).event)
       .filter(Boolean);
     expect(events).toEqual(
-      expect.arrayContaining(['auth.registered', 'auth.login_failed', 'auth.logged_out']),
+      expect.arrayContaining(['auth.logged_in', 'auth.login_failed', 'auth.logged_out']),
     );
     const all = logs.join('\n');
     for (const secret of [user.email, TEST_PASSWORD, 'mauvais-mdp', '$argon2id']) {

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, isNotNull, lte, or, sql } from 'drizzle-orm';
-import { bookings, type DbHandle, sessions, stripeEvents } from '@creno/db';
+import { bookings, type DbHandle, pendingRegistrations, sessions, stripeEvents } from '@creno/db';
 import { STRIPE_EVENTS_RETENTION_DAYS } from '@creno/shared';
 import { DB } from '../database/database.module.js';
 
@@ -61,6 +61,18 @@ export class MaintenanceRepository {
         ),
       )
       .returning({ id: stripeEvents.id });
+    return rows.length;
+  }
+
+  /**
+   * Supprime les inscriptions jamais confirmées dont le lien a expiré. Un lien expiré est déjà
+   * refusé à la confirmation : ce ménage ne sert qu'à ne pas garder ces lignes.
+   */
+  async purgePendingRegistrations(): Promise<number> {
+    const rows = await this.handle.db
+      .delete(pendingRegistrations)
+      .where(lte(pendingRegistrations.expiresAt, sql`now()`))
+      .returning({ id: pendingRegistrations.id });
     return rows.length;
   }
 }

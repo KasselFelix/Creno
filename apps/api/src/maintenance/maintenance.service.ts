@@ -10,6 +10,7 @@ import { MaintenanceRepository } from './maintenance.repository.js';
 export const EXPIRE_HOLDS_QUEUE = 'maintenance.expire-holds';
 export const PURGE_SESSIONS_QUEUE = 'maintenance.purge-sessions';
 export const PURGE_STRIPE_EVENTS_QUEUE = 'maintenance.purge-stripe-events';
+export const PURGE_PENDING_REGISTRATIONS_QUEUE = 'maintenance.purge-pending-registrations';
 
 // Une seule exécution à la fois ; pas de reprise : le passage suivant refait le travail.
 const queue = { policy: 'stately', retryLimit: 0, expireInSeconds: 300 } as const;
@@ -54,6 +55,15 @@ export class MaintenanceService implements OnModuleInit {
         await this.purgeStripeEvents();
       },
     });
+    await this.jobs.register({
+      name: PURGE_PENDING_REGISTRATIONS_QUEUE,
+      queue,
+      // Toutes les heures : une demande expirée ne sert plus à rien, autant ne pas garder l'adresse.
+      cron: '10 * * * *',
+      handler: async () => {
+        await this.purgePendingRegistrations();
+      },
+    });
   }
 
   async expireHolds(): Promise<number> {
@@ -86,6 +96,12 @@ export class MaintenanceService implements OnModuleInit {
   async purgeStripeEvents(): Promise<number> {
     const count = await this.maintenance.purgeStripeEvents();
     this.logger.log({ event: 'maintenance.stripe_events_purged', count });
+    return count;
+  }
+
+  async purgePendingRegistrations(): Promise<number> {
+    const count = await this.maintenance.purgePendingRegistrations();
+    this.logger.log({ event: 'maintenance.pending_registrations_purged', count });
     return count;
   }
 }

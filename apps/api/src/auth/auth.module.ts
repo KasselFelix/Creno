@@ -4,12 +4,15 @@ import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { AuthController } from './auth.controller.js';
 import { AuthCookies } from './auth.cookies.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { PasswordHasher } from './password-hasher.js';
+import { PendingRegistrationsRepository } from './pending-registrations.repository.js';
+import { RegistrationWorker } from './registration.worker.js';
 import { RolesGuard } from './roles.guard.js';
 import { SessionsRepository } from './sessions.repository.js';
 import { TokensService } from './tokens.service.js';
@@ -17,6 +20,8 @@ import { TokensService } from './tokens.service.js';
 @Module({
   imports: [
     UsersModule,
+    // Pour la passerelle email (emails d'inscription).
+    NotificationsModule,
     JwtModule.registerAsync({
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) => ({
@@ -31,6 +36,7 @@ import { TokensService } from './tokens.service.js';
       useFactory: (config: AppConfig) => [
         { name: 'credentials', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE },
         { name: 'refresh', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE * 3 },
+        { name: 'registration', ttl: 3_600_000, limit: config.REGISTRATION_RATE_LIMIT_PER_HOUR },
         { name: 'public', ttl: 60_000, limit: config.PUBLIC_RATE_LIMIT_PER_MINUTE },
         { name: 'bookings', ttl: 60_000, limit: config.BOOKING_RATE_LIMIT_PER_MINUTE },
       ],
@@ -41,6 +47,8 @@ import { TokensService } from './tokens.service.js';
     AuthService,
     AuthCookies,
     PasswordHasher,
+    PendingRegistrationsRepository,
+    RegistrationWorker,
     SessionsRepository,
     TokensService,
     // Ordre important : on identifie l'utilisateur, puis on vérifie son rôle.

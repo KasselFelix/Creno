@@ -53,7 +53,7 @@ export function formatMoney(cents: number, currency: string): string {
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency }).format(cents / 100);
 }
 
-interface EmailParts {
+export interface EmailParts {
   subject: string;
   title: string;
   /** Paragraphes en texte brut : ils sont échappés au rendu HTML. */
@@ -146,9 +146,19 @@ function parts(data: MessageData): EmailParts {
 const oneLine = (value: string) => value.replace(/[\p{Cc}\s]+/gu, ' ').trim();
 
 export function renderEmail(data: MessageData): RenderedEmail {
-  const { subject: rawSubject, title, paragraphs, action } = parts(data);
+  return renderParts(data.recipientName, parts(data));
+}
+
+/**
+ * Met en forme un email (sujet, HTML, texte) : salutation, titre, paragraphes, lien éventuel.
+ * `recipientName` à `null` : salutation sans nom, quand le nom n'est pas celui d'un compte confirmé.
+ */
+export function renderParts(
+  recipientName: string | null,
+  { subject: rawSubject, title, paragraphs, action }: EmailParts,
+): RenderedEmail {
   const subject = oneLine(rawSubject);
-  const greeting = `Bonjour ${data.recipientName},`;
+  const greeting = recipientName === null ? 'Bonjour,' : `Bonjour ${recipientName},`;
 
   const text = [
     greeting,

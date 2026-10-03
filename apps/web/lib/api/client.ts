@@ -9,7 +9,12 @@ interface ApiFetchOptions<T extends z.ZodType> {
 }
 
 /** Routes où un 401 est la réponse attendue (identifiants ou session invalides) : pas de nouvel essai. */
-const NO_REFRESH_RETRY = new Set(['/v1/auth/login', '/v1/auth/register', '/v1/auth/refresh']);
+const NO_REFRESH_RETRY = new Set([
+  '/v1/auth/login',
+  '/v1/auth/register',
+  '/v1/auth/register/complete',
+  '/v1/auth/refresh',
+]);
 
 let refreshing: Promise<boolean> | null = null;
 

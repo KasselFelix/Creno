@@ -122,17 +122,19 @@ async function main(): Promise<void> {
     }
     await db.transaction(async (tx) => {
       await tx.execute(
-        sql`TRUNCATE notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+        sql`TRUNCATE pending_registrations, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
       );
 
+      // Comptes de démo : adresses réputées confirmées (l'inscription réelle passe par un lien).
+      const account = { passwordHash, emailVerifiedAt: new Date() };
       await tx
         .insert(users)
-        .values({ email: 'admin@creno.dev', fullName: 'Admin Creno', role: 'admin', passwordHash });
+        .values({ email: 'admin@creno.dev', fullName: 'Admin Creno', role: 'admin', ...account });
       const customers = await tx
         .insert(users)
         .values([
-          { email: 'lea.petit@example.com', fullName: 'Léa Petit', passwordHash },
-          { email: 'tom.moreau@example.com', fullName: 'Tom Moreau', passwordHash },
+          { email: 'lea.petit@example.com', fullName: 'Léa Petit', ...account },
+          { email: 'tom.moreau@example.com', fullName: 'Tom Moreau', ...account },
         ])
         .returning({ id: users.id });
 
@@ -140,7 +142,7 @@ async function main(): Promise<void> {
       for (const p of providerSeeds) {
         const [owner] = await tx
           .insert(users)
-          .values({ email: p.email, fullName: p.fullName, role: 'provider', passwordHash })
+          .values({ email: p.email, fullName: p.fullName, role: 'provider', ...account })
           .returning({ id: users.id });
         const [provider] = await tx
           .insert(providers)

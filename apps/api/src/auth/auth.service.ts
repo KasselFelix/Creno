@@ -1,12 +1,29 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { type DbHandle, sqlState } from '@creno/db';
-import type { LoginInput, PublicUser, RegisterInput, Session } from '@creno/shared';
+import {
+  type CompleteRegistrationInput,
+  EMAIL_VERIFICATION_TTL_HOURS,
+  type LoginInput,
+  type PublicUser,
+  type RegisterInput,
+  type RegistrationEmailJob,
+  type Session,
+} from '@creno/shared';
 import { DomainError } from '../common/domain-error.js';
 import { DB } from '../database/database.module.js';
+import { JobsService } from '../jobs/jobs.service.js';
 import { toPublicUser } from '../users/users.mapper.js';
 import { type UserRow, UsersRepository } from '../users/users.repository.js';
 import type { AuthUser } from './auth.types.js';
 import { PasswordHasher } from './password-hasher.js';
+import {
+  type PendingRegistrationRow,
+  PendingRegistrationsRepository,
+} from './pending-registrations.repository.js';
+import {
+  MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR,
+  REGISTRATION_EMAIL_QUEUE,
+} from './registration.queues.js';
 import { type SessionRow, SessionsRepository } from './sessions.repository.js';
 import { TokensService } from './tokens.service.js';
 
@@ -15,6 +32,7 @@ export const REFRESH_GRACE_MS = 10_000;
 /** Durée de vie absolue d'une session : au-delà, il faut se reconnecter, même si elle sert tous les jours. */
 export const SESSION_MAX_AGE_MS = 90 * 24 * 60 * 60_000;
 const USER_AGENT_MAX_LENGTH = 200;
+const EMAIL_VERIFICATION_TTL_MS = EMAIL_VERIFICATION_TTL_HOURS * 60 * 60_000;
 
 export interface AuthResult {
   user: PublicUser;
@@ -36,15 +54,71 @@ export class AuthService {
     private readonly sessions: SessionsRepository,
     private readonly hasher: PasswordHasher,
     private readonly tokens: TokensService,
+    private readonly pending: PendingRegistrationsRepository,
+    private readonly jobs: JobsService,
   ) {}
 
-  async register(input: RegisterInput, userAgent: string | undefined): Promise<AuthResult> {
+  /**
+   * Demande d'inscription : une adresse, rien d'autre. Aucun compte n'est créé ici, seulement une
+   * demande en attente et le job qui enverra l'email. La requête ne lit pas `users` : sa réponse et
+   * sa durée sont les mêmes que l'adresse ait déjà un compte ou non.
+   */
+  async register(input: RegisterInput): Promise<void> {
+    const pendingRegistrationId = await this.handle.db.transaction(async (tx) => {
+      await this.pending.lockEmail(input.email, tx);
+      const recent = await this.pending.countLastHour(input.email, tx);
+      if (recent >= MAX_REGISTRATION_EMAILS_PER_ADDRESS_PER_HOUR) return undefined;
+      const row = await this.pending.create(
+        { email: input.email, expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS) },
+        tx,
+      );
+      // Le job naît avec la ligne (outbox transactionnelle) : pas de demande sans email.
+      const job: RegistrationEmailJob = { pendingRegistrationId: row.id };
+      await this.jobs.send(REGISTRATION_EMAIL_QUEUE, job, { tx });
+      return row.id;
+    });
+    if (pendingRegistrationId) {
+      this.logger.log({ event: 'auth.registration_requested', pendingRegistrationId });
+    } else {
+      // Même réponse pour l'appelant, mais aucun email de plus ne part vers cette adresse.
+      this.logger.warn({ event: 'auth.registration_capped' });
+    }
+  }
+
+  /**
+   * Fin de l'inscription, depuis le lien : le jeton prouve l'accès à la boîte mail, et c'est son
+   * titulaire qui choisit ici nom, rôle et mot de passe. Le compte est créé avec une première
+   * session, et toutes les demandes en attente de l'adresse disparaissent (leurs liens avec).
+   */
+  async completeRegistration(
+    input: CompleteRegistrationInput,
+    userAgent: string | undefined,
+  ): Promise<AuthResult> {
+    const parts = this.tokens.parseToken(input.token);
+    if (!parts) throw this.registrationLinkRejected('malformed');
+    const presented = this.tokens.hashSecret(parts.secret);
+    // Lien vérifié avant de calculer le hash : un jeton bidon ne coûte pas un argon2.
+    this.usablePending(await this.pending.findById(parts.id), presented);
     const passwordHash = await this.hasher.hash(input.password);
-    const secret = this.tokens.newRefreshSecret();
+    const secret = this.tokens.newSecret();
     try {
-      // Utilisateur + première session : les deux ou rien.
       const { user, session } = await this.handle.db.transaction(async (tx) => {
-        const user = await this.users.create({ ...input, passwordHash }, tx);
+        // Deux liens d'une même adresse utilisés en même temps : le second attend ici, puis
+        // constate à la relecture que sa ligne a été supprimée par le premier.
+        const seen = this.usablePending(await this.pending.findById(parts.id, tx), presented);
+        await this.pending.lockEmail(seen.email, tx);
+        const pending = this.usablePending(await this.pending.findById(parts.id, tx), presented);
+        const user = await this.users.create(
+          {
+            email: pending.email,
+            fullName: input.fullName,
+            role: input.role,
+            passwordHash,
+            emailVerifiedAt: new Date(),
+          },
+          tx,
+        );
+        await this.pending.deleteByEmail(pending.email, tx);
         const session = await this.sessions.create(
           this.newSessionValues(user.id, secret, userAgent),
           tx,
@@ -54,11 +128,8 @@ export class AuthService {
       this.logger.log({ event: 'auth.registered', userId: user.id, role: user.role });
       return this.issue(user, session, secret);
     } catch (error) {
-      if (sqlState(error) === '23505') {
-        throw new DomainError('EMAIL_TAKEN', 409, 'Un compte existe déjà avec cet email.', {
-          fieldErrors: { email: ['Un compte existe déjà avec cet email.'] },
-        });
-      }
+      // Filet de sécurité : un compte existe déjà pour cette adresse (créé hors de ce parcours).
+      if (sqlState(error) === '23505') throw this.registrationLinkRejected('account_exists');
       throw error;
     }
   }
@@ -74,7 +145,7 @@ export class AuthService {
       throw new DomainError('INVALID_CREDENTIALS', 401, 'Email ou mot de passe incorrect.');
     }
     await this.sessions.purgeDead(user.id);
-    const secret = this.tokens.newRefreshSecret();
+    const secret = this.tokens.newSecret();
     const session = await this.sessions.create(this.newSessionValues(user.id, secret, userAgent));
     this.logger.log({ event: 'auth.logged_in', userId: user.id, sessionId: session.id });
     return this.issue(user, session, secret);
@@ -85,15 +156,15 @@ export class AuthService {
    * (hors délai de grâce) signale un vol ou un rejeu : la session entière est révoquée.
    */
   async refresh(rawToken: unknown): Promise<AuthResult> {
-    const parts = this.tokens.parseRefreshToken(rawToken);
+    const parts = this.tokens.parseToken(rawToken);
     if (!parts) throw sessionExpired();
 
-    const session = await this.sessions.findById(parts.sessionId);
+    const session = await this.sessions.findById(parts.id);
     if (!session || session.revokedAt || session.expiresAt <= new Date()) throw sessionExpired();
 
     const presented = this.tokens.hashSecret(parts.secret);
     if (this.tokens.sameHash(session.refreshTokenHash, presented)) {
-      const secret = this.tokens.newRefreshSecret();
+      const secret = this.tokens.newSecret();
       const rotated = await this.sessions.rotate(
         session.id,
         presented,
@@ -117,9 +188,9 @@ export class AuthService {
    * (plus de session) est déjà atteint.
    */
   async logout(rawToken: unknown): Promise<void> {
-    const parts = this.tokens.parseRefreshToken(rawToken);
+    const parts = this.tokens.parseToken(rawToken);
     if (!parts) return;
-    const session = await this.sessions.findById(parts.sessionId);
+    const session = await this.sessions.findById(parts.id);
     if (!session || session.revokedAt) return;
     const presented = this.tokens.hashSecret(parts.secret);
     const owns =
@@ -150,6 +221,29 @@ export class AuthService {
     }
     await this.sessions.revoke(sessionId);
     this.logger.log({ event: 'auth.session_revoked', userId: current.id, sessionId });
+  }
+
+  /** La demande visée par un lien, si le lien est le bon et encore valable ; sinon l'erreur unique. */
+  private usablePending(
+    pending: PendingRegistrationRow | undefined,
+    presentedHash: string,
+  ): PendingRegistrationRow {
+    if (!pending) throw this.registrationLinkRejected('unknown');
+    if (!this.tokens.sameHash(pending.tokenHash, presentedHash)) {
+      throw this.registrationLinkRejected('bad_secret');
+    }
+    if (pending.expiresAt <= new Date()) throw this.registrationLinkRejected('expired');
+    return pending;
+  }
+
+  /** Une seule erreur pour l'appelant, quelle que soit la raison (elle n'est que dans les logs). */
+  private registrationLinkRejected(reason: string): DomainError {
+    this.logger.warn({ event: 'auth.registration_link_rejected', reason });
+    return new DomainError(
+      'REGISTRATION_LINK_INVALID',
+      400,
+      "Ce lien d'inscription est invalide ou a expiré.",
+    );
   }
 
   private async refreshWithinGrace(
@@ -208,7 +302,7 @@ export class AuthService {
     return {
       user: toPublicUser(user),
       accessToken: await this.tokens.signAccessToken(user, session.id),
-      refreshToken: this.tokens.formatRefreshToken(session.id, secret),
+      refreshToken: this.tokens.formatToken(session.id, secret),
     };
   }
 }

@@ -12,13 +12,29 @@ export const passwordSchema = z
 /** Rôles choisissables à l'inscription : `admin` n'en fait jamais partie. */
 export const registrableRoleSchema = z.enum(['customer', 'provider']);
 
-export const registerSchema = z.object({
-  email: emailSchema,
+/**
+ * Première étape de l'inscription : une adresse, rien d'autre. Le reste du profil est saisi depuis
+ * le lien reçu par email, donc par le titulaire de la boîte mail.
+ */
+export const registerSchema = z.object({ email: emailSchema });
+export type RegisterInput = z.infer<typeof registerSchema>;
+
+/** Durée de validité du lien envoyé à l'inscription. */
+export const EMAIL_VERIFICATION_TTL_HOURS = 24;
+
+/** Seconde étape, depuis le lien : le jeton prouve l'adresse, le reste crée le compte. */
+export const completeRegistrationSchema = z.object({
+  // Le format précis est vérifié par l'API : un lien abîmé donne la même erreur qu'un lien expiré.
+  token: z.string().min(1, { error: "Lien d'inscription requis" }).max(200),
   password: passwordSchema,
   fullName: fullNameSchema,
   role: registrableRoleSchema,
 });
-export type RegisterInput = z.infer<typeof registerSchema>;
+export type CompleteRegistrationInput = z.infer<typeof completeRegistrationSchema>;
+
+/** Contenu du job d'email d'inscription : un identifiant, jamais d'adresse ni de jeton. */
+export const registrationEmailJobSchema = z.object({ pendingRegistrationId: z.uuid() });
+export type RegistrationEmailJob = z.infer<typeof registrationEmailJobSchema>;
 
 export const loginSchema = z.object({
   email: emailSchema,

@@ -18,10 +18,17 @@ erDiagram
   users {
     uuid id PK
     citext email UK
+    timestamptz email_verified_at "obligatoire : adresse confirmée"
     text full_name
     text phone "nullable"
     user_role role "customer | provider | admin"
     text password_hash "argon2id, nullable"
+  }
+  pending_registrations {
+    uuid id PK
+    citext email "pas unique : plusieurs demandes"
+    text token_hash "sha256 du secret du lien, nullable"
+    timestamptz expires_at "création + 24 h"
   }
   sessions {
     uuid id PK
@@ -120,17 +127,18 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 
 ## Migrations
 
-| Fichier                                             | Contenu                                                                                                              |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                                    |
-| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                                         |
-| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                                       |
-| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises                |
-| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                              |
-| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                                      |
-| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`               |
-| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »             |
-| `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events` |
+| Fichier                                             | Contenu                                                                                                               |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                                     |
+| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                                          |
+| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                                        |
+| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises                 |
+| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                               |
+| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                                       |
+| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`                |
+| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »              |
+| `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events`  |
+| `0009_email_verification.sql` (générée, ajustée)    | table `pending_registrations` ; `users.email_verified_at` ajoutée, reprise sur les comptes existants, puis `NOT NULL` |
 
 Le schéma `pgboss` (file de jobs) n'est pas dans ces migrations : pg-boss l'installe et le met à jour lui-même au démarrage de l'API.
 
@@ -307,6 +315,26 @@ Execution Time: 8.654 ms
 ```
 
 27 lignes lues sur 50 000. Sans centre, la requête parcourt toute la table (0,6 à 0,8 s à ce volume) : limite assumée, notée dans l'ADR 0007.
+
+## Inscription en attente
+
+Une demande d'inscription ne crée pas de ligne dans `users` : elle crée une ligne `pending_registrations` (l'adresse, rien d'autre), et le compte naît quand le lien reçu est utilisé, avec le profil et le mot de passe saisis à ce moment-là (ADR 0011). `pending_registrations` n'a donc **aucune clé étrangère** et **pas d'unicité sur `email`** : plusieurs demandes peuvent viser la même adresse, leurs liens se valent, le premier utilisé crée le compte et supprime les autres.
+
+Le lien vaut `<id>.<secret>` ; la base ne garde que `sha256(secret)` dans `token_hash`, écrit par le worker au moment où l'email part. `token_hash` reste `NULL` pour une demande faite sur une adresse qui a déjà un compte : personne ne peut s'en servir.
+
+La fin de l'inscription, dans une transaction :
+
+```sql
+SELECT pg_advisory_xact_lock(hashtextextended(lower($email), 1)); -- une création de compte à la fois par adresse
+SELECT * FROM pending_registrations WHERE id = $1;                -- relue sous le verrou : supprimée si un autre lien a servi
+INSERT INTO users (email, full_name, role, password_hash, email_verified_at) VALUES (…, now());
+DELETE FROM pending_registrations WHERE email = $email;
+INSERT INTO sessions (…);                                          -- la personne arrive connectée
+```
+
+Le même verrou protège le plafond de 3 demandes par adresse et par heure. `users.email_verified_at` est `NOT NULL` sans valeur par défaut : une ligne de `users` est toujours une adresse prouvée (les comptes antérieurs à la migration `0009` ont reçu leur date de création).
+
+Contrainte : `pending_registrations_expiry_after_creation`. Index : `(email, created_at)` pour le plafond et la suppression, `(expires_at)` pour la purge horaire des demandes expirées.
 
 ## Sessions et refresh token rotatif
 

@@ -44,18 +44,20 @@ describe('apiFetch', () => {
     },
   );
 
-  it.each(['/v1/auth/login', '/v1/auth/register', '/v1/auth/refresh'])(
-    'ne tente pas de refresh pour %s',
-    async (path) => {
-      const fetchMock = mockFetch(
-        json(401, { statusCode: 401, code: 'INVALID_CREDENTIALS', message: 'x' }),
-      );
-      await expect(apiFetch(path, { method: 'POST', body: {} })).rejects.toMatchObject({
-        code: 'INVALID_CREDENTIALS',
-      });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    },
-  );
+  it.each([
+    '/v1/auth/login',
+    '/v1/auth/register',
+    '/v1/auth/register/complete',
+    '/v1/auth/refresh',
+  ])('ne tente pas de refresh pour %s', async (path) => {
+    const fetchMock = mockFetch(
+      json(401, { statusCode: 401, code: 'INVALID_CREDENTIALS', message: 'x' }),
+    );
+    await expect(apiFetch(path, { method: 'POST', body: {} })).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
   it('renvoie l’erreur d’origine quand le refresh échoue', async () => {
     const fetchMock = mockFetch(
@@ -71,11 +73,11 @@ describe('apiFetch', () => {
 
   it('expose les erreurs par champ de l’API et un message utilisateur', async () => {
     mockFetch(
-      json(409, {
-        statusCode: 409,
-        code: 'EMAIL_TAKEN',
+      json(400, {
+        statusCode: 400,
+        code: 'VALIDATION_FAILED',
         message: 'technique',
-        details: { fieldErrors: { email: ['Un compte existe déjà avec cet email.'] } },
+        details: { fieldErrors: { email: ['Email invalide'] } },
       }),
     );
     const error = await apiFetch('/v1/auth/register', { method: 'POST', body: {} }).catch(
@@ -83,8 +85,8 @@ describe('apiFetch', () => {
     );
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error).toMatchObject({
-      message: 'Un compte existe déjà avec cet email.',
-      fieldErrors: { email: ['Un compte existe déjà avec cet email.'] },
+      message: 'Certains champs sont invalides.',
+      fieldErrors: { email: ['Email invalide'] },
     });
   });
 

@@ -2,7 +2,7 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée) et **notifications** (emails et SMS de rappel par jobs pg-boss, outbox transactionnelle, tâches de ménage).
+> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée), **notifications** (emails et SMS de rappel par jobs pg-boss, outbox transactionnelle, tâches de ménage) et **inscription par lien envoyé par email** (le compte naît depuis le lien, l'inscription ne révèle pas qui est inscrit).
 
 ## Démarrer
 
@@ -31,6 +31,8 @@ Au démarrage, l'API applique les migrations et, si la base est vide, charge un 
 | Client      | `lea.petit@example.com`      |
 | Prestataire | `studio.lumiere@example.com` |
 | Admin       | `admin@creno.dev`            |
+
+**Créer un compte en local** : l'inscription ne demande qu'un email ; le lien arrive dans Mailpit (http://localhost:8025) et mène au formulaire où l'on choisit son rôle, son nom et son mot de passe.
 
 **Carte** : créer un token public (`pk.…`) sur https://account.mapbox.com, le restreindre par URL, puis le mettre dans `.env` (`NEXT_PUBLIC_MAPBOX_TOKEN`). Sans token, la recherche fonctionne en liste seule.
 
@@ -95,6 +97,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Géocodage par l'API Adresse de l'État, derrière une interface** : sans clé, coordonnées stockables, appelée par l'API (timeout, repli, faux en test). → [ADR 0008](docs/adr/0008-geocoding-provider.md)
 - **Stripe Connect en destination charge, webhook comme seule source de vérité** : le prestataire reçoit le prix moins la commission, le hold est aligné sur la session Checkout, un événement rejoué ne fait rien. → [ADR 0009](docs/adr/0009-stripe-connect-payments.md)
 - **Notifications par outbox transactionnelle sur pg-boss** : le message à envoyer est écrit dans la transaction qui confirme la réservation, puis envoyé par un job avec reprises ; pas de Redis. → [ADR 0010](docs/adr/0010-notifications-outbox-pg-boss.md)
+- **L'email d'abord, le compte depuis le lien** : la première étape ne lit jamais `users`, donc sa réponse ne peut pas révéler qui est inscrit ; le mot de passe est choisi par celui qui a reçu le lien, jamais par l'auteur de la demande. → [ADR 0011](docs/adr/0011-pending-registration-uniform-signup.md)
 - _À venir : choix du modèle IA, retry / circuit breaker / fallback de la recherche._
 
 ## Recherche géographique
@@ -145,8 +148,8 @@ RETURNING id;   -- rien de renvoyé : événement déjà traité
 - **Outbox transactionnelle** : la ligne `notifications` et son job sont écrits dans la transaction qui change le statut de la réservation. Pas de notification pour un changement annulé, pas de changement sans notification, et aucun appel à un service externe pendant une requête ou un webhook.
 - **pg-boss** (file de jobs dans Postgres) : 5 reprises en backoff exponentiel, puis file morte → notification `failed` et log `error`. Un job ne contient que l'identifiant de la notification, jamais d'adresse ni de numéro.
 - **En local**, les emails arrivent dans Mailpit (http://localhost:8025) sans aucun compte. Avec `RESEND_API_KEY`, ils partent par Resend ; avec les trois variables `TWILIO_*`, le rappel part aussi par SMS. Sans rien, les notifications sont marquées `skipped`.
-- **Garde-fous** : SMS réservés aux préfixes autorisés (`SMS_ALLOWED_PREFIXES`, mobiles français par défaut), 5 SMS par jour et 30 emails par heure au plus pour un même destinataire ; au-delà, la notification est `skipped`. L'email et le téléphone ne sont pas encore vérifiés : ces plafonds bornent ce qu'un compte peut faire envoyer à un tiers.
-- **Tâches planifiées** : rappels dus et holds expirés toutes les 5 min, purge nocturne des sessions mortes et des événements Stripe de plus de 90 jours.
+- **Garde-fous** : SMS réservés aux préfixes autorisés (`SMS_ALLOWED_PREFIXES`, mobiles français par défaut), 5 SMS par jour et 30 emails par heure au plus pour un même destinataire ; au-delà, la notification est `skipped`. L'adresse email d'un compte est prouvée (le compte naît depuis le lien envoyé à l'inscription) ; le téléphone n'est pas encore vérifié : ces plafonds bornent ce qu'un compte peut faire envoyer à un tiers.
+- **Tâches planifiées** : rappels dus et holds expirés toutes les 5 min, purge horaire des inscriptions jamais terminées, purge nocturne des sessions mortes et des événements Stripe de plus de 90 jours.
 - Tests : idempotence, transaction annulée, rappel, reprises et file morte ([apps/api/test/notifications.e2e-spec.ts](apps/api/test/notifications.e2e-spec.ts)) ; ménage ([apps/api/test/maintenance.e2e-spec.ts](apps/api/test/maintenance.e2e-spec.ts)).
 
 ```bash
@@ -157,7 +160,7 @@ docker compose exec db psql -U creno -c "select name, cron from pgboss.schedule;
 
 ## Authentification et autorisations
 
-- Inscription (client ou prestataire), connexion, « Mon compte » avec la liste des appareils connectés.
+- Inscription (client ou prestataire) **par lien envoyé par email** : on ne saisit d'abord que son adresse, puis rôle, nom et mot de passe depuis le lien reçu ; le formulaire répond la même chose que l'adresse soit déjà inscrite ou non. Connexion, « Mon compte » avec la liste des appareils connectés.
 - Access token JWT de 15 min et refresh token de 30 jours, tous deux en cookies `HttpOnly` ; le navigateur ne parle qu'au front (`/api/*` est réécrit vers l'API), les cookies restent donc first-party.
 - **Refresh rotatif** : chaque renouvellement remplace le refresh token (compare-and-swap en base). Un ancien token rejoué après 10 s révoque la session : c'est le signe d'un vol.
 - Mots de passe hachés en argon2id ; même réponse et même durée pour « mauvais mot de passe » et « email inconnu ».
@@ -178,37 +181,38 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 
 ## Variables d'environnement
 
-| Variable                        | Utilisée par     | Défaut / exemple                                   | Rôle                                                                                                         |
-| ------------------------------- | ---------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `NODE_ENV`                      | api, web         | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                            |
-| `DB_PORT`                       | docker compose   | `5432`                                             | port exposé de Postgres                                                                                      |
-| `DATABASE_URL`                  | api, db          | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                              |
-| `DATABASE_URL_TEST`             | tests            | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                 |
-| `API_PORT`                      | api              | `4000`                                             | port HTTP de l'API                                                                                           |
-| `LOG_LEVEL`                     | api              | `info`                                             | niveau des logs pino                                                                                         |
-| `WEB_ORIGIN`                    | api              | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                     |
-| `API_INTERNAL_URL`              | web (serveur)    | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                               |
-| `JWT_ACCESS_SECRET`             | api              | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production |
-| `ACCESS_TOKEN_TTL_MINUTES`      | api              | `15`                                               | durée de vie de l'access token                                                                               |
-| `REFRESH_TOKEN_TTL_DAYS`        | api              | `30`                                               | durée de vie (glissante) d'une session                                                                       |
-| `AUTH_RATE_LIMIT_PER_MINUTE`    | api              | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
-| `PUBLIC_RATE_LIMIT_PER_MINUTE`  | api              | `120`                                              | lectures publiques (fiche, ressource, créneaux, recherche, géocodage) par minute, par IP et par route        |
-| `BOOKING_RATE_LIMIT_PER_MINUTE` | api              | `20`                                               | demandes de réservation par minute et par IP                                                                 |
-| `TRUST_PROXY`                   | api              | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
-| `GEOCODER_URL`                  | api              | `https://data.geopf.fr/geocodage`                  | géocodeur d'adresses (API Adresse de l'État, sans clé)                                                       |
-| `STRIPE_SECRET_KEY`             | api, stripe-cli  | vide                                               | clé secrète Stripe ; vide : paiements indisponibles (503). Clé de test obligatoire hors production           |
-| `STRIPE_WEBHOOK_SECRET`         | api              | vide                                               | secret de signature du webhook (`whsec_…`), affiché par le service `stripe-cli`                              |
-| `STRIPE_CONNECT_WEBHOOK_SECRET` | api              | vide                                               | production : secret de l'endpoint « Connect » (`account.updated`)                                            |
-| `STRIPE_PLATFORM_FEE_BPS`       | api              | `1000`                                             | commission Creno en points de base (1000 = 10 %)                                                             |
-| `SEED_STRIPE_ACCOUNT_ID`        | seed             | vide                                               | compte Express de test rattaché à « Studio Lumière » par le seed                                             |
-| `RESEND_API_KEY`                | api              | vide                                               | clé API Resend (`re_…`) pour les emails ; obligatoire en production                                          |
-| `EMAIL_FROM`                    | api              | `Creno <onboarding@resend.dev>`                    | expéditeur des emails (domaine vérifié chez Resend)                                                          |
-| `MAILPIT_URL`                   | api              | `http://mailpit:8025` (docker compose)             | boîte de réception de dev, utilisée sans clé Resend ; refusée en production                                  |
-| `TWILIO_ACCOUNT_SID`            | api              | vide                                               | compte Twilio pour le SMS de rappel (les trois variables `TWILIO_*` ensemble, ou aucune)                     |
-| `TWILIO_AUTH_TOKEN`             | api              | vide                                               | jeton d'authentification Twilio                                                                              |
-| `TWILIO_FROM`                   | api              | vide                                               | numéro expéditeur (`+33…`) ou Messaging Service (`MG…`)                                                      |
-| `SMS_ALLOWED_PREFIXES`          | api              | `+336,+337`                                        | préfixes des numéros qui peuvent recevoir un SMS (mobiles français par défaut)                               |
-| `JOBS_WORKERS_ENABLED`          | api              | `true`                                             | `false` : l'instance crée des jobs sans les exécuter (ni workers, ni tâches planifiées)                      |
-| `NEXT_PUBLIC_MAPBOX_TOKEN`      | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé              |
+| Variable                           | Utilisée par     | Défaut / exemple                                   | Rôle                                                                                                         |
+| ---------------------------------- | ---------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `NODE_ENV`                         | api, web         | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                            |
+| `DB_PORT`                          | docker compose   | `5432`                                             | port exposé de Postgres                                                                                      |
+| `DATABASE_URL`                     | api, db          | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                              |
+| `DATABASE_URL_TEST`                | tests            | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                 |
+| `API_PORT`                         | api              | `4000`                                             | port HTTP de l'API                                                                                           |
+| `LOG_LEVEL`                        | api              | `info`                                             | niveau des logs pino                                                                                         |
+| `WEB_ORIGIN`                       | api              | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                     |
+| `API_INTERNAL_URL`                 | web (serveur)    | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                               |
+| `JWT_ACCESS_SECRET`                | api              | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production |
+| `ACCESS_TOKEN_TTL_MINUTES`         | api              | `15`                                               | durée de vie de l'access token                                                                               |
+| `REFRESH_TOKEN_TTL_DAYS`           | api              | `30`                                               | durée de vie (glissante) d'une session                                                                       |
+| `AUTH_RATE_LIMIT_PER_MINUTE`       | api              | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                    |
+| `REGISTRATION_RATE_LIMIT_PER_HOUR` | api              | `20`                                               | demandes d'inscription par heure et par IP (chacune envoie un email)                                         |
+| `PUBLIC_RATE_LIMIT_PER_MINUTE`     | api              | `120`                                              | lectures publiques (fiche, ressource, créneaux, recherche, géocodage) par minute, par IP et par route        |
+| `BOOKING_RATE_LIMIT_PER_MINUTE`    | api              | `20`                                               | demandes de réservation par minute et par IP                                                                 |
+| `TRUST_PROXY`                      | api              | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                 |
+| `GEOCODER_URL`                     | api              | `https://data.geopf.fr/geocodage`                  | géocodeur d'adresses (API Adresse de l'État, sans clé)                                                       |
+| `STRIPE_SECRET_KEY`                | api, stripe-cli  | vide                                               | clé secrète Stripe ; vide : paiements indisponibles (503). Clé de test obligatoire hors production           |
+| `STRIPE_WEBHOOK_SECRET`            | api              | vide                                               | secret de signature du webhook (`whsec_…`), affiché par le service `stripe-cli`                              |
+| `STRIPE_CONNECT_WEBHOOK_SECRET`    | api              | vide                                               | production : secret de l'endpoint « Connect » (`account.updated`)                                            |
+| `STRIPE_PLATFORM_FEE_BPS`          | api              | `1000`                                             | commission Creno en points de base (1000 = 10 %)                                                             |
+| `SEED_STRIPE_ACCOUNT_ID`           | seed             | vide                                               | compte Express de test rattaché à « Studio Lumière » par le seed                                             |
+| `RESEND_API_KEY`                   | api              | vide                                               | clé API Resend (`re_…`) pour les emails ; obligatoire en production                                          |
+| `EMAIL_FROM`                       | api              | `Creno <onboarding@resend.dev>`                    | expéditeur des emails (domaine vérifié chez Resend)                                                          |
+| `MAILPIT_URL`                      | api              | `http://mailpit:8025` (docker compose)             | boîte de réception de dev, utilisée sans clé Resend ; refusée en production                                  |
+| `TWILIO_ACCOUNT_SID`               | api              | vide                                               | compte Twilio pour le SMS de rappel (les trois variables `TWILIO_*` ensemble, ou aucune)                     |
+| `TWILIO_AUTH_TOKEN`                | api              | vide                                               | jeton d'authentification Twilio                                                                              |
+| `TWILIO_FROM`                      | api              | vide                                               | numéro expéditeur (`+33…`) ou Messaging Service (`MG…`)                                                      |
+| `SMS_ALLOWED_PREFIXES`             | api              | `+336,+337`                                        | préfixes des numéros qui peuvent recevoir un SMS (mobiles français par défaut)                               |
+| `JOBS_WORKERS_ENABLED`             | api              | `true`                                             | `false` : l'instance crée des jobs sans les exécuter (ni workers, ni tâches planifiées)                      |
+| `NEXT_PUBLIC_MAPBOX_TOKEN`         | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé              |
 
 La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Les variables lues par le navigateur le sont dans `apps/web/lib/env.ts`. Aucun secret n'est versionné.
