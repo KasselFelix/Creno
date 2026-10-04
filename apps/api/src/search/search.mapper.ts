@@ -1,8 +1,12 @@
 import type { SearchProvider } from '@creno/shared';
+import type { DayAvailability } from '../availability/availability.service.js';
 import type { SearchRow } from './search.repository.js';
 
-/** Seule sortie autorisée d'un résultat de recherche : rien d'autre que ces champs publics. */
-export function toSearchProvider(row: SearchRow): SearchProvider {
+/**
+ * Seule sortie autorisée d'un résultat de recherche : rien d'autre que ces champs publics.
+ * `availability` : créneaux libres le jour demandé ; absente sans date.
+ */
+export function toSearchProvider(row: SearchRow, availability?: DayAvailability): SearchProvider {
   return {
     id: row.id,
     name: row.name,
@@ -17,8 +21,7 @@ export function toSearchProvider(row: SearchRow): SearchProvider {
     // Une seule devise à ce stade (voir la spec de l'étape 3).
     currency: 'EUR',
     resourceCount: row.resource_count,
-    // Sans date demandée, les créneaux ne sont pas comptés.
-    availableSlots: null,
-    availableResourceId: null,
+    availableSlots: availability?.availableSlots ?? null,
+    availableResourceId: availability?.availableResourceId ?? null,
   };
 }

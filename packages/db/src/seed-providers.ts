@@ -1,8 +1,30 @@
 // Prestataires de démo pour la recherche géographique : assez nombreux, autour de trois villes,
 // pour que le rayon, le tri par distance et les filtres se voient. Coordonnées approximatives.
+// Leurs horaires varient, pour que le filtre « disponible le » trie aussi quelque chose.
 import type { providers } from './schema/index.js';
 
 type Category = (typeof providers.$inferInsert)['category'];
+
+/** Plage hebdomadaire en heure locale ; `weekday` ISO (1 = lundi). */
+export interface RuleSeed {
+  weekday: number;
+  startTime: string;
+  endTime: string;
+}
+
+const days = (weekdays: number[], startTime: string, endTime: string): RuleSeed[] =>
+  weekdays.map((weekday) => ({ weekday, startTime, endTime }));
+
+/** Profils d'horaires des prestataires de démo. */
+export const HOURS = {
+  weekdays: days([1, 2, 3, 4, 5], '09:00', '18:00'),
+  weekdaysAndSaturday: [...days([1, 2, 3, 4, 5], '09:00', '18:00'), ...days([6], '10:00', '14:00')],
+  everyDay: days([1, 2, 3, 4, 5, 6, 7], '10:00', '19:00'),
+} satisfies Record<string, RuleSeed[]>;
+export type HoursProfile = keyof typeof HOURS;
+
+/** Complet le prochain samedi : le filtre « disponible le » l'écarte ce jour-là. */
+export const FULL_ON_SATURDAY = 'padel-merignac';
 
 export interface ResourceSeed {
   name: string;
@@ -23,6 +45,7 @@ export interface ProviderSeed {
   lng: number;
   lat: number;
   resources: ResourceSeed[];
+  hours: HoursProfile;
 }
 
 type Row = [
@@ -34,6 +57,7 @@ type Row = [
   lng: number,
   lat: number,
   resources: ResourceSeed[],
+  hours: HoursProfile,
 ];
 
 const one = (name: string, slotMinutes: number, priceCents: number): ResourceSeed => ({
@@ -53,6 +77,7 @@ const rows: Row[] = [
     2.3712,
     48.8537,
     [one('Coupe', 30, 3200), one('Brushing', 30, 2200)],
+    'weekdaysAndSaturday',
   ],
   [
     'salon-des-abbesses',
@@ -63,6 +88,7 @@ const rows: Row[] = [
     2.337,
     48.8845,
     [one('Coupe', 30, 2800), one('Coupe + couleur', 90, 8500)],
+    'weekdays',
   ],
   [
     'barbier-de-montreuil',
@@ -73,6 +99,7 @@ const rows: Row[] = [
     2.441,
     48.861,
     [one('Coupe + barbe', 30, 2000)],
+    'everyDay',
   ],
   [
     'foot-indoor-ivry',
@@ -83,6 +110,7 @@ const rows: Row[] = [
     2.3905,
     48.8205,
     [one('Terrain A (5 contre 5)', 60, 8000), one('Terrain B (5 contre 5)', 60, 8000)],
+    'everyDay',
   ],
   [
     'tennis-de-vincennes',
@@ -93,6 +121,7 @@ const rows: Row[] = [
     2.439,
     48.842,
     [one('Court couvert', 60, 2200)],
+    'everyDay',
   ],
   [
     'salle-du-marais',
@@ -103,6 +132,7 @@ const rows: Row[] = [
     2.3554,
     48.859,
     [one('Salle de réunion (8 places)', 60, 6000), one('Grande salle (30 places)', 120, 15000)],
+    'weekdays',
   ],
   [
     'espace-republique',
@@ -113,6 +143,7 @@ const rows: Row[] = [
     2.364,
     48.867,
     [one('Bureau à l’heure', 60, 3500)],
+    'weekdaysAndSaturday',
   ],
   [
     'atelier-photo-belleville',
@@ -123,6 +154,7 @@ const rows: Row[] = [
     2.383,
     48.872,
     [one('Séance studio', 60, 5500)],
+    'weekdaysAndSaturday',
   ],
   [
     'studio-repetition-pigalle',
@@ -133,6 +165,7 @@ const rows: Row[] = [
     2.3375,
     48.8822,
     [one('Box de répétition', 60, 1800)],
+    'everyDay',
   ],
   [
     'salle-des-fetes-versailles',
@@ -143,6 +176,7 @@ const rows: Row[] = [
     2.1301,
     48.8049,
     [one('Salle de réception', 120, 12000)],
+    'weekdaysAndSaturday',
   ],
   // Lyon et alentours
   [
@@ -154,6 +188,7 @@ const rows: Row[] = [
     4.832,
     45.7578,
     [one('Coupe', 30, 3000), one('Coupe + soin', 60, 5500)],
+    'weekdaysAndSaturday',
   ],
   [
     'barber-guillotiere',
@@ -164,6 +199,7 @@ const rows: Row[] = [
     4.844,
     45.753,
     [one('Coupe homme', 30, 1800)],
+    'everyDay',
   ],
   [
     'studio-confluence',
@@ -174,6 +210,7 @@ const rows: Row[] = [
     4.818,
     45.74,
     [one('Séance portrait', 60, 7000)],
+    'weekdays',
   ],
   [
     'salle-part-dieu',
@@ -184,6 +221,7 @@ const rows: Row[] = [
     4.859,
     45.761,
     [one('Salle de réunion (12 places)', 60, 5000)],
+    'weekdays',
   ],
   [
     'foot-a-5-villeurbanne',
@@ -194,6 +232,7 @@ const rows: Row[] = [
     4.89,
     45.771,
     [one('Terrain synthétique', 60, 8500)],
+    'everyDay',
   ],
   [
     'local-repete-vaise',
@@ -204,6 +243,7 @@ const rows: Row[] = [
     4.805,
     45.779,
     [one('Studio de répétition', 60, 1500)],
+    'everyDay',
   ],
   // Bordeaux et alentours
   [
@@ -215,6 +255,7 @@ const rows: Row[] = [
     -0.572,
     44.84,
     [one('Coupe', 30, 2700)],
+    'weekdaysAndSaturday',
   ],
   [
     'studio-des-chartrons',
@@ -225,6 +266,7 @@ const rows: Row[] = [
     -0.57,
     44.854,
     [one('Séance studio', 60, 5000)],
+    'weekdays',
   ],
   [
     'salle-de-la-victoire',
@@ -235,6 +277,7 @@ const rows: Row[] = [
     -0.573,
     44.831,
     [one('Salle de réunion (10 places)', 60, 4000)],
+    'weekdays',
   ],
   [
     'padel-merignac',
@@ -245,6 +288,7 @@ const rows: Row[] = [
     -0.645,
     44.84,
     [one('Piste de padel', 60, 2400)],
+    'everyDay',
   ],
   // Aucune ressource active : ce prestataire ne doit jamais sortir dans la recherche.
   [
@@ -256,11 +300,12 @@ const rows: Row[] = [
     -0.5745,
     44.8395,
     [{ ...one('Atelier', 60, 3000), isActive: false }],
+    'weekdays',
   ],
 ];
 
 export const searchProviderSeeds: ProviderSeed[] = rows.map(
-  ([slug, name, category, address, city, lng, lat, resources]) => ({
+  ([slug, name, category, address, city, lng, lat, resources, hours]) => ({
     email: `${slug}@example.com`,
     fullName: `Gérant ${name}`,
     name,
@@ -271,5 +316,6 @@ export const searchProviderSeeds: ProviderSeed[] = rows.map(
     lng,
     lat,
     resources,
+    hours,
   }),
 );

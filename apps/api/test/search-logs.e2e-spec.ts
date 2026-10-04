@@ -48,7 +48,9 @@ describe('recherche et géocodage : logs', () => {
       hasCenter: true,
       radiusKm: 7,
       category: 'room',
+      hasDate: false,
       total: 0,
+      totalIsCapped: false,
     });
     // Service tiers indisponible : un `warn` (dégradé), jamais un `error`.
     expect(lines.find((l) => l.event === 'geocoding.failed')).toMatchObject({

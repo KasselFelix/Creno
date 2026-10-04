@@ -22,7 +22,9 @@ import { AvailabilityRepository, type ExceptionRow } from './availability.reposi
 import {
   addLocalDays,
   computeSlots,
+  type Interval,
   isOfferedSlot,
+  isoWeekday,
   localDateOf,
   wallTimeToInstant,
 } from './slots.engine.js';
@@ -33,6 +35,39 @@ const toException = (row: ExceptionRow): AvailabilityException => ({
   end: row.end.toISOString(),
   reason: row.reason,
 });
+
+/** Créneaux libres d'un prestataire le jour demandé, sur ses ressources éligibles. */
+export interface DayAvailability {
+  /** Somme des créneaux libres des ressources éligibles. */
+  availableSlots: number;
+  /** Première ressource éligible (prix croissant, puis identifiant) qui a un créneau libre. */
+  availableResourceId: string;
+}
+
+function byResource<T extends { resourceId: string }>(rows: T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const group = groups.get(row.resourceId);
+    if (group) group.push(row);
+    else groups.set(row.resourceId, [row]);
+  }
+  return groups;
+}
+
+/**
+ * Fenêtre qui couvre le jour local `date` dans chacun des fuseaux : ses bornes changent d'un fuseau
+ * à l'autre. Le moteur ne garde ensuite que ce qui chevauche les créneaux de chaque ressource.
+ */
+function dayWindow(date: string, timezones: string[]): Interval {
+  const days = [...new Set(timezones)].map((timezone) => ({
+    start: wallTimeToInstant(date, '00:00', timezone).getTime(),
+    end: wallTimeToInstant(date, '24:00', timezone).getTime(),
+  }));
+  return {
+    start: new Date(Math.min(...days.map((day) => day.start))),
+    end: new Date(Math.max(...days.map((day) => day.end))),
+  };
+}
 
 @Injectable()
 export class AvailabilityService {
@@ -175,6 +210,60 @@ export class AvailabilityService {
         })),
       })),
     };
+  }
+
+  /**
+   * Créneaux libres de chaque prestataire le jour `date` (date locale de chaque ressource), pour le
+   * filtre « disponible le » de la recherche. Même calcul que `getSlots`, par le moteur, mais chargé
+   * par lot : une requête pour les ressources, puis trois pour toutes à la fois (règles, fermetures,
+   * réservations), quel que soit leur nombre. Avec `priceMaxCents`, seules les ressources à ce prix
+   * ou moins comptent. Seuls les prestataires qui ont au moins un créneau libre sont renvoyés.
+   */
+  async freeSlotsOn(
+    providerIds: string[],
+    date: string,
+    { priceMaxCents }: { priceMaxCents?: number },
+    now = new Date(),
+  ): Promise<Map<string, DayAvailability>> {
+    const result = new Map<string, DayAvailability>();
+    const resources = await this.availability.activeResourcesOf(providerIds, priceMaxCents);
+    if (resources.length === 0) return result;
+
+    const ids = resources.map((resource) => resource.id);
+    const window = dayWindow(
+      date,
+      resources.map((resource) => resource.timezone),
+    );
+    const [rules, closures, busy] = await Promise.all([
+      this.availability.rulesOn(ids, isoWeekday(date)),
+      this.availability.closuresOf(ids, window),
+      this.availability.busyOf(ids, window),
+    ]);
+    const rulesOf = byResource(rules);
+    const closuresOf = byResource(closures);
+    const busyOf = byResource(busy);
+
+    for (const resource of resources) {
+      const [day] = computeSlots({
+        timezone: resource.timezone,
+        slotMinutes: resource.slotMinutes,
+        rules: rulesOf.get(resource.id) ?? [],
+        closures: closuresOf.get(resource.id) ?? [],
+        busy: busyOf.get(resource.id) ?? [],
+        from: date,
+        to: date,
+        now,
+        horizonDays: BOOKING_HORIZON_DAYS,
+      });
+      const free = day?.slots.filter((slot) => slot.available).length ?? 0;
+      if (free === 0) continue;
+      const current = result.get(resource.providerId);
+      // Les ressources arrivent par prix croissant : la première qui a un créneau libre sert au lien.
+      if (current) current.availableSlots += free;
+      else
+        result.set(resource.providerId, { availableSlots: free, availableResourceId: resource.id });
+    }
+    return result;
   }
 
   /**
