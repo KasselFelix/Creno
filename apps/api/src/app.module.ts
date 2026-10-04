@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
+import { AiSearchModule } from './ai-search/ai-search.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AvailabilityModule } from './availability/availability.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module.js';
     BookingsModule,
     PaymentsModule,
     SearchModule,
+    AiSearchModule,
     GeocodingModule,
     NotificationsModule,
     MaintenanceModule,

@@ -40,6 +40,7 @@ import { TokensService } from './tokens.service.js';
         { name: 'public', ttl: 60_000, limit: config.PUBLIC_RATE_LIMIT_PER_MINUTE },
         { name: 'bookings', ttl: 60_000, limit: config.BOOKING_RATE_LIMIT_PER_MINUTE },
         { name: 'phone', ttl: 3_600_000, limit: config.PHONE_CODE_RATE_LIMIT_PER_HOUR },
+        { name: 'ai', ttl: 60_000, limit: config.AI_RATE_LIMIT_PER_MINUTE },
       ],
     }),
   ],

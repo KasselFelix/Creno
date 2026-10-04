@@ -93,6 +93,20 @@ export const envSchema = z
       /^(\+[1-9]\d{6,14}|MG[0-9a-fA-F]{32})$/,
       'numéro E.164 ou Messaging Service attendu',
     ),
+    // Recherche en langage naturel (Mistral). Sans clé, l'API démarre et la phrase est analysée par
+    // mots-clés. Mistral ne documente pas le format de ses clés : contrôle volontairement souple.
+    MISTRAL_API_KEY: optionalSecret(/^[A-Za-z0-9_-]{20,200}$/, 'clé API Mistral attendue'),
+    // Version datée plutôt qu'un alias `-latest` : prix connu, comportement qui ne change pas sans nous.
+    AI_MODEL: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9.-]{1,63}$/, { error: 'identifiant de modèle attendu' })
+      .default('mistral-small-2603'),
+    // Timeout de chaque appel au modèle.
+    AI_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(3000),
+    // Phrases interprétées par minute et par IP.
+    AI_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
+    // Appels au modèle par jour (UTC), toutes IP confondues. 0 coupe l'IA.
+    AI_DAILY_REQUEST_CAP: z.coerce.number().int().min(0).default(500),
   })
   .superRefine((env, ctx) => {
     // Une clé « live » encaisse de vrais paiements : jamais en développement ni en test.

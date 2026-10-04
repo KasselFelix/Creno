@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isSearchDateInRange,
   SEARCH_RADIUS_KM_DEFAULT,
   SEARCH_RESULTS_MAX,
+  searchDateRange,
   searchProvidersQuerySchema,
   searchProvidersResponseSchema,
 } from './search.js';
@@ -58,6 +60,23 @@ describe('searchProvidersQuerySchema', () => {
     expect(searchProvidersQuerySchema.parse({ date: '2026-10-10' })).toMatchObject({
       date: '2026-10-10',
     });
+  });
+});
+
+describe('isSearchDateInRange', () => {
+  it("accepte d'aujourd'hui à 90 jours, bornes comprises, en franchissant mois et années", () => {
+    expect(searchDateRange('2026-12-15')).toEqual({ min: '2026-12-15', max: '2027-03-15' });
+    expect(isSearchDateInRange('2026-12-15', '2026-12-15')).toBe(true);
+    expect(isSearchDateInRange('2027-03-15', '2026-12-15')).toBe(true);
+  });
+
+  it('refuse hier et le 91e jour', () => {
+    expect(isSearchDateInRange('2026-12-14', '2026-12-15')).toBe(false);
+    expect(isSearchDateInRange('2027-03-16', '2026-12-15')).toBe(false);
+  });
+
+  it("ne dépend pas d'un changement d'heure (fin mars)", () => {
+    expect(searchDateRange('2027-01-01').max).toBe('2027-04-01');
   });
 });
 

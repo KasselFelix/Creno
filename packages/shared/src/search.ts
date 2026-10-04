@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { localDateSchema } from './availability.js';
+import { BOOKING_HORIZON_DAYS, localDateSchema } from './availability.js';
 import { providerCategorySchema } from './providers.js';
 import { PRICE_CENTS_MAX } from './resources.js';
 
@@ -15,6 +15,27 @@ export const SEARCH_RADIUS_OPTIONS_KM = [1, 2, 5, 10, 25, 50] as const;
 export const SEARCH_TIMEZONE = 'Europe/Paris';
 /** Avec une date, prestataires examinés (les plus proches d'abord) avant le filtre de disponibilité. */
 export const SEARCH_DATE_CANDIDATES_MAX = 200;
+
+/** Décale une date `YYYY-MM-DD` de `days` jours calendaires (calcul en UTC : pas d'heure en jeu). */
+function addCalendarDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+/**
+ * Dates acceptées par le filtre « disponible le » : d'aujourd'hui à `BOOKING_HORIZON_DAYS` jours,
+ * `today` étant la date du jour à l'heure de `SEARCH_TIMEZONE`. Format fixe : l'ordre des chaînes
+ * est l'ordre des dates.
+ */
+export function searchDateRange(today: string): { min: string; max: string } {
+  return { min: today, max: addCalendarDays(today, BOOKING_HORIZON_DAYS) };
+}
+
+export function isSearchDateInRange(date: string, today: string): boolean {
+  const { min, max } = searchDateRange(today);
+  return date >= min && date <= max;
+}
 
 /**
  * Arrondi à 3 décimales (≈ 100 m) : la position d'un visiteur est une donnée personnelle,

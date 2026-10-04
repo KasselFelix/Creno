@@ -16,5 +16,7 @@ import { GeocodingService } from './geocoding.service.js';
       useFactory: (config: AppConfig) => new BanGeocoder(config.GEOCODER_URL),
     },
   ],
+  // La recherche en langage naturel géocode le lieu cité dans la phrase.
+  exports: [GEOCODER],
 })
 export class GeocodingModule {}
