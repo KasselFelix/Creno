@@ -39,6 +39,8 @@ export function truncateIgnored(terms: string[]): string[] {
  */
 const MODEL_PRICES: Readonly<Record<string, { input: number; output: number }>> = {
   'mistral-small-2603': { input: 0.15, output: 0.6 },
+  // Ministral 3 8B : plus petit, sortie moins chère ; repli quand Mistral Small n'a pas de quota.
+  'ministral-8b-2512': { input: 0.15, output: 0.15 },
 };
 
 export function hasKnownPrice(model: string): boolean {

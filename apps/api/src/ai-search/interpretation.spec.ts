@@ -45,6 +45,11 @@ describe('costUsdMicros', () => {
     expect(costUsdMicros('mistral-small-2603', { inputTokens: 500, outputTokens: 80 })).toBe(123);
   });
 
+  it('calcule le coût de Ministral 3 8B : 666 + 76 tokens → 111 µ$', () => {
+    expect(hasKnownPrice('ministral-8b-2512')).toBe(true);
+    expect(costUsdMicros('ministral-8b-2512', { inputTokens: 666, outputTokens: 76 })).toBe(111);
+  });
+
   it('renvoie null pour un modèle sans tarif ou des tokens inconnus', () => {
     expect(hasKnownPrice('mistral-large-2411')).toBe(false);
     expect(costUsdMicros('mistral-large-2411', { inputTokens: 500, outputTokens: 80 })).toBeNull();

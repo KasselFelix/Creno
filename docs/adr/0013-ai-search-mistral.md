@@ -48,8 +48,11 @@ Tarifs relevés le 2026-10-04. Une recherche type consomme environ 500 tokens en
 | Modèle                                     | Entrée ($ / M tokens) | Sortie ($ / M tokens) | Une recherche | 1 000 recherches |
 | ------------------------------------------ | --------------------- | --------------------- | ------------- | ---------------- |
 | **Mistral Small 4** (`mistral-small-2603`) | 0,15                  | 0,60                  | ~0,00012 $    | ~0,12 $          |
+| Ministral 3 8B (`ministral-8b-2512`)       | 0,15                  | 0,15                  | ~0,00009 $    | ~0,09 $          |
 | Claude Haiku 4.5                           | 1,00                  | 5,00                  | ~0,0009 $     | ~0,90 $          |
 | Claude Sonnet 5.5                          | 2,00                  | 10,00                 | ~0,0018 $     | ~1,80 $          |
+
+Mesuré avec le vrai prompt (calendrier compris) : 666 tokens en entrée et 76 en sortie, soit ~146 µ$ avec Mistral Small 4 et ~111 µ$ avec Ministral 3 8B. Ministral 3 8B est aussi dans la table de prix : c'est le modèle de repli quand Mistral Small n'a pas de quota sur l'offre gratuite (il suffit de changer `AI_MODEL`), au prix d'une compréhension un peu moins fine des tournures ambiguës.
 
 Les tokens ne se comptent pas pareil d'un fournisseur à l'autre (chacun découpe le texte à sa façon) : l'ordre de grandeur compte plus que le chiffre exact. Le cache de prompt n'aiderait pas ici : le préfixe commun (la consigne) est sous la taille minimale mise en cache. Un modèle plus capable n'apporterait rien à une extraction de cinq champs validée par un schéma.
 
