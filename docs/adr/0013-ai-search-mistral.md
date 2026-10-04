@@ -21,7 +21,7 @@ Contraintes :
 **Le modèle ne produit que des filtres, jamais de SQL.**
 
 - Sortie structurée : le JSON Schema envoyé au modèle est généré (`z.toJSONSchema`) depuis le schéma Zod partagé `aiSearchExtractionSchema`. La réponse est revalidée par ce même schéma : une catégorie inconnue ou un prix négatif donnent `invalid_output`, puis le repli.
-- `temperature: 0`. Le prompt donne la date du jour (heure de Paris) et le calendrier des 14 prochains jours, pour que le modèle lise « samedi » au lieu de calculer la date. La phrase est placée entre balises, et `<` et `>` y sont neutralisés.
+- `temperature: 0`, et `reasoning_effort: 'none'` pour les seuls modèles qui raisonnent (Mistral Small 4) : un modèle qui ne raisonne pas refuse ce paramètre (400), il ne lui est donc pas envoyé. Le prompt donne la date du jour (heure de Paris) et le calendrier des 14 prochains jours, pour que le modèle lise « samedi » au lieu de calculer la date. La phrase est placée entre balises, et `<` et `>` y sont neutralisés.
 - Le lieu sort en texte (« Bordeaux ») ; c'est le géocodeur (ADR 0008) qui en fait une position. Le modèle ne produit jamais de coordonnées.
 
 **Derrière une interface.** `FilterExtractor` (jeton `AI_FILTER_EXTRACTOR`), adapter `MistralFilterExtractor`, et `UnconfiguredFilterExtractor` quand `MISTRAL_API_KEY` est vide. Changer de fournisseur, c'est écrire un autre adapter. En test, l'adapter est remplacé par un faux ; son analyse des réponses est testée à part avec un `fetch` simulé.

@@ -17,6 +17,12 @@ import { buildUserMessage, SYSTEM_PROMPT } from './prompt.js';
 const OUTPUT_SCHEMA = z.toJSONSchema(aiSearchExtractionSchema);
 /** Une sortie complète tient en une centaine de tokens : au-delà, elle est coupée (`length`). */
 const MAX_OUTPUT_TOKENS = 400;
+/**
+ * Modèles qui raisonnent avant de répondre : on leur demande de ne pas le faire (latence, texte
+ * simple). Les autres refusent le paramètre (`400 reasoning_effort is not enabled for this model`),
+ * il ne leur est donc pas envoyé.
+ */
+const REASONING_MODELS: ReadonlySet<string> = new Set(['mistral-small-2603']);
 
 /**
  * Extracteur Mistral (offre gratuite « Experiment » ou payante, même code). Un seul appel par
@@ -49,9 +55,9 @@ export class MistralFilterExtractor implements FilterExtractor {
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: buildUserMessage(request) },
           ],
-          // Extraction : même phrase, même réponse ; pas de raisonnement (latence et texte simple).
+          // Extraction : même phrase, même réponse.
           temperature: 0,
-          reasoningEffort: 'none',
+          ...(REASONING_MODELS.has(this.model) ? { reasoningEffort: 'none' as const } : {}),
           maxTokens: MAX_OUTPUT_TOKENS,
           responseFormat: {
             type: 'json_schema',

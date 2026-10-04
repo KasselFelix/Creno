@@ -84,6 +84,17 @@ describe('MistralFilterExtractor', () => {
     expect(JSON.stringify(body.response_format)).toContain('"additionalProperties":false');
   });
 
+  it("n'envoie pas reasoning_effort à un modèle qui ne raisonne pas (il refuserait la requête)", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(completion(JSON.stringify(OUTPUT)));
+    await new MistralFilterExtractor(API_KEY, 'ministral-8b-2512', fetchFn).extract(
+      REQUEST,
+      new AbortController().signal,
+    );
+    const body = (await (fetchFn.mock.calls[0]![0] as Request).json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ model: 'ministral-8b-2512', temperature: 0 });
+    expect(body).not.toHaveProperty('reasoning_effort');
+  });
+
   it('lit aussi une réponse découpée en morceaux de texte', async () => {
     const chunks = [{ type: 'text', text: JSON.stringify(OUTPUT) }];
     const result = await run(vi.fn<typeof fetch>().mockResolvedValue(completion(chunks)));
