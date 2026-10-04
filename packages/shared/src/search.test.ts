@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isSearchDateInRange,
   SEARCH_RADIUS_KM_DEFAULT,
   SEARCH_RESULTS_MAX,
+  searchDateRange,
   searchProvidersQuerySchema,
+  searchProvidersResponseSchema,
 } from './search.js';
 
 describe('searchProvidersQuerySchema', () => {
@@ -46,7 +49,70 @@ describe('searchProvidersQuerySchema', () => {
     ['prix négatif', { priceMax: '-1' }],
     ['limite nulle', { limit: '0' }],
     ['limite trop grande', { limit: '51' }],
+    ['date au format français', { date: '10/10/2026' }],
+    ['date impossible', { date: '2026-02-31' }],
+    ['date vide', { date: '' }],
   ])('refuse : %s', (_label, input) => {
     expect(searchProvidersQuerySchema.safeParse(input).success).toBe(false);
+  });
+
+  it('accepte une date de disponibilité', () => {
+    expect(searchProvidersQuerySchema.parse({ date: '2026-10-10' })).toMatchObject({
+      date: '2026-10-10',
+    });
+  });
+});
+
+describe('isSearchDateInRange', () => {
+  it("accepte d'aujourd'hui à 90 jours, bornes comprises, en franchissant mois et années", () => {
+    expect(searchDateRange('2026-12-15')).toEqual({ min: '2026-12-15', max: '2027-03-15' });
+    expect(isSearchDateInRange('2026-12-15', '2026-12-15')).toBe(true);
+    expect(isSearchDateInRange('2027-03-15', '2026-12-15')).toBe(true);
+  });
+
+  it('refuse hier et le 91e jour', () => {
+    expect(isSearchDateInRange('2026-12-14', '2026-12-15')).toBe(false);
+    expect(isSearchDateInRange('2027-03-16', '2026-12-15')).toBe(false);
+  });
+
+  it("ne dépend pas d'un changement d'heure (fin mars)", () => {
+    expect(searchDateRange('2027-01-01').max).toBe('2027-04-01');
+  });
+});
+
+describe('searchProvidersResponseSchema', () => {
+  const provider = {
+    id: '6f1c2b0e-8a4d-4c1e-9b7a-2d3e4f5a6b7c',
+    name: 'Five Bordeaux Lac',
+    slug: 'five-bordeaux-lac',
+    category: 'sports_field',
+    address: 'Rue du Lac',
+    city: 'Bordeaux',
+    latitude: 44.885,
+    longitude: -0.563,
+    distanceMeters: 1200,
+    minPriceCents: 3000,
+    currency: 'EUR',
+    resourceCount: 2,
+  };
+
+  it('accepte un résultat sans date (créneaux non comptés) et un résultat avec date', () => {
+    const withoutDate = { ...provider, availableSlots: null, availableResourceId: null };
+    const withDate = {
+      ...provider,
+      availableSlots: 3,
+      availableResourceId: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+    };
+    expect(
+      searchProvidersResponseSchema.safeParse({
+        items: [withoutDate, withDate],
+        total: 2,
+        totalIsCapped: false,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('exige totalIsCapped', () => {
+    expect(searchProvidersResponseSchema.safeParse({ items: [], total: 0 }).success).toBe(false);
   });
 });

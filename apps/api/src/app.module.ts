@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
+import { AiSearchModule } from './ai-search/ai-search.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AvailabilityModule } from './availability/availability.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
 import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
+import { ClockModule } from './common/clock.js';
 import { LOG_STREAM, LogStreamModule, loggerParams } from './common/logger.js';
 import { APP_CONFIG, ConfigModule } from './config/config.module.js';
 import type { AppConfig } from './config/env.js';
@@ -24,6 +26,7 @@ import { UsersModule } from './users/users.module.js';
 @Module({
   imports: [
     ConfigModule,
+    ClockModule,
     LoggerModule.forRootAsync({
       imports: [LogStreamModule],
       inject: [APP_CONFIG, LOG_STREAM],
@@ -41,6 +44,7 @@ import { UsersModule } from './users/users.module.js';
     BookingsModule,
     PaymentsModule,
     SearchModule,
+    AiSearchModule,
     GeocodingModule,
     NotificationsModule,
     MaintenanceModule,

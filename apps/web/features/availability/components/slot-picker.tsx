@@ -18,8 +18,7 @@ import {
   todayInZone,
 } from '@/lib/format';
 import { useSlots } from '../api';
-
-const WEEK = 7;
+import { WEEK, weekStartFor } from '../week';
 
 /** Ce qu'il faut pour réserver : la session du visiteur, et la capacité du prestataire à encaisser. */
 interface BookingContext {
@@ -30,9 +29,19 @@ interface BookingContext {
   providerPath: string;
 }
 
-/** Sélecteur de ressource, de jour et de créneau de la fiche publique d'un prestataire. */
-export function SlotPicker({ resources, ...booking }: { resources: Resource[] } & BookingContext) {
-  const [resourceId, setResourceId] = useState(resources[0]!.id);
+/**
+ * Sélecteur de ressource, de jour et de créneau de la fiche publique d'un prestataire.
+ * `initialResourceId` et `initialDate` viennent d'un résultat de recherche (« disponible le ») :
+ * la fiche s'ouvre sur cette ressource et ce jour. Invalides, ils sont ignorés.
+ */
+export function SlotPicker({
+  resources,
+  initialResourceId,
+  initialDate,
+  ...booking
+}: { resources: Resource[]; initialResourceId?: string; initialDate?: string } & BookingContext) {
+  const initial = resources.find((item) => item.id === initialResourceId) ?? resources[0]!;
+  const [resourceId, setResourceId] = useState(initial.id);
   const resource = resources.find((item) => item.id === resourceId) ?? resources[0]!;
 
   return (
@@ -58,16 +67,33 @@ export function SlotPicker({ resources, ...booking }: { resources: Resource[] } 
         ))}
       </div>
       {/* `key` : changer de ressource repart d'aujourd'hui, dans le fuseau de cette ressource. */}
-      <ResourceSlots key={resource.id} resource={resource} booking={booking} />
+      <ResourceSlots
+        key={resource.id}
+        resource={resource}
+        booking={booking}
+        initialDate={resource.id === initial.id ? initialDate : undefined}
+      />
     </div>
   );
 }
 
-function ResourceSlots({ resource, booking }: { resource: Resource; booking: BookingContext }) {
+function ResourceSlots({
+  resource,
+  booking,
+  initialDate,
+}: {
+  resource: Resource;
+  booking: BookingContext;
+  initialDate?: string;
+}) {
   const today = todayInZone(resource.timezone);
-  const [weekStart, setWeekStart] = useState(today);
+  // Date hors de la plage réservable (dans le fuseau de la ressource) : on part d'aujourd'hui.
+  const initialWeek = initialDate ? weekStartFor(today, initialDate) : null;
+  const [weekStart, setWeekStart] = useState(initialWeek ?? today);
   // `null` : aucun jour choisi à la main, on montre le premier jour qui a un créneau libre.
-  const [pickedDate, setPickedDate] = useState<string | null>(null);
+  const [pickedDate, setPickedDate] = useState<string | null>(
+    initialWeek ? (initialDate ?? null) : null,
+  );
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
   const slots = useSlots(resource.id, weekStart, addDays(weekStart, WEEK - 1));
 
@@ -164,7 +190,8 @@ function ResourceSlots({ resource, booking }: { resource: Resource; booking: Boo
 
           <div aria-live="polite" className="flex flex-col gap-3">
             <p className="text-muted-foreground text-sm">
-              <span className="capitalize">
+              {/* Majuscule à la première lettre seulement : « Samedi 10 octobre ». */}
+              <span className="inline-block first-letter:uppercase">
                 {formatLocalDate(selectedDate, { weekday: 'long', day: 'numeric', month: 'long' })}
               </span>{' '}
               · heures affichées dans le fuseau {resource.timezone}
@@ -190,7 +217,7 @@ function ResourceSlots({ resource, booking }: { resource: Resource; booking: Boo
           <CardContent className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-col">
               <span className="font-medium">{resource.name}</span>
-              <span className="text-muted-foreground capitalize">
+              <span className="text-muted-foreground first-letter:uppercase">
                 {formatLocalDate(selectedDate, { weekday: 'long', day: 'numeric', month: 'long' })}{' '}
                 · {timeInZone(selected.start, resource.timezone)} –{' '}
                 {timeInZone(selected.end, resource.timezone)}

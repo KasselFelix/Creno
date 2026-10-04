@@ -1,8 +1,15 @@
 // Données de démo. Idempotent : vide les tables métier puis réinsère le même jeu de données.
 import { hash } from '@node-rs/argon2';
 import { sql, type SQL } from 'drizzle-orm';
+import type { PgInsertValue } from 'drizzle-orm/pg-core';
 import { createDb } from './client.js';
-import { type ProviderSeed, searchProviderSeeds } from './seed-providers.js';
+import {
+  FULL_ON_SATURDAY,
+  HOURS,
+  type ProviderSeed,
+  type RuleSeed,
+  searchProviderSeeds,
+} from './seed-providers.js';
 import {
   availabilityExceptions,
   availabilityRules,
@@ -23,15 +30,47 @@ const DEMO_FEE_BPS = 1000;
 /** Mot de passe de tous les comptes de démo (développement uniquement, documenté dans le README). */
 export const DEMO_PASSWORD = 'creno-demo-2026';
 
+/** Jour de la semaine (0 = dimanche … 6 = samedi) à Paris, `days` jours après aujourd'hui. */
+function parisWeekdayIn(days: number): number {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
+  const date = new Date(`${today}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.getUTCDay();
+}
+
 /** Nombre de jours jusqu'au prochain jour ouvré (lundi à vendredi) à Paris, à partir de demain. */
 function daysToNextWeekday(): number {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
   for (let days = 1; ; days++) {
-    const date = new Date(`${today}T00:00:00Z`);
-    date.setUTCDate(date.getUTCDate() + days);
-    const weekday = date.getUTCDay();
+    const weekday = parisWeekdayIn(days);
     if (weekday >= 1 && weekday <= 5) return days;
   }
+}
+
+/**
+ * Nombre de jours jusqu'au prochain samedi à Paris, aujourd'hui compris : le jour que désigne
+ * « samedi » dans une recherche en langage naturel.
+ */
+function daysToSaturday(): number {
+  return (6 - parisWeekdayIn(0) + 7) % 7;
+}
+
+/**
+ * Créneaux `[début, fin)` d'une plage horaire, en heures `HH:mm`. Calcul en heures murales : les
+ * plages de démo sont en journée, loin des changements d'heure.
+ */
+function slotsOf(rule: RuleSeed, slotMinutes: number): { start: string; end: string }[] {
+  const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+  const hhmm = (total: number) =>
+    `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  const slots: { start: string; end: string }[] = [];
+  for (
+    let at = minutes(rule.startTime);
+    at + slotMinutes <= minutes(rule.endTime);
+    at += slotMinutes
+  ) {
+    slots.push({ start: hhmm(at), end: hhmm(at + slotMinutes) });
+  }
+  return slots;
 }
 
 /**
@@ -45,6 +84,7 @@ function parisRange(days: number, start: string, end: string): SQL {
 }
 
 // Les trois premiers servent aux parcours de démo (créneaux, réservations) ; les suivants à la recherche.
+// Les trois de démo gardent le même horaire (semaine 9-18 h, samedi 10-14 h).
 const providerSeeds: ProviderSeed[] = [
   {
     email: 'studio.lumiere@example.com',
@@ -60,6 +100,7 @@ const providerSeeds: ProviderSeed[] = [
       { name: 'Studio A (fond blanc)', slotMinutes: 60, priceCents: 4500 },
       { name: 'Séance portrait', slotMinutes: 30, priceCents: 6000 },
     ],
+    hours: 'weekdaysAndSaturday',
   },
   {
     email: 'coupe.croix-rousse@example.com',
@@ -75,6 +116,7 @@ const providerSeeds: ProviderSeed[] = [
       { name: 'Coupe homme', slotMinutes: 30, priceCents: 2500 },
       { name: 'Coupe + couleur', slotMinutes: 90, priceCents: 7500 },
     ],
+    hours: 'weekdaysAndSaturday',
   },
   {
     email: 'five.bordeaux@example.com',
@@ -90,6 +132,7 @@ const providerSeeds: ProviderSeed[] = [
       { name: 'Terrain 1 (5 contre 5)', slotMinutes: 60, priceCents: 9000 },
       { name: 'Terrain 2 (5 contre 5)', slotMinutes: 60, priceCents: 9000 },
     ],
+    hours: 'weekdaysAndSaturday',
   },
   ...searchProviderSeeds,
 ];
@@ -120,6 +163,7 @@ async function main(): Promise<void> {
     if (demoStripeAccountId && !/^acct_[A-Za-z0-9]+$/.test(demoStripeAccountId)) {
       throw new Error('SEED_STRIPE_ACCOUNT_ID doit être un identifiant de compte Stripe (acct_…)');
     }
+    const fullSaturday: PgInsertValue<typeof bookings>[] = [];
     await db.transaction(async (tx) => {
       await tx.execute(
         sql`TRUNCATE pending_registrations, phone_verifications, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
@@ -179,17 +223,27 @@ async function main(): Promise<void> {
             .returning({ id: resources.id });
           resourceIds.push(resource!.id);
 
-          await tx.insert(availabilityRules).values([
-            ...[1, 2, 3, 4, 5].map((weekday) => ({
-              resourceId: resource!.id,
-              weekday,
-              startTime: '09:00',
-              endTime: '18:00',
-            })),
-            { resourceId: resource!.id, weekday: 6, startTime: '10:00', endTime: '14:00' },
-          ]);
+          const rules = HOURS[p.hours];
+          await tx
+            .insert(availabilityRules)
+            .values(rules.map((rule) => ({ resourceId: resource!.id, ...rule })));
+
+          // Réservations confirmées sur tous les créneaux du prochain samedi.
+          if (p.slug !== FULL_ON_SATURDAY) continue;
+          for (const rule of rules.filter((rule) => rule.weekday === 6)) {
+            for (const slot of slotsOf(rule, r.slotMinutes)) {
+              fullSaturday.push({
+                resourceId: resource!.id,
+                customerId: customers[1]!.id,
+                during: parisRange(daysToSaturday(), slot.start, slot.end),
+                status: 'confirmed',
+                priceCents: r.priceCents,
+              });
+            }
+          }
         }
       }
+      if (fullSaturday.length > 0) await tx.insert(bookings).values(fullSaturday);
 
       const [studioA] = resourceIds;
       const day = daysToNextWeekday();
@@ -243,7 +297,7 @@ async function main(): Promise<void> {
     });
 
     process.stdout.write(
-      `${JSON.stringify({ level: 'info', event: 'db.seeded', providers: providerSeeds.length, resources: providerSeeds.reduce((n, p) => n + p.resources.length, 0), bookings: 3 })}\n`,
+      `${JSON.stringify({ level: 'info', event: 'db.seeded', providers: providerSeeds.length, resources: providerSeeds.reduce((n, p) => n + p.resources.length, 0), bookings: 3 + fullSaturday.length })}\n`,
     );
   } finally {
     await pool.end();

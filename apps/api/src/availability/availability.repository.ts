@@ -1,11 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, eq, sql } from 'drizzle-orm';
+import { and, asc, type Column, count, eq, lte, sql } from 'drizzle-orm';
 import {
   availabilityExceptions,
   availabilityRules,
   bookings,
   type Database,
   type DbHandle,
+  resources,
   toRange,
 } from '@creno/db';
 import type { AvailabilityRule } from '@creno/shared';
@@ -25,6 +26,32 @@ const bounds = (during: typeof bookings.during | typeof availabilityExceptions.d
 
 /** Postgres renvoie un `time` en `HH:MM:SS` ; l'API parle en `HH:mm` (`24:00:00` → `24:00`). */
 const toHourMinute = (time: string) => time.slice(0, 5);
+
+/**
+ * Réservations qui occupent réellement un créneau : les `confirmed`, et les `pending` dont le hold
+ * n'a pas expiré. La contrainte EXCLUDE, elle, compte encore un hold expiré (son prédicat ne peut
+ * pas utiliser now()) : c'est ici qu'on l'ignore.
+ */
+const occupiesSlot = sql`(${bookings.status} = 'confirmed' OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`;
+
+/** `colonne = ANY($1)` : un seul paramètre (un tableau), quel que soit le nombre d'identifiants. */
+const anyOf = (column: Column, ids: string[]) => sql`${column} = ANY(${sql.param(ids)}::uuid[])`;
+
+/** Ressource active examinée par le filtre « disponible le » de la recherche. */
+export interface DayResourceRow {
+  id: string;
+  providerId: string;
+  timezone: string;
+  slotMinutes: number;
+}
+
+export interface ResourceRuleRow extends AvailabilityRule {
+  resourceId: string;
+}
+
+export interface ResourceIntervalRow extends Interval {
+  resourceId: string;
+}
 
 @Injectable()
 export class AvailabilityRepository {
@@ -130,11 +157,7 @@ export class AvailabilityRepository {
       );
   }
 
-  /**
-   * Réservations qui occupent réellement un créneau dans la fenêtre : les `confirmed`, et les
-   * `pending` dont le hold n'a pas expiré. La contrainte EXCLUDE, elle, compte encore un hold
-   * expiré (son prédicat ne peut pas utiliser now()) : c'est ici qu'on l'ignore.
-   */
+  /** Réservations qui occupent réellement un créneau dans la fenêtre (voir `occupiesSlot`). */
   async busyBetween(resourceId: string, window: Interval): Promise<Interval[]> {
     return this.handle.db
       .select(bounds(bookings.during))
@@ -143,7 +166,93 @@ export class AvailabilityRepository {
         and(
           eq(bookings.resourceId, resourceId),
           sql`${bookings.during} && ${toRange(window.start, window.end)}::tstzrange`,
-          sql`(${bookings.status} = 'confirmed' OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`,
+          occupiesSlot,
+        ),
+      );
+  }
+
+  // Chargement par lot pour le filtre « disponible le » : une requête pour toutes les ressources
+  // des prestataires candidats, au lieu d'une par ressource.
+
+  /**
+   * Ressources actives des prestataires, à `priceMaxCents` ou moins si le prix est filtré : seules
+   * celles-là comptent. Triées par prix puis par identifiant, l'ordre du choix de la ressource du lien.
+   */
+  async activeResourcesOf(
+    providerIds: string[],
+    priceMaxCents?: number,
+  ): Promise<DayResourceRow[]> {
+    if (providerIds.length === 0) return [];
+    return this.handle.db
+      .select({
+        id: resources.id,
+        providerId: resources.providerId,
+        timezone: resources.timezone,
+        slotMinutes: resources.slotMinutes,
+      })
+      .from(resources)
+      .where(
+        and(
+          anyOf(resources.providerId, providerIds),
+          eq(resources.isActive, true),
+          priceMaxCents === undefined ? undefined : lte(resources.priceCents, priceMaxCents),
+        ),
+      )
+      .orderBy(asc(resources.priceCents), asc(resources.id));
+  }
+
+  /** Plages horaires d'un jour de la semaine (ISO), pour plusieurs ressources. */
+  async rulesOn(resourceIds: string[], weekday: number): Promise<ResourceRuleRow[]> {
+    if (resourceIds.length === 0) return [];
+    const rows = await this.handle.db
+      .select({
+        resourceId: availabilityRules.resourceId,
+        weekday: availabilityRules.weekday,
+        startTime: availabilityRules.startTime,
+        endTime: availabilityRules.endTime,
+      })
+      .from(availabilityRules)
+      .where(
+        and(
+          anyOf(availabilityRules.resourceId, resourceIds),
+          eq(availabilityRules.weekday, weekday),
+        ),
+      );
+    return rows.map((row) => ({
+      ...row,
+      startTime: toHourMinute(row.startTime),
+      endTime: toHourMinute(row.endTime),
+    }));
+  }
+
+  /** Fermetures qui chevauchent la fenêtre, pour plusieurs ressources. */
+  async closuresOf(resourceIds: string[], window: Interval): Promise<ResourceIntervalRow[]> {
+    if (resourceIds.length === 0) return [];
+    return this.handle.db
+      .select({
+        resourceId: availabilityExceptions.resourceId,
+        ...bounds(availabilityExceptions.during),
+      })
+      .from(availabilityExceptions)
+      .where(
+        and(
+          anyOf(availabilityExceptions.resourceId, resourceIds),
+          sql`${availabilityExceptions.during} && ${toRange(window.start, window.end)}::tstzrange`,
+        ),
+      );
+  }
+
+  /** Réservations qui occupent un créneau dans la fenêtre, pour plusieurs ressources. */
+  async busyOf(resourceIds: string[], window: Interval): Promise<ResourceIntervalRow[]> {
+    if (resourceIds.length === 0) return [];
+    return this.handle.db
+      .select({ resourceId: bookings.resourceId, ...bounds(bookings.during) })
+      .from(bookings)
+      .where(
+        and(
+          anyOf(bookings.resourceId, resourceIds),
+          sql`${bookings.during} && ${toRange(window.start, window.end)}::tstzrange`,
+          occupiesSlot,
         ),
       );
   }

@@ -8,6 +8,7 @@ export const THROTTLERS = [
   'public',
   'bookings',
   'phone',
+  'ai',
 ] as const;
 export type ThrottlerName = (typeof THROTTLERS)[number];
 

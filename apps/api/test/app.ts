@@ -11,7 +11,9 @@ import { vi } from 'vitest';
 import { createDb, type DbHandle, providers, users } from '@creno/db';
 import type { Provider, PublicUser, Resource, UserRole } from '@creno/shared';
 import { AppModule } from '../src/app.module.js';
+import { AI_FILTER_EXTRACTOR, type FilterExtractor } from '../src/ai-search/filter-extractor.js';
 import { addLocalDays, localDateOf, wallTimeToInstant } from '../src/availability/slots.engine.js';
+import { CLOCK, type Clock } from '../src/common/clock.js';
 import { LOG_STREAM } from '../src/common/logger.js';
 import { GEOCODER, type Geocoder } from '../src/geocoding/geocoder.js';
 import { APP_CONFIG } from '../src/config/config.module.js';
@@ -59,6 +61,18 @@ export interface TestAppOptions {
   email?: EmailGateway;
   /** Remplace l'envoi de SMS. Sans cette option, la passerelle est « non configurée ». */
   sms?: SmsGateway;
+  /** Remplace le modèle de langage. Sans cette option, il est « non configuré » : mots-clés seulement. */
+  filterExtractor?: FilterExtractor;
+  /** Phrases interprétées par minute et par IP (très haute par défaut). */
+  aiRateLimit?: number;
+  /** Appels au modèle par jour (très haut par défaut ; 0 coupe l'IA). */
+  aiDailyCap?: number;
+  /** Timeout d'un appel au modèle, en millisecondes. */
+  aiTimeoutMs?: number;
+  /** Modèle configuré (par défaut celui de la table de prix). */
+  aiModel?: string;
+  /** Remplace l'horloge (circuit breaker, attente avant reprise). */
+  clock?: Clock;
 }
 
 /** Démarre l'application complète sur la base de test (jamais de base mockée). */
@@ -88,6 +102,12 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     TWILIO_AUTH_TOKEN: '',
     TWILIO_FROM: '',
     SMS_ALLOWED_PREFIXES: '+336,+337',
+    // Vide = absente : aucun test n'appelle Mistral, même si le .env local contient une clé.
+    MISTRAL_API_KEY: '',
+    AI_MODEL: options.aiModel ?? 'mistral-small-2603',
+    AI_TIMEOUT_MS: String(options.aiTimeoutMs ?? 3000),
+    AI_RATE_LIMIT_PER_MINUTE: String(options.aiRateLimit ?? 100_000),
+    AI_DAILY_REQUEST_CAP: String(options.aiDailyCap ?? 100_000),
   });
 
   const builder = Test.createTestingModule({ imports: [AppModule] });
@@ -100,6 +120,10 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
   if (options.payments) builder.overrideProvider(PAYMENTS_GATEWAY).useValue(options.payments);
   if (options.email) builder.overrideProvider(EMAIL_GATEWAY).useValue(options.email);
   if (options.sms) builder.overrideProvider(SMS_GATEWAY).useValue(options.sms);
+  if (options.filterExtractor) {
+    builder.overrideProvider(AI_FILTER_EXTRACTOR).useValue(options.filterExtractor);
+  }
+  if (options.clock) builder.overrideProvider(CLOCK).useValue(options.clock);
   if (options.logs) {
     const logs = options.logs;
     builder.overrideProvider(LOG_STREAM).useValue(
@@ -128,7 +152,7 @@ export function dbOf(app: INestApplication): DbHandle {
 
 export async function resetDatabase(app: INestApplication): Promise<void> {
   await dbOf(app).db.execute(
-    sql`TRUNCATE pending_registrations, phone_verifications, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ai_requests, pending_registrations, phone_verifications, notifications, sessions, stripe_events, payments, bookings, availability_exceptions, availability_rules, resources, providers, users RESTART IDENTITY CASCADE`,
   );
   await app.get(JobsService).clear();
 }
@@ -136,6 +160,23 @@ export async function resetDatabase(app: INestApplication): Promise<void> {
 /** Exécute les jobs en attente d'une file, comme le ferait un worker. Renvoie le nombre de jobs traités. */
 export function runJobs(app: INestApplication, queue: string): Promise<number> {
   return app.get(JobsService).runPending(queue);
+}
+
+/**
+ * Horloge de test : elle suit le temps réel (les timeouts restent de vrais délais), mais une attente
+ * (`sleep`) avance l'horloge d'un coup au lieu de bloquer, et `advance` saute dans le temps.
+ */
+export function fakeClock() {
+  let offset = 0;
+  return {
+    now: () => Date.now() + offset,
+    sleep: vi.fn<Clock['sleep']>(async (ms) => {
+      offset += ms;
+    }),
+    advance(ms: number) {
+      offset += ms;
+    },
+  } satisfies Clock & { advance(ms: number): void };
 }
 
 /** Fausses passerelles d'envoi : chaque message « part » et reste consultable dans `mock.calls`. */

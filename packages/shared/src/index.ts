@@ -1,3 +1,4 @@
+export * from './ai-search.js';
 export * from './auth.js';
 export * from './availability.js';
 export * from './bookings.js';

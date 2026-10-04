@@ -21,6 +21,43 @@ const prod = {
   EMAIL_FROM: 'Creno <bonjour@creno.test>',
 };
 
+describe('loadConfig : recherche en langage naturel', () => {
+  // Fausse clé construite à l'exécution, comme les autres.
+  const mistralKey = 'k'.repeat(32);
+
+  it('démarre sans clé Mistral, avec les valeurs par défaut', () => {
+    const config = loadConfig(base);
+    expect(config.MISTRAL_API_KEY).toBeUndefined();
+    expect(config).toMatchObject({
+      AI_MODEL: 'ministral-8b-2512',
+      AI_TIMEOUT_MS: 3000,
+      AI_RATE_LIMIT_PER_MINUTE: 10,
+      AI_DAILY_REQUEST_CAP: 500,
+    });
+  });
+
+  it('accepte une clé et un plafond à 0 (IA coupée), même en production', () => {
+    expect(loadConfig({ ...base, MISTRAL_API_KEY: mistralKey }).MISTRAL_API_KEY).toBe(mistralKey);
+    expect(loadConfig({ ...prod, AI_DAILY_REQUEST_CAP: '0' }).AI_DAILY_REQUEST_CAP).toBe(0);
+  });
+
+  it.each([
+    ['clé trop courte', { MISTRAL_API_KEY: 'court' }, /MISTRAL_API_KEY/],
+    ['modèle mal formé', { AI_MODEL: 'Mistral Small' }, /AI_MODEL/],
+    ['timeout trop court', { AI_TIMEOUT_MS: '50' }, /AI_TIMEOUT_MS/],
+    ['timeout trop long', { AI_TIMEOUT_MS: '20000' }, /AI_TIMEOUT_MS/],
+    ['limite par minute nulle', { AI_RATE_LIMIT_PER_MINUTE: '0' }, /AI_RATE_LIMIT_PER_MINUTE/],
+    ['plafond négatif', { AI_DAILY_REQUEST_CAP: '-1' }, /AI_DAILY_REQUEST_CAP/],
+  ])('refuse de démarrer : %s', (_label, change, error) => {
+    expect(() => loadConfig({ ...base, ...change })).toThrow(error);
+  });
+
+  it("n'affiche jamais la clé refusée", () => {
+    const badKey = 'secret avec espaces '.repeat(3);
+    expect(() => loadConfig({ ...base, MISTRAL_API_KEY: badKey })).not.toThrow(new RegExp(badKey));
+  });
+});
+
 describe('loadConfig', () => {
   it('accepte la config de dev et normalise WEB_ORIGIN', () => {
     const config = loadConfig(base);

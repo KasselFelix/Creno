@@ -53,7 +53,7 @@ export function addLocalDays(date: string, days: number): string {
 }
 
 /** Jour de la semaine ISO (1 = lundi … 7 = dimanche) d'une date locale. */
-function isoWeekday(date: string): number {
+export function isoWeekday(date: string): number {
   return new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
 }
 

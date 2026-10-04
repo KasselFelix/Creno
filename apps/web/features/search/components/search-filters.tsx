@@ -1,14 +1,23 @@
 'use client';
 
+import { X } from 'lucide-react';
 import { useState } from 'react';
 import {
+  isSearchDateInRange,
   PRICE_CENTS_MAX,
   providerCategories,
   type ProviderCategory,
   SEARCH_RADIUS_OPTIONS_KM,
+  searchDateRange,
 } from '@creno/shared';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group';
 import {
   Select,
   SelectContent,
@@ -17,7 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { categoryLabels } from '@/features/providers/labels';
-import type { SearchFilters } from '../params';
+import { type SearchFilters, searchToday } from '../params';
 
 const ALL = 'all';
 const categoryItems = [
@@ -62,6 +71,65 @@ function PriceMaxInput({
         if (event.key === 'Enter') commit();
       }}
     />
+  );
+}
+
+/** Jour où le prestataire doit avoir un créneau libre : d'aujourd'hui à l'horizon (heure de Paris). */
+function DateInput({
+  id,
+  date,
+  onCommit,
+}: {
+  id: string;
+  date: string | undefined;
+  onCommit: (date: string | undefined) => void;
+}) {
+  const today = searchToday();
+  const { min, max } = searchDateRange(today);
+  const [text, setText] = useState(date ?? '');
+  // Filtre changé ailleurs (bouton retour, phrase interprétée) : le champ suit, sans être remonté
+  // (il garderait sinon le focus d'un visiteur qui tape la date au clavier).
+  const [shown, setShown] = useState(date);
+  if (date !== shown) {
+    setShown(date);
+    setText(date ?? '');
+  }
+
+  return (
+    <InputGroup className="h-11 md:h-9">
+      <InputGroupInput
+        id={id}
+        type="date"
+        min={min}
+        max={max}
+        value={text}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          // Vide : peut-être une saisie en cours, le filtre n'est retiré qu'à la sortie du champ.
+          if (next !== '' && next !== date && isSearchDateInRange(next, today)) onCommit(next);
+        }}
+        onBlur={() => {
+          if (text === '' && date !== undefined) onCommit(undefined);
+        }}
+      />
+      {date && (
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            size="icon-sm"
+            // Zone de clic agrandie (44 px) sans grossir l'icône dans le champ.
+            className="relative after:absolute after:-inset-1.5"
+            aria-label="Effacer la date"
+            onClick={() => {
+              setText('');
+              onCommit(undefined);
+            }}
+          >
+            <X aria-hidden />
+          </InputGroupButton>
+        </InputGroupAddon>
+      )}
+    </InputGroup>
   );
 }
 
@@ -145,6 +213,14 @@ export function SearchFilterFields({
           id={`${idPrefix}-price`}
           priceMax={filters.priceMax}
           onCommit={(priceMax) => onChange({ ...filters, priceMax })}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-date`}>Disponible le</FieldLabel>
+        <DateInput
+          id={`${idPrefix}-date`}
+          date={filters.date}
+          onCommit={(date) => onChange({ ...filters, date })}
         />
       </Field>
     </>

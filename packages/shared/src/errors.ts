@@ -28,6 +28,7 @@ export const errorCodes = [
   'INVALID_WEBHOOK_SIGNATURE',
   'PHONE_NOT_ALLOWED',
   'PHONE_CODE_INVALID',
+  'SEARCH_DATE_OUT_OF_RANGE',
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);

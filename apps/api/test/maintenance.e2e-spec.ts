@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  aiRequests,
   bookings,
   pendingRegistrations,
   phoneVerifications,
@@ -10,6 +11,7 @@ import {
   stripeEvents,
 } from '@creno/db';
 import {
+  AI_REQUESTS_RETENTION_DAYS,
   type Booking,
   type Resource,
   slotsResponseSchema,
@@ -19,6 +21,7 @@ import { JobsService } from '../src/jobs/jobs.service.js';
 import {
   EXPIRE_HOLDS_QUEUE,
   MaintenanceService,
+  PURGE_AI_REQUESTS_QUEUE,
   PURGE_PENDING_REGISTRATIONS_QUEUE,
   PURGE_PHONE_VERIFICATIONS_QUEUE,
   PURGE_SESSIONS_QUEUE,
@@ -252,6 +255,28 @@ describe('jobs de ménage', () => {
     expect(logged('maintenance.phone_verifications_purged')).toMatchObject([{ count: 1 }]);
   });
 
+  it(`purge le journal de la recherche IA au-delà de ${AI_REQUESTS_RETENTION_DAYS} jours seulement`, async () => {
+    const row = (requestId: string) => ({
+      requestId,
+      outcome: 'not_configured' as const,
+      latencyMs: 0,
+      queryLength: 12,
+    });
+    await db()
+      .insert(aiRequests)
+      .values([
+        { ...row('req-ancienne'), createdAt: sql`now() - interval '91 days'` },
+        { ...row('req-limite'), createdAt: sql`now() - interval '89 days'` },
+        row('req-recente'),
+      ]);
+
+    expect(await maintenance().purgeAiRequests()).toBe(1);
+
+    const left = await db().select({ requestId: aiRequests.requestId }).from(aiRequests);
+    expect(left.map((r) => r.requestId).sort()).toEqual(['req-limite', 'req-recente']);
+    expect(logged('maintenance.ai_requests_purged')).toMatchObject([{ count: 1 }]);
+  });
+
   it('chaque tâche est branchée sur sa file : un job reçu l’exécute', async () => {
     const { agent } = await registerAs(app, 'customer');
     const overdue = await hold(agent, '09:00');
@@ -263,6 +288,7 @@ describe('jobs de ménage', () => {
       PURGE_STRIPE_EVENTS_QUEUE,
       PURGE_PENDING_REGISTRATIONS_QUEUE,
       PURGE_PHONE_VERIFICATIONS_QUEUE,
+      PURGE_AI_REQUESTS_QUEUE,
     ]) {
       await jobs.send(queue, {});
       expect(await runJobs(app, queue)).toBe(1);
@@ -273,5 +299,6 @@ describe('jobs de ménage', () => {
     expect(logged('maintenance.stripe_events_purged')).toHaveLength(1);
     expect(logged('maintenance.pending_registrations_purged')).toHaveLength(1);
     expect(logged('maintenance.phone_verifications_purged')).toHaveLength(1);
+    expect(logged('maintenance.ai_requests_purged')).toHaveLength(1);
   });
 });

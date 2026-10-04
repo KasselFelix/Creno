@@ -1,6 +1,8 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SEARCH_TIMEZONE } from '@creno/shared';
+import { localDateOf } from '../src/availability/slots.engine.js';
 import { GeocoderError } from '../src/geocoding/geocoder.js';
 import { createTestApp } from './app.js';
 
@@ -42,13 +44,22 @@ describe('recherche et géocodage : logs', () => {
       .get('/v1/geocoding/search?q=10%20rue%20de%20la%20Paix')
       .expect(503);
 
+    // Avec une date : la date n'est pas une donnée personnelle, seul le fait qu'elle soit là est loggé.
+    await request(app.getHttpServer())
+      .get(`/v1/search/providers?date=${localDateOf(new Date(), SEARCH_TIMEZONE)}`)
+      .expect(200);
+
     const lines = logs.map((line) => JSON.parse(line) as LogLine);
+    const performed = lines.filter((l) => l.event === 'search.performed');
+    expect(performed.at(-1)).toMatchObject({ level: 30, hasCenter: false, hasDate: true });
     expect(lines.find((l) => l.event === 'search.performed')).toMatchObject({
       level: 30,
       hasCenter: true,
       radiusKm: 7,
       category: 'room',
+      hasDate: false,
       total: 0,
+      totalIsCapped: false,
     });
     // Service tiers indisponible : un `warn` (dégradé), jamais un `error`.
     expect(lines.find((l) => l.event === 'geocoding.failed')).toMatchObject({
