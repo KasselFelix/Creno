@@ -185,6 +185,13 @@ describe('POST /v1/search/interpret (modèle configuré)', () => {
       expect(body.notices).toEqual([{ type: 'place_not_found', place: 'Lyon' }]);
     });
 
+    it('erreur imprévue du géocodeur → place_not_found, jamais une erreur 500', async () => {
+      geocoder.search.mockRejectedValue(new TypeError('Cannot read properties of undefined'));
+      extractor.extract.mockResolvedValue(answer({ ...EMPTY, place: 'Lyon' }));
+      const { body } = await interpret(app, 'à Lyon');
+      expect(body.notices).toEqual([{ type: 'place_not_found', place: 'Lyon' }]);
+    });
+
     it('date passée → date_out_of_range ; date dans la plage → filtre', async () => {
       extractor.extract.mockResolvedValue(answer({ ...EMPTY, date: '2020-01-01' }));
       expect((await interpret(app, 'terrain le 1er janvier 2020')).body).toMatchObject({

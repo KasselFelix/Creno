@@ -160,6 +160,12 @@ describe('recherche IA : timeout et reprise', () => {
     extractor.extract.mockImplementation(() => failWith('bad_request', { status: 400 }));
     await interpret(app);
     expect(await lastRow(app)).toMatchObject({ outcome: 'upstream_error', attempts: 1 });
+    // Requête refusée (paramètre ou modèle inconnu) : le repli masquerait une IA qui ne marche jamais.
+    expect(events('ai.request').at(-1)).toMatchObject({
+      level: 50,
+      reason: 'bad_request',
+      status: 400,
+    });
 
     extractor.extract.mockImplementation(() => failWith('unauthorized', { status: 401 }));
     await interpret(app);

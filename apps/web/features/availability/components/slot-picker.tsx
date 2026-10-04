@@ -190,7 +190,8 @@ function ResourceSlots({
 
           <div aria-live="polite" className="flex flex-col gap-3">
             <p className="text-muted-foreground text-sm">
-              <span className="capitalize">
+              {/* Majuscule à la première lettre seulement : « Samedi 10 octobre ». */}
+              <span className="inline-block first-letter:uppercase">
                 {formatLocalDate(selectedDate, { weekday: 'long', day: 'numeric', month: 'long' })}
               </span>{' '}
               · heures affichées dans le fuseau {resource.timezone}
@@ -216,7 +217,7 @@ function ResourceSlots({
           <CardContent className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-col">
               <span className="font-medium">{resource.name}</span>
-              <span className="text-muted-foreground capitalize">
+              <span className="text-muted-foreground first-letter:uppercase">
                 {formatLocalDate(selectedDate, { weekday: 'long', day: 'numeric', month: 'long' })}{' '}
                 · {timeInZone(selected.start, resource.timezone)} –{' '}
                 {timeInZone(selected.end, resource.timezone)}

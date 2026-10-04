@@ -117,6 +117,8 @@ function DateInput({
         <InputGroupAddon align="inline-end">
           <InputGroupButton
             size="icon-sm"
+            // Zone de clic agrandie (44 px) sans grossir l'icône dans le champ.
+            className="relative after:absolute after:-inset-1.5"
             aria-label="Effacer la date"
             onClick={() => {
               setText('');

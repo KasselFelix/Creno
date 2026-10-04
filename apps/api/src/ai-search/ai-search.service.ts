@@ -87,6 +87,12 @@ const UNAVAILABLE: ReadonlySet<FailureReason> = new Set([
   'unauthorized',
 ]);
 
+/**
+ * Échecs qui demandent une action (log `error`, donc Sentry) : une clé refusée, ou une requête que
+ * le fournisseur refuse (400, paramètre ou modèle inconnu). Le repli par mots-clés les masquerait.
+ */
+const ACTION_REQUIRED: ReadonlySet<FailureReason> = new Set(['unauthorized', 'bad_request']);
+
 /** Début du jour UTC de l'instant `ms` : le plafond journalier repart de zéro à minuit UTC. */
 function startOfUtcDay(ms: number): Date {
   const date = new Date(ms);
@@ -154,7 +160,11 @@ export class AiSearchService implements OnModuleInit {
 
     // Ni la phrase, ni le lieu, ni les morceaux ignorés : seulement des mesures.
     const level =
-      call.outcome === 'success' ? 'log' : call.reason === 'unauthorized' ? 'error' : 'warn';
+      call.outcome === 'success'
+        ? 'log'
+        : call.reason && ACTION_REQUIRED.has(call.reason)
+          ? 'error'
+          : 'warn';
     this.logger[level]({
       event: 'ai.request',
       outcome: call.outcome,
@@ -333,7 +343,8 @@ export class AiSearchService implements OnModuleInit {
   /**
    * Position du lieu cité. Le modèle recopie un nom de lieu : on prend le premier résultat. Les
    * mots-clés peuvent attraper un faux lieu : on ne le garde que si c'est une commune, ou un libellé
-   * qui contient le texte cherché. Géocodeur en panne : pas de lieu, la recherche continue.
+   * qui contient le texte cherché. Géocodeur en panne, ou erreur imprévue : pas de lieu, la
+   * recherche continue.
    */
   private async geocode(
     place: string,
@@ -355,8 +366,15 @@ export class AiSearchService implements OnModuleInit {
         lng: roundCoordinate(first.longitude),
       };
     } catch (error) {
-      if (!(error instanceof GeocoderError)) throw error;
-      this.logger.warn({ event: 'ai.geocoding_failed', reason: error.reason });
+      if (error instanceof GeocoderError) {
+        this.logger.warn({ event: 'ai.geocoding_failed', reason: error.reason });
+      } else {
+        // Un bug, pas une panne : `error`. Seulement le nom : le message peut contenir le lieu.
+        this.logger.error({
+          event: 'ai.geocoding_failed',
+          err: { name: describeError(error).name },
+        });
+      }
       return undefined;
     }
   }

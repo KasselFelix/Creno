@@ -13,7 +13,7 @@ import { QueryError } from '@/components/query-error';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { ApiClientError } from '@/lib/api/errors';
 import { useInterpretSearch } from '../api';
@@ -67,12 +67,13 @@ export function AiSearchBar({
               </InputGroupAddon>
               <InputGroupInput
                 id="ai-query"
-                placeholder="Un terrain de foot à Bordeaux samedi, moins de 40 €"
+                placeholder="Terrain de foot à Bordeaux samedi"
                 maxLength={AI_QUERY_MAX}
                 autoComplete="off"
                 enterKeyHint="search"
                 aria-invalid={!!errors.query}
                 aria-busy={interpret.isPending}
+                aria-describedby="ai-query-help"
                 {...form.register('query')}
               />
             </InputGroup>
@@ -85,6 +86,10 @@ export function AiSearchBar({
               Rechercher
             </Button>
           </div>
+          <FieldDescription id="ai-query-help">
+            Votre phrase est analysée par Mistral AI (hébergé dans l&apos;UE) : n&apos;y mettez pas
+            d&apos;informations personnelles.
+          </FieldDescription>
           <FieldError errors={[errors.query]} />
         </Field>
       </form>
