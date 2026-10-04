@@ -29,7 +29,7 @@ describe('loadConfig : recherche en langage naturel', () => {
     const config = loadConfig(base);
     expect(config.MISTRAL_API_KEY).toBeUndefined();
     expect(config).toMatchObject({
-      AI_MODEL: 'mistral-small-2603',
+      AI_MODEL: 'ministral-8b-2512',
       AI_TIMEOUT_MS: 3000,
       AI_RATE_LIMIT_PER_MINUTE: 10,
       AI_DAILY_REQUEST_CAP: 500,

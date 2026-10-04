@@ -1,4 +1,4 @@
-# ADR 0013 — Recherche en langage naturel : Mistral Small, sortie validée par Zod, repli par mots-clés
+# ADR 0013 — Recherche en langage naturel : Mistral (Ministral 3 8B), sortie validée par Zod, repli par mots-clés
 
 - Statut : accepté
 - Date : 2026-10-04
@@ -16,7 +16,9 @@ Contraintes :
 
 ## Décision
 
-**Fournisseur et modèle.** Mistral AI, **Mistral Small 4** en version datée (`AI_MODEL=mistral-small-2603`), et non l'alias `mistral-small-latest` : le prix et le comportement ne changent pas sans nous. SDK officiel `@mistralai/mistralai`. L'offre gratuite « Experiment » (sans carte bancaire, environ 1 requête par seconde) suffit pour le développement et la démo ; une carte bancaire la fait passer en offre payante, sans toucher au code.
+**Fournisseur et modèle.** Mistral AI, modèle par défaut **Ministral 3 8B** en version datée (`AI_MODEL=ministral-8b-2512`), et non un alias `-latest` : le prix et le comportement ne changent pas sans nous. SDK officiel `@mistralai/mistralai`. Le niveau gratuit de l'API (sans carte bancaire, environ 1 requête par seconde) suffit pour le développement et la démo ; activer le paiement à l'usage le fait passer en offre payante, sans toucher au code.
+
+Le choix initial était **Mistral Small 4** (`mistral-small-2603`), plus gros et meilleur sur les tournures ambiguës. En développement, il a répondu `429 Rate limit exceeded` aux appels par clé API pendant plusieurs heures, alors que la console affichait une limite de 20 000 tokens par minute et que le Playground lui répondait : le niveau gratuit passe vraisemblablement après les comptes payants quand ce modèle est chargé. Ministral 3 8B, lui, répondait (1,2 s, sortie exacte sur la phrase testée), et son tarif est plus bas. Il devient le défaut ; Mistral Small 4 reste dans la table de prix et se choisit par `AI_MODEL`, sans code. Aucune évaluation des deux modèles sur un jeu de phrases n'a encore été faite.
 
 **Le modèle ne produit que des filtres, jamais de SQL.**
 
@@ -45,14 +47,14 @@ Tout échec du modèle, y compris une exception inattendue de l'adapter, donne `
 
 Tarifs relevés le 2026-10-04. Une recherche type consomme environ 500 tokens en entrée (consigne, calendrier, phrase) et 80 en sortie (le JSON des filtres).
 
-| Modèle                                     | Entrée ($ / M tokens) | Sortie ($ / M tokens) | Une recherche | 1 000 recherches |
-| ------------------------------------------ | --------------------- | --------------------- | ------------- | ---------------- |
-| **Mistral Small 4** (`mistral-small-2603`) | 0,15                  | 0,60                  | ~0,00012 $    | ~0,12 $          |
-| Ministral 3 8B (`ministral-8b-2512`)       | 0,15                  | 0,15                  | ~0,00009 $    | ~0,09 $          |
-| Claude Haiku 4.5                           | 1,00                  | 5,00                  | ~0,0009 $     | ~0,90 $          |
-| Claude Sonnet 5.5                          | 2,00                  | 10,00                 | ~0,0018 $     | ~1,80 $          |
+| Modèle                                   | Entrée ($ / M tokens) | Sortie ($ / M tokens) | Une recherche | 1 000 recherches |
+| ---------------------------------------- | --------------------- | --------------------- | ------------- | ---------------- |
+| Mistral Small 4 (`mistral-small-2603`)   | 0,15                  | 0,60                  | ~0,00012 $    | ~0,12 $          |
+| **Ministral 3 8B** (`ministral-8b-2512`) | 0,15                  | 0,15                  | ~0,00009 $    | ~0,09 $          |
+| Claude Haiku 4.5                         | 1,00                  | 5,00                  | ~0,0009 $     | ~0,90 $          |
+| Claude Sonnet 5.5                        | 2,00                  | 10,00                 | ~0,0018 $     | ~1,80 $          |
 
-Mesuré avec le vrai prompt (calendrier compris) : 666 tokens en entrée et 76 en sortie, soit ~146 µ$ avec Mistral Small 4 et ~111 µ$ avec Ministral 3 8B. Ministral 3 8B est aussi dans la table de prix : c'est le modèle de repli quand Mistral Small n'a pas de quota sur l'offre gratuite (il suffit de changer `AI_MODEL`), au prix d'une compréhension un peu moins fine des tournures ambiguës.
+Mesuré avec le vrai prompt (calendrier compris) : 666 tokens en entrée et 76 en sortie, soit ~146 µ$ avec Mistral Small 4 et ~111 µ$ avec Ministral 3 8B. Les deux modèles sont dans la table de prix. Ministral 3 8B coûte environ 25 % de moins ; Mistral Small 4 devrait mieux comprendre les tournures ambiguës.
 
 Les tokens ne se comptent pas pareil d'un fournisseur à l'autre (chacun découpe le texte à sa façon) : l'ordre de grandeur compte plus que le chiffre exact. Le cache de prompt n'aiderait pas ici : le préfixe commun (la consigne) est sous la taille minimale mise en cache. Un modèle plus capable n'apporterait rien à une extraction de cinq champs validée par un schéma.
 

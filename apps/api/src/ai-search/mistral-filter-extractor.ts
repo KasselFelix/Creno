@@ -25,7 +25,7 @@ const MAX_OUTPUT_TOKENS = 400;
 const REASONING_MODELS: ReadonlySet<string> = new Set(['mistral-small-2603']);
 
 /**
- * Extracteur Mistral (offre gratuite « Experiment » ou payante, même code). Un seul appel par
+ * Extracteur Mistral (niveau gratuit ou payant, même code). Un seul appel par
  * `extract` : les reprises, le timeout global et le circuit breaker sont gérés par le service, pour
  * qu'il les compte et les journalise. Voir docs/adr/0013-ai-search-mistral.md.
  */
