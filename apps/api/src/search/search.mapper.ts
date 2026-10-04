@@ -17,5 +17,8 @@ export function toSearchProvider(row: SearchRow): SearchProvider {
     // Une seule devise à ce stade (voir la spec de l'étape 3).
     currency: 'EUR',
     resourceCount: row.resource_count,
+    // Sans date demandée, les créneaux ne sont pas comptés.
+    availableSlots: null,
+    availableResourceId: null,
   };
 }

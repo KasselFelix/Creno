@@ -131,25 +131,39 @@ erDiagram
     text provider_message_id "nullable"
     timestamptz sent_at "obligatoire si sent"
   }
+  ai_requests {
+    uuid id PK
+    text request_id "requestId des logs"
+    ai_request_outcome outcome "success | invalid_output | timeout | …"
+    text model "NULL sans appel"
+    smallint attempts "0..2, 0 ssi aucun appel"
+    int latency_ms "appels au modèle, 0 sans appel"
+    int input_tokens "NULL sans réponse"
+    int output_tokens "NULL sans réponse"
+    int cost_usd_micros "tarif payant, micro-dollars"
+    smallint query_length "3..200 : jamais la phrase"
+    jsonb filters "filtres non localisants"
+  }
 ```
 
-Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règles et exceptions de disponibilité et `stripe_events`. Montants en centimes (`integer`), dates en UTC (`timestamptz`), créneaux en `tstzrange` semi-ouverts `[début, fin)`.
+Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règles et exceptions de disponibilité, `stripe_events` et `ai_requests` (journal en ajout seul : `created_at` uniquement). Montants en centimes (`integer`), dates en UTC (`timestamptz`), créneaux en `tstzrange` semi-ouverts `[début, fin)`.
 
 ## Migrations
 
-| Fichier                                             | Contenu                                                                                                               |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                                     |
-| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                                          |
-| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                                        |
-| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises                 |
-| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                               |
-| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                                       |
-| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`                |
-| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »              |
-| `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events`  |
-| `0009_email_verification.sql` (générée, ajustée)    | table `pending_registrations` ; `users.email_verified_at` ajoutée, reprise sur les comptes existants, puis `NOT NULL` |
-| `0010_phone_verification.sql` (générée, ajustée)    | table `phone_verifications` ; `users.phone_verified_at`, numéros non prouvés effacés, `users_phone_unique` et CHECK   |
+| Fichier                                             | Contenu                                                                                                                |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                                      |
+| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                                           |
+| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                                         |
+| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises                  |
+| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                                |
+| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                                        |
+| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`                 |
+| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »               |
+| `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events`   |
+| `0009_email_verification.sql` (générée, ajustée)    | table `pending_registrations` ; `users.email_verified_at` ajoutée, reprise sur les comptes existants, puis `NOT NULL`  |
+| `0010_phone_verification.sql` (générée, ajustée)    | table `phone_verifications` ; `users.phone_verified_at`, numéros non prouvés effacés, `users_phone_unique` et CHECK    |
+| `0011_ai_requests.sql` (générée)                    | table `ai_requests` et enum `ai_request_outcome`, CHECK de cohérence (issue ⇔ appel au modèle), index sur `created_at` |
 
 Le schéma `pgboss` (file de jobs) n'est pas dans ces migrations : pg-boss l'installe et le met à jour lui-même au démarrage de l'API.
 
@@ -326,6 +340,31 @@ Execution Time: 8.654 ms
 ```
 
 27 lignes lues sur 50 000. Sans centre, la requête parcourt toute la table (0,6 à 0,8 s à ce volume) : limite assumée, notée dans l'ADR 0007.
+
+## Recherche en langage naturel : `ai_requests`
+
+Chaque phrase interprétée par `POST /search/interpret` laisse une ligne dans `ai_requests`, que le modèle ait été appelé ou non. **La phrase n'y est jamais** : seulement sa longueur, et les filtres qui ne localisent personne (`filters` : catégorie, rayon, prix, date, `hasPlace`, `nearMe` ; ni lieu ni coordonnées). La table n'a aucune clé étrangère : la route est publique, et une donnée personnelle de moins vaut mieux qu'un lien vers `users`.
+
+L'issue (`outcome`) dit ce qui s'est passé. Trois issues n'appellent pas le modèle (`circuit_open`, `budget_exceeded`, `not_configured`) ; les cinq autres l'ont appelé au moins une fois (`success`, `invalid_output`, `timeout`, `rate_limited`, `upstream_error`). Toute issue autre que `success` correspond à un repli sur l'analyse par mots-clés. Contraintes :
+
+- `ai_requests_attempts_match_outcome` : `(outcome IN ('circuit_open', 'budget_exceeded', 'not_configured')) = (attempts = 0)`. L'égalité de deux booléens se lit « si et seulement si » : une ligne `success` sans appel, ou `circuit_open` avec un appel, est refusée ;
+- `ai_requests_model_needs_call` : pas de modèle sans appel ;
+- `attempts` entre 0 et 2 (une seule reprise), tokens, coût et latence positifs, `query_length` entre 3 et 200 (les bornes de la phrase acceptée par l'API).
+
+Le coût (`cost_usd_micros`) est calculé au tarif payant du modèle, même sur l'offre gratuite : il montre ce que coûterait la production. Les micro-dollars entiers évitent les flottants pour de l'argent (une recherche typique coûte une centaine de micro-dollars).
+
+L'index `ai_requests_created_at_idx` sert le plafond journalier d'appels (somme des `attempts` depuis minuit UTC), les statistiques par période et la purge des lignes de plus de 90 jours. Coût, latence et replis par jour :
+
+```sql
+SELECT date_trunc('day', created_at) AS day,
+       count(*) FILTER (WHERE outcome = 'success') AS ai_ok,
+       count(*) FILTER (WHERE outcome <> 'success') AS fallbacks,
+       percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE attempts > 0) AS p95_ms,
+       sum(cost_usd_micros) / 1e6 AS cost_usd
+FROM ai_requests GROUP BY 1 ORDER BY 1 DESC;
+```
+
+`FILTER (WHERE …)` restreint un agrégat à certaines lignes : on compte succès et replis dans la même lecture. `percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)` donne la latence sous laquelle tombent 95 % des appels, plus parlante qu'une moyenne qu'un seul appel lent fausse.
 
 ## Inscription en attente
 

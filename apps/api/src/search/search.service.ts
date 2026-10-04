@@ -31,6 +31,7 @@ export class SearchService {
       total,
       durationMs: Date.now() - startedAt,
     });
-    return { items: rows.map(toSearchProvider), total };
+    // Sans date, la requête compte tous les prestataires qui correspondent : le total est exact.
+    return { items: rows.map(toSearchProvider), total, totalIsCapped: false };
   }
 }

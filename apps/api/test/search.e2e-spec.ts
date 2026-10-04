@@ -123,7 +123,7 @@ describe('search', () => {
       const distance = within.items[0]!.distanceMeters!;
       expect(distance).toBeGreaterThan(1112 * 0.99);
       expect(distance).toBeLessThan(1112 * 1.01);
-      expect(await search(around(PARIS, 1))).toEqual({ items: [], total: 0 });
+      expect(await search(around(PARIS, 1))).toEqual({ items: [], total: 0, totalIsCapped: false });
     });
 
     it('trie du plus proche au plus loin, avec un ordre stable à distance égale', async () => {
@@ -195,7 +195,11 @@ describe('search', () => {
       expect(names(await search(`category=hairdresser&priceMax=3000`))).toEqual([
         'Coiffeur pas cher',
       ]);
-      expect(await search(`category=photographer&priceMax=3000`)).toEqual({ items: [], total: 0 });
+      expect(await search(`category=photographer&priceMax=3000`)).toEqual({
+        items: [],
+        total: 0,
+        totalIsCapped: false,
+      });
     });
 
     it('donne le prix minimum et le nombre de ressources actives', async () => {
@@ -214,6 +218,8 @@ describe('search', () => {
       const item = (res.body as { items: Record<string, unknown>[] }).items[0]!;
       expect(Object.keys(item).sort()).toEqual([
         'address',
+        'availableResourceId',
+        'availableSlots',
         'category',
         'city',
         'currency',
@@ -238,6 +244,7 @@ describe('search', () => {
       const body = await search(around(PARIS, 5));
       expect(body.items).toHaveLength(50);
       expect(body.total).toBe(60);
+      expect(body.totalIsCapped).toBe(false);
       const limited = await search(`${around(PARIS, 5)}&limit=10`);
       expect(limited.items).toHaveLength(10);
       expect(limited.total).toBe(60);

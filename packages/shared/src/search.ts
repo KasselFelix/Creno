@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { localDateSchema } from './availability.js';
 import { providerCategorySchema } from './providers.js';
 import { PRICE_CENTS_MAX } from './resources.js';
 
@@ -7,6 +8,13 @@ export const SEARCH_RADIUS_KM_DEFAULT = 10;
 /** Plafond de résultats : pas de pagination, l'écran invite à réduire le rayon ou à filtrer. */
 export const SEARCH_RESULTS_MAX = 50;
 export const SEARCH_RADIUS_OPTIONS_KM = [1, 2, 5, 10, 25, 50] as const;
+/**
+ * Fuseau de référence de la recherche : « aujourd'hui » et la plage de dates autorisée (jusqu'à
+ * `BOOKING_HORIZON_DAYS` jours). Les créneaux, eux, sont calculés au fuseau de chaque ressource.
+ */
+export const SEARCH_TIMEZONE = 'Europe/Paris';
+/** Avec une date, prestataires examinés (les plus proches d'abord) avant le filtre de disponibilité. */
+export const SEARCH_DATE_CANDIDATES_MAX = 200;
 
 /**
  * Arrondi à 3 décimales (≈ 100 m) : la position d'un visiteur est une donnée personnelle,
@@ -63,6 +71,8 @@ export const searchProvidersQuerySchema = z
     category: providerCategorySchema.optional(),
     /** Prix maximum en centimes : le prestataire a au moins une ressource active à ce prix ou moins. */
     priceMax: searchPriceMaxSchema.optional(),
+    /** Jour où le prestataire doit avoir au moins un créneau libre (date locale `YYYY-MM-DD`). */
+    date: localDateSchema.optional(),
     limit: queryNumber
       .pipe(z.number().int().min(1).max(SEARCH_RESULTS_MAX))
       .default(SEARCH_RESULTS_MAX),
@@ -90,6 +100,10 @@ export const searchProviderSchema = z.object({
   minPriceCents: z.number().int(),
   currency: z.literal('EUR'),
   resourceCount: z.number().int(),
+  /** Créneaux libres le jour demandé, sur les ressources éligibles (prix maximum compris) ; `null` sans date. */
+  availableSlots: z.number().int().nullable(),
+  /** Ressource éligible qui a un créneau libre ce jour-là, pour le lien vers la fiche ; `null` sans date. */
+  availableResourceId: z.uuid().nullable(),
 });
 export type SearchProvider = z.infer<typeof searchProviderSchema>;
 
@@ -97,5 +111,10 @@ export const searchProvidersResponseSchema = z.object({
   items: z.array(searchProviderSchema),
   /** Nombre de résultats avant le plafond `limit`. */
   total: z.number().int(),
+  /**
+   * Avec une date, `true` quand plus de `SEARCH_DATE_CANDIDATES_MAX` prestataires correspondaient aux
+   * autres filtres : seuls les plus proches ont été examinés et `total` n'est qu'un minimum.
+   */
+  totalIsCapped: z.boolean(),
 });
 export type SearchProvidersResponse = z.infer<typeof searchProvidersResponseSchema>;

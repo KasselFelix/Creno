@@ -1,3 +1,4 @@
+export * from './ai-requests.js';
 export * from './availability.js';
 export * from './bookings.js';
 export * from './notifications.js';
