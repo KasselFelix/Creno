@@ -16,6 +16,8 @@ export const AI_PRICE_MAX_EUROS = 10_000;
  */
 export const AI_IGNORED_TERMS_MAX = 5;
 export const AI_IGNORED_TERM_MAX_LENGTH = 60;
+/** Durée de conservation du journal `ai_requests` (purge quotidienne). */
+export const AI_REQUESTS_RETENTION_DAYS = 90;
 
 /** Corps de `POST /search/interpret`, aussi validé par le formulaire de la barre de recherche. */
 export const interpretRequestSchema = z.object({

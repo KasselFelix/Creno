@@ -12,6 +12,7 @@ export const PURGE_SESSIONS_QUEUE = 'maintenance.purge-sessions';
 export const PURGE_STRIPE_EVENTS_QUEUE = 'maintenance.purge-stripe-events';
 export const PURGE_PENDING_REGISTRATIONS_QUEUE = 'maintenance.purge-pending-registrations';
 export const PURGE_PHONE_VERIFICATIONS_QUEUE = 'maintenance.purge-phone-verifications';
+export const PURGE_AI_REQUESTS_QUEUE = 'maintenance.purge-ai-requests';
 
 // Une seule exécution à la fois ; pas de reprise : le passage suivant refait le travail.
 const queue = { policy: 'stately', retryLimit: 0, expireInSeconds: 300 } as const;
@@ -73,6 +74,14 @@ export class MaintenanceService implements OnModuleInit {
         await this.purgePhoneVerifications();
       },
     });
+    await this.jobs.register({
+      name: PURGE_AI_REQUESTS_QUEUE,
+      queue,
+      cron: '45 3 * * *',
+      handler: async () => {
+        await this.purgeAiRequests();
+      },
+    });
   }
 
   async expireHolds(): Promise<number> {
@@ -117,6 +126,12 @@ export class MaintenanceService implements OnModuleInit {
   async purgePhoneVerifications(): Promise<number> {
     const count = await this.maintenance.purgePhoneVerifications();
     this.logger.log({ event: 'maintenance.phone_verifications_purged', count });
+    return count;
+  }
+
+  async purgeAiRequests(): Promise<number> {
+    const count = await this.maintenance.purgeAiRequests();
+    this.logger.log({ event: 'maintenance.ai_requests_purged', count });
     return count;
   }
 }

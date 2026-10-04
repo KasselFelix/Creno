@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, isNotNull, lte, or, sql } from 'drizzle-orm';
 import {
+  aiRequests,
   bookings,
   type DbHandle,
   pendingRegistrations,
@@ -8,7 +9,7 @@ import {
   sessions,
   stripeEvents,
 } from '@creno/db';
-import { STRIPE_EVENTS_RETENTION_DAYS } from '@creno/shared';
+import { AI_REQUESTS_RETENTION_DAYS, STRIPE_EVENTS_RETENTION_DAYS } from '@creno/shared';
 import { DB } from '../database/database.module.js';
 
 @Injectable()
@@ -92,6 +93,23 @@ export class MaintenanceRepository {
       .delete(phoneVerifications)
       .where(lte(phoneVerifications.expiresAt, sql`now() - interval '24 hours'`))
       .returning({ id: phoneVerifications.id });
+    return rows.length;
+  }
+
+  /**
+   * Supprime le journal de la recherche en langage naturel au-delà de sa durée de conservation. Il
+   * ne contient ni phrase ni lieu, mais rien ne justifie de le garder indéfiniment.
+   */
+  async purgeAiRequests(): Promise<number> {
+    const rows = await this.handle.db
+      .delete(aiRequests)
+      .where(
+        lte(
+          aiRequests.createdAt,
+          sql`now() - make_interval(days => ${AI_REQUESTS_RETENTION_DAYS})`,
+        ),
+      )
+      .returning({ id: aiRequests.id });
     return rows.length;
   }
 }

@@ -13,6 +13,7 @@ import type { Provider, PublicUser, Resource, UserRole } from '@creno/shared';
 import { AppModule } from '../src/app.module.js';
 import { AI_FILTER_EXTRACTOR, type FilterExtractor } from '../src/ai-search/filter-extractor.js';
 import { addLocalDays, localDateOf, wallTimeToInstant } from '../src/availability/slots.engine.js';
+import { CLOCK, type Clock } from '../src/common/clock.js';
 import { LOG_STREAM } from '../src/common/logger.js';
 import { GEOCODER, type Geocoder } from '../src/geocoding/geocoder.js';
 import { APP_CONFIG } from '../src/config/config.module.js';
@@ -68,6 +69,10 @@ export interface TestAppOptions {
   aiDailyCap?: number;
   /** Timeout d'un appel au modèle, en millisecondes. */
   aiTimeoutMs?: number;
+  /** Modèle configuré (par défaut celui de la table de prix). */
+  aiModel?: string;
+  /** Remplace l'horloge (circuit breaker, attente avant reprise). */
+  clock?: Clock;
 }
 
 /** Démarre l'application complète sur la base de test (jamais de base mockée). */
@@ -99,7 +104,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     SMS_ALLOWED_PREFIXES: '+336,+337',
     // Vide = absente : aucun test n'appelle Mistral, même si le .env local contient une clé.
     MISTRAL_API_KEY: '',
-    AI_MODEL: 'mistral-small-2603',
+    AI_MODEL: options.aiModel ?? 'mistral-small-2603',
     AI_TIMEOUT_MS: String(options.aiTimeoutMs ?? 3000),
     AI_RATE_LIMIT_PER_MINUTE: String(options.aiRateLimit ?? 100_000),
     AI_DAILY_REQUEST_CAP: String(options.aiDailyCap ?? 100_000),
@@ -118,6 +123,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
   if (options.filterExtractor) {
     builder.overrideProvider(AI_FILTER_EXTRACTOR).useValue(options.filterExtractor);
   }
+  if (options.clock) builder.overrideProvider(CLOCK).useValue(options.clock);
   if (options.logs) {
     const logs = options.logs;
     builder.overrideProvider(LOG_STREAM).useValue(
@@ -154,6 +160,23 @@ export async function resetDatabase(app: INestApplication): Promise<void> {
 /** Exécute les jobs en attente d'une file, comme le ferait un worker. Renvoie le nombre de jobs traités. */
 export function runJobs(app: INestApplication, queue: string): Promise<number> {
   return app.get(JobsService).runPending(queue);
+}
+
+/**
+ * Horloge de test : elle suit le temps réel (les timeouts restent de vrais délais), mais une attente
+ * (`sleep`) avance l'horloge d'un coup au lieu de bloquer, et `advance` saute dans le temps.
+ */
+export function fakeClock() {
+  let offset = 0;
+  return {
+    now: () => Date.now() + offset,
+    sleep: vi.fn<Clock['sleep']>(async (ms) => {
+      offset += ms;
+    }),
+    advance(ms: number) {
+      offset += ms;
+    },
+  } satisfies Clock & { advance(ms: number): void };
 }
 
 /** Fausses passerelles d'envoi : chaque message « part » et reste consultable dans `mock.calls`. */

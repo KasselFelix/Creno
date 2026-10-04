@@ -10,13 +10,16 @@ import {
 } from '@creno/shared';
 import { localDateOf } from '../availability/slots.engine.js';
 import { describeError } from '../common/all-exceptions.filter.js';
+import { CLOCK, type Clock } from '../common/clock.js';
 import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import { GEOCODER, type Geocoder, GeocoderError } from '../geocoding/geocoder.js';
 import { type AiRequestOutcome, AiRequestsRepository } from './ai-requests.repository.js';
+import { CircuitBreaker } from './circuit-breaker.js';
 import {
   AI_FILTER_EXTRACTOR,
   type ExtractionRequest,
+  type ExtractionResult,
   type ExtractionUsage,
   type FilterExtractor,
   FilterExtractorError,
@@ -30,8 +33,16 @@ import {
   truncateIgnored,
 } from './interpretation.js';
 import { fold, parseKeywords } from './keyword-parser.js';
+import {
+  MAX_ATTEMPTS,
+  MIN_ATTEMPT_MS,
+  MODEL_BUDGET_MS,
+  retryDelayMs,
+  withTimeout,
+} from './with-retry.js';
 
 type Source = InterpretResponse['source'];
+type FailureReason = FilterExtractorFailure | 'unexpected';
 
 /** Ce que l'appel au modèle a donné, de quoi remplir la ligne `ai_requests` et le log. */
 interface ModelCall {
@@ -40,10 +51,10 @@ interface ModelCall {
   extraction: AiSearchExtraction | null;
   model: string | null;
   attempts: number;
-  /** Durée des appels au modèle, 0 sans appel. */
+  /** Durée des appels au modèle, attente entre eux comprise ; 0 sans appel. */
   latencyMs: number;
   usage: ExtractionUsage | null;
-  reason?: FilterExtractorFailure | 'unexpected';
+  reason?: FailureReason;
   status?: number;
   /** Sortie invalide : chemins des champs refusés par Zod (jamais leurs valeurs). */
   invalidFields?: string[];
@@ -51,7 +62,7 @@ interface ModelCall {
 
 const NO_CALL = { extraction: null, model: null, attempts: 0, latencyMs: 0, usage: null } as const;
 
-const OUTCOME_BY_REASON: Record<FilterExtractorFailure | 'unexpected', AiRequestOutcome> = {
+const OUTCOME_BY_REASON: Record<FailureReason, AiRequestOutcome> = {
   not_configured: 'not_configured',
   timeout: 'timeout',
   rate_limited: 'rate_limited',
@@ -64,9 +75,31 @@ const OUTCOME_BY_REASON: Record<FilterExtractorFailure | 'unexpected', AiRequest
 };
 
 /**
+ * Échecs qui comptent pour le circuit breaker : le fournisseur est injoignable, saturé ou refuse
+ * notre clé. Une clé refusée compte aussi : sans cela, chaque recherche referait l'appel et
+ * produirait une erreur (Sentry) tant que la clé n'est pas changée.
+ */
+const UNAVAILABLE: ReadonlySet<FailureReason> = new Set([
+  'timeout',
+  'network',
+  'rate_limited',
+  'server_error',
+  'unauthorized',
+]);
+
+/** Début du jour UTC de l'instant `ms` : le plafond journalier repart de zéro à minuit UTC. */
+function startOfUtcDay(ms: number): Date {
+  const date = new Date(ms);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+/**
  * Recherche en langage naturel : une phrase devient des filtres, jamais du SQL. Le modèle propose,
- * le schéma Zod valide, le géocodeur place le lieu ; en cas d'échec du modèle, l'analyse par
- * mots-clés prend le relais. Aucune défaillance du modèle ne donne une erreur 5xx.
+ * le schéma Zod valide, le géocodeur place le lieu ; si le modèle échoue, l'analyse par mots-clés
+ * prend le relais. Aucune défaillance du modèle ne donne une erreur 5xx.
+ *
+ * Résilience, dans cet ordre : clé absente → circuit ouvert → plafond journalier atteint → appel,
+ * coupé à `AI_TIMEOUT_MS`, repris une fois si l'échec est passager et si le budget de 5 s le permet.
  */
 @Injectable()
 export class AiSearchService implements OnModuleInit {
@@ -77,6 +110,8 @@ export class AiSearchService implements OnModuleInit {
     @Inject(AI_FILTER_EXTRACTOR) private readonly extractor: FilterExtractor,
     @Inject(GEOCODER) private readonly geocoder: Geocoder,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(CLOCK) private readonly clock: Clock,
+    private readonly breaker: CircuitBreaker,
     private readonly requests: AiRequestsRepository,
   ) {}
 
@@ -87,9 +122,9 @@ export class AiSearchService implements OnModuleInit {
     }
   }
 
-  async interpret(query: string, requestId: string, now = new Date()): Promise<InterpretResponse> {
-    const startedAt = Date.now();
-    const today = localDateOf(now, SEARCH_TIMEZONE);
+  async interpret(query: string, requestId: string): Promise<InterpretResponse> {
+    const startedAt = this.clock.now();
+    const today = localDateOf(new Date(startedAt), SEARCH_TIMEZONE);
 
     const call = await this.callModel({ query, today });
     const source: Source = call.extraction ? 'ai' : 'keywords';
@@ -127,7 +162,7 @@ export class AiSearchService implements OnModuleInit {
       model: call.model,
       attempts: call.attempts,
       latencyMs: call.latencyMs,
-      durationMs: Date.now() - startedAt,
+      durationMs: this.clock.now() - startedAt,
       inputTokens: call.usage?.inputTokens ?? null,
       outputTokens: call.usage?.outputTokens ?? null,
       costUsdMicros: cost,
@@ -142,56 +177,125 @@ export class AiSearchService implements OnModuleInit {
     return this.extractor.configured && this.config.AI_DAILY_REQUEST_CAP > 0;
   }
 
-  /** Un appel au modèle, coupé au bout de `AI_TIMEOUT_MS`, et sa sortie validée par Zod. */
+  /** Les contrôles avant l'appel, puis l'appel et la mise à jour du circuit. */
   private async callModel(request: ExtractionRequest): Promise<ModelCall> {
     if (!this.isConfigured()) return { outcome: 'not_configured', ...NO_CALL };
+    if (!this.breaker.canAttempt()) return { outcome: 'circuit_open', ...NO_CALL };
+    if (await this.dailyCapReached()) return { outcome: 'budget_exceeded', ...NO_CALL };
+    // Pendant la lecture du plafond, une autre requête a pu prendre l'essai du circuit.
+    if (!this.breaker.acquire()) return { outcome: 'circuit_open', ...NO_CALL };
 
-    const startedAt = Date.now();
-    const elapsed = () => Date.now() - startedAt;
+    let call: ModelCall | undefined;
     try {
-      const result = await withTimeout(
-        (signal) => this.extractor.extract(request, signal),
-        this.config.AI_TIMEOUT_MS,
-      );
-      const parsed = aiSearchExtractionSchema.safeParse(result.output);
-      return {
-        outcome: parsed.success ? 'success' : 'invalid_output',
-        extraction: parsed.success ? parsed.data : null,
-        model: result.model,
-        attempts: 1,
-        latencyMs: elapsed(),
-        usage: result.usage,
-        ...(parsed.success
-          ? {}
-          : {
-              reason: 'invalid_output' as const,
-              invalidFields: parsed.error.issues.map((issue) => issue.path.join('.')),
-            }),
-      };
+      call = await this.callWithRetry(request);
+      return call;
+    } finally {
+      this.updateCircuit(call);
+    }
+  }
+
+  /**
+   * Plafond d'appels du jour (UTC), partagé par tous les réplicas via la base. Il est souple : deux
+   * requêtes simultanées peuvent lire le même total et le dépasser d'une unité chacune. Base
+   * illisible : on ne dépense pas sans pouvoir compter.
+   */
+  private async dailyCapReached(): Promise<boolean> {
+    const cap = this.config.AI_DAILY_REQUEST_CAP;
+    try {
+      const attemptsToday = await this.requests.attemptsSince(startOfUtcDay(this.clock.now()));
+      if (attemptsToday < cap) return false;
+      this.logger.warn({ event: 'ai.budget_exceeded', attemptsToday, cap });
     } catch (error) {
-      if (error instanceof FilterExtractorError && error.reason === 'not_configured') {
-        return { outcome: 'not_configured', ...NO_CALL };
+      this.logger.error({ event: 'ai.budget_check_failed', err: describeError(error) });
+    }
+    return true;
+  }
+
+  /** Un appel coupé à `AI_TIMEOUT_MS`, et une reprise si l'échec est passager et le budget le permet. */
+  private async callWithRetry(request: ExtractionRequest): Promise<ModelCall> {
+    const startedAt = this.clock.now();
+    const deadline = startedAt + MODEL_BUDGET_MS;
+    const elapsed = () => this.clock.now() - startedAt;
+
+    for (let attempt = 1; ; attempt++) {
+      const timeoutMs = Math.min(this.config.AI_TIMEOUT_MS, deadline - this.clock.now());
+      try {
+        const result = await withTimeout(
+          (signal) => this.extractor.extract(request, signal),
+          timeoutMs,
+        );
+        return this.answered(result, attempt, elapsed());
+      } catch (error) {
+        if (error instanceof FilterExtractorError && error.reason === 'not_configured') {
+          return { outcome: 'not_configured', ...NO_CALL };
+        }
+        const reason: FailureReason =
+          error instanceof FilterExtractorError ? error.reason : 'unexpected';
+        const details = error instanceof FilterExtractorError ? error.details : {};
+        const delay =
+          attempt < MAX_ATTEMPTS && reason !== 'unexpected'
+            ? retryDelayMs(reason, details.retryAfterMs)
+            : null;
+        if (delay !== null && this.clock.now() + delay + MIN_ATTEMPT_MS <= deadline) {
+          this.logger.warn({
+            event: 'ai.retry',
+            reason,
+            attempt,
+            delayMs: delay,
+            ...(details.status === undefined ? {} : { status: details.status }),
+          });
+          await this.clock.sleep(delay);
+          continue;
+        }
+        // Une erreur inattendue (bug de l'adapter ou du SDK) donne aussi un repli, jamais un 500.
+        if (reason === 'unexpected') {
+          this.logger.warn({
+            event: 'ai.unexpected_error',
+            err: { name: describeError(error).name },
+          });
+        }
+        return {
+          outcome: OUTCOME_BY_REASON[reason],
+          extraction: null,
+          // Le modèle qui a répondu, ou celui qu'on a appelé.
+          model: details.model ?? this.config.AI_MODEL,
+          attempts: attempt,
+          latencyMs: elapsed(),
+          usage: details.usage ?? null,
+          reason,
+          ...(details.status === undefined ? {} : { status: details.status }),
+        };
       }
-      // Une erreur inattendue (bug de l'adapter ou du SDK) donne aussi un repli, jamais un 500.
-      const reason = error instanceof FilterExtractorError ? error.reason : 'unexpected';
-      const details = error instanceof FilterExtractorError ? error.details : {};
-      if (reason === 'unexpected') {
-        this.logger.warn({
-          event: 'ai.unexpected_error',
-          err: { name: describeError(error).name },
-        });
+    }
+  }
+
+  /** Le modèle a répondu : sa sortie est validée par le même schéma que celle des mots-clés. */
+  private answered(result: ExtractionResult, attempts: number, latencyMs: number): ModelCall {
+    const parsed = aiSearchExtractionSchema.safeParse(result.output);
+    const common = { model: result.model, attempts, latencyMs, usage: result.usage };
+    if (parsed.success) return { outcome: 'success', extraction: parsed.data, ...common };
+    return {
+      outcome: 'invalid_output',
+      extraction: null,
+      ...common,
+      reason: 'invalid_output',
+      invalidFields: parsed.error.issues.map((issue) => issue.path.join('.')),
+    };
+  }
+
+  /**
+   * Le modèle a répondu (même mal) : le circuit se referme. Il est injoignable ou refuse la clé :
+   * l'échec compte. Ni l'un ni l'autre (requête refusée, erreur inattendue) : rien n'est tranché.
+   */
+  private updateCircuit(call: ModelCall | undefined): void {
+    if (call?.outcome === 'success' || call?.outcome === 'invalid_output') {
+      if (this.breaker.recordSuccess()) this.logger.log({ event: 'ai.circuit_closed' });
+    } else if (call?.reason && UNAVAILABLE.has(call.reason)) {
+      if (this.breaker.recordFailure()) {
+        this.logger.warn({ event: 'ai.circuit_opened', reason: call.reason });
       }
-      return {
-        outcome: OUTCOME_BY_REASON[reason],
-        extraction: null,
-        // Le modèle qui a répondu, ou celui qu'on a appelé.
-        model: details.model ?? this.config.AI_MODEL,
-        attempts: 1,
-        latencyMs: elapsed(),
-        usage: details.usage ?? null,
-        reason,
-        ...(details.status === undefined ? {} : { status: details.status }),
-      };
+    } else {
+      this.breaker.recordNeutral();
     }
   }
 
@@ -273,28 +377,5 @@ export class AiSearchService implements OnModuleInit {
     } catch (error) {
       this.logger.error({ event: 'ai.persist_failed', err: describeError(error) });
     }
-  }
-}
-
-/**
- * Exécute `run` avec un signal qui s'interrompt au bout de `timeoutMs`, et n'attend pas plus
- * longtemps, même si `run` ignore le signal.
- */
-async function withTimeout<T>(
-  run: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number,
-): Promise<T> {
-  const controller = new AbortController();
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new FilterExtractorError('timeout'));
-    }, timeoutMs);
-  });
-  try {
-    return await Promise.race([run(controller.signal), timeout]);
-  } finally {
-    clearTimeout(timer);
   }
 }
