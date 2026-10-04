@@ -254,3 +254,7 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 | `NEXT_PUBLIC_MAPBOX_TOKEN`         | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé                              |
 
 La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Les variables lues par le navigateur le sont dans `apps/web/lib/env.ts`. Aucun secret n'est versionné.
+
+## Licence
+
+Code propriétaire, tous droits réservés (voir [LICENSE](LICENSE)). Le code source est public à titre de consultation uniquement : le copier, le modifier, le redistribuer ou l'utiliser, en tout ou partie, demande l'autorisation écrite préalable de l'auteur.
