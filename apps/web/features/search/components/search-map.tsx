@@ -17,6 +17,7 @@ import { roundCoordinate, type SearchProvider } from '@creno/shared';
 import { Button } from '@/components/ui/button';
 import { categoryLabels } from '@/features/providers/labels';
 import { formatPrice } from '@/lib/format';
+import { describeFreeSlots, providerHref } from '../params';
 
 // Vue d'ensemble de la France métropolitaine, quand il n'y a ni lieu ni résultat.
 const FRANCE = { longitude: 2.5, latitude: 46.6, zoom: 4.6 };
@@ -25,6 +26,8 @@ const SINGLE_POINT_ZOOM = 13;
 export interface SearchMapProps {
   token: string;
   items: SearchProvider[];
+  /** Jour filtré : le lien ouvre la fiche sur ce jour. */
+  date?: string;
   center?: { lat: number; lng: number };
   activeId: string | null;
   onActiveChange: (id: string | null) => void;
@@ -36,6 +39,7 @@ export interface SearchMapProps {
 export default function SearchMap({
   token,
   items,
+  date,
   center,
   activeId,
   onActiveChange,
@@ -162,8 +166,11 @@ export default function SearchMap({
               </span>
               <span className="font-medium">{selected.name}</span>
               <span>À partir de {formatPrice(selected.minPriceCents, selected.currency)}</span>
+              {date && selected.availableSlots !== null && (
+                <span>{describeFreeSlots(selected.availableSlots, date)}</span>
+              )}
               <Link
-                href={`/providers/${selected.slug}`}
+                href={providerHref(selected, date)}
                 className="text-primary inline-flex min-h-11 items-center font-medium underline underline-offset-4 md:min-h-0"
               >
                 Voir les créneaux

@@ -1,4 +1,4 @@
-import { type ApiError, apiErrorSchema, type ErrorCode } from '@creno/shared';
+import { type ApiError, apiErrorSchema, BOOKING_HORIZON_DAYS, type ErrorCode } from '@creno/shared';
 
 /** Messages utilisateur par code d'erreur de l'API (jamais le message technique brut). */
 const messages: Partial<Record<ErrorCode, string>> = {
@@ -25,6 +25,7 @@ const messages: Partial<Record<ErrorCode, string>> = {
   CANCELLATION_NOT_ALLOWED: 'Cette réservation ne peut plus être annulée en ligne.',
   PHONE_NOT_ALLOWED: 'Seuls les numéros mobiles français (06 ou 07) sont acceptés pour l’instant.',
   PHONE_CODE_INVALID: 'Code incorrect ou expiré.',
+  SEARCH_DATE_OUT_OF_RANGE: `Choisissez une date entre aujourd'hui et dans ${BOOKING_HORIZON_DAYS} jours.`,
 };
 
 const FALLBACK = 'Une erreur est survenue. Réessayez.';

@@ -1,6 +1,6 @@
 'use client';
 
-import { MapPin } from 'lucide-react';
+import { CalendarCheck, MapPin } from 'lucide-react';
 import Link from 'next/link';
 import type { SearchProvider } from '@creno/shared';
 import { Badge } from '@/components/ui/badge';
@@ -8,14 +8,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { categoryLabels } from '@/features/providers/labels';
 import { formatPrice } from '@/lib/format';
-import { formatDistance } from '../params';
+import { describeFreeSlots, formatDistance, providerHref } from '../params';
 
 export function ResultList({
   items,
+  date,
   activeId,
   onActiveChange,
 }: {
   items: SearchProvider[];
+  /** Jour filtré : chaque carte dit combien de créneaux sont libres ce jour-là. */
+  date?: string;
   activeId: string | null;
   onActiveChange: (id: string | null) => void;
 }) {
@@ -38,7 +41,7 @@ export function ResultList({
               <Badge variant="secondary">{categoryLabels[provider.category]}</Badge>
               <CardTitle>
                 <Link
-                  href={`/providers/${provider.slug}`}
+                  href={providerHref(provider, date)}
                   className="outline-none after:absolute after:inset-0"
                 >
                   {provider.name}
@@ -53,6 +56,12 @@ export function ResultList({
                   )}
                 </span>
               </CardDescription>
+              {date && provider.availableSlots !== null && (
+                <p className="text-primary flex items-center gap-1.5 text-sm font-medium">
+                  <CalendarCheck aria-hidden className="size-4 shrink-0" />
+                  {describeFreeSlots(provider.availableSlots, date)}
+                </p>
+              )}
             </CardHeader>
             <CardContent className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="font-medium">

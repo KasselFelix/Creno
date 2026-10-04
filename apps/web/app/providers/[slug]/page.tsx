@@ -2,14 +2,18 @@ import { MapPin } from 'lucide-react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
-import { publicProviderSchema } from '@creno/shared';
+import { localDateSchema, publicProviderSchema } from '@creno/shared';
 import { SiteHeader } from '@/components/site-header';
 import { Badge } from '@/components/ui/badge';
 import { SlotPicker } from '@/features/availability/components/slot-picker';
 import { categoryLabels } from '@/features/providers/labels';
 import { getCurrentUser, serverFetch } from '@/lib/api/server';
 
-type Props = { params: Promise<{ slug: string }> };
+type Props = {
+  params: Promise<{ slug: string }>;
+  /** Depuis un résultat de recherche avec date : `?date=YYYY-MM-DD&resource=<id>`. */
+  searchParams: Promise<{ date?: string | string[]; resource?: string | string[] }>;
+};
 
 // `cache` : la page et ses métadonnées partagent le même appel à l'API.
 const getProvider = cache((slug: string) =>
@@ -21,9 +25,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: provider ? `${provider.name} — Creno` : 'Prestataire introuvable — Creno' };
 }
 
-export default async function ProviderPage({ params }: Props) {
-  const [provider, user] = await Promise.all([getProvider((await params).slug), getCurrentUser()]);
+export default async function ProviderPage({ params, searchParams }: Props) {
+  const [provider, user, query] = await Promise.all([
+    getProvider((await params).slug),
+    getCurrentUser(),
+    searchParams,
+  ]);
   if (!provider) notFound();
+  // Paramètres invalides ignorés ; la plage de dates est vérifiée dans le fuseau de la ressource.
+  const date = localDateSchema.safeParse(query.date);
+  const resourceId = typeof query.resource === 'string' ? query.resource : undefined;
 
   return (
     <>
@@ -47,6 +58,8 @@ export default async function ProviderPage({ params }: Props) {
         ) : (
           <SlotPicker
             resources={provider.resources}
+            initialResourceId={resourceId}
+            initialDate={date.success ? date.data : undefined}
             isAuthenticated={user !== null}
             onlinePayment={provider.onlinePayment}
             providerPath={`/providers/${provider.slug}`}

@@ -6,7 +6,12 @@ import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { roundCoordinate, SEARCH_RADIUS_KM_MAX, type SearchProvider } from '@creno/shared';
+import {
+  type InterpretResponse,
+  roundCoordinate,
+  SEARCH_RADIUS_KM_MAX,
+  type SearchProvider,
+} from '@creno/shared';
 import { QueryError } from '@/components/query-error';
 import { Button } from '@/components/ui/button';
 import { Field, FieldLabel } from '@/components/ui/field';
@@ -26,6 +31,7 @@ import { PlaceCombobox } from '@/features/geocoding/components/place-combobox';
 import { publicEnv } from '@/lib/env';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { useSearchProviders } from '../api';
+import { applyInterpretation, interpretationMatches } from '../interpretation';
 import {
   countActiveFilters,
   describeResults,
@@ -36,6 +42,7 @@ import {
   searchHref,
   type SearchFilters,
 } from '../params';
+import { AiSearchBar, InterpretationSummary } from './ai-search-bar';
 import { ResultList, ResultListSkeleton } from './result-list';
 import { SearchFilterFields } from './search-filters';
 
@@ -52,6 +59,37 @@ const FIVE_MINUTES = 5 * 60 * 1000;
 
 type View = 'list' | 'map';
 
+/** Échec de la géolocalisation, avec le message à afficher au visiteur. */
+class GeolocationError extends Error {}
+
+/** Position du visiteur, arrondie (≈ 100 m) avant d'aller dans l'URL et à l'API. */
+function currentPosition(): Promise<{ lat: number; lng: number }> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator) || !window.isSecureContext) {
+      reject(
+        new GeolocationError('Géolocalisation indisponible. Indiquez une ville ou une adresse.'),
+      );
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) =>
+        resolve({
+          lat: roundCoordinate(position.coords.latitude),
+          lng: roundCoordinate(position.coords.longitude),
+        }),
+      (error) =>
+        reject(
+          new GeolocationError(
+            error.code === error.PERMISSION_DENIED
+              ? 'Vous avez refusé la géolocalisation. Indiquez une ville ou une adresse.'
+              : 'Position introuvable. Indiquez une ville ou une adresse.',
+          ),
+        ),
+      { timeout: GEOLOCATION_TIMEOUT_MS, maximumAge: FIVE_MINUTES },
+    );
+  });
+}
+
 export function SearchView() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -62,6 +100,21 @@ export function SearchView() {
   const results = useSearchProviders(filters);
   const items = results.data?.items ?? NO_ITEMS;
   const total = results.data?.total ?? 0;
+  const capped = results.data?.totalIsCapped ?? false;
+  // Pendant le chargement d'un nouveau filtre, la liste affichée est l'ancienne : ses créneaux ne
+  // sont pas ceux de la date demandée.
+  const resultsDate = results.isPlaceholderData ? undefined : filters.date;
+
+  // Dernière phrase interprétée et filtres qu'elle a produits : la ligne « Compris » n'est affichée
+  // que tant que la page montre ces filtres.
+  const [interpretation, setInterpretation] = useState<{
+    response: InterpretResponse;
+    applied: SearchFilters;
+  } | null>(null);
+  const shownInterpretation =
+    interpretation && interpretationMatches(filters, interpretation.applied)
+      ? interpretation
+      : null;
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [view, setView] = useState<View>('list');
@@ -73,94 +126,99 @@ export function SearchView() {
   const activeFilters = countActiveFilters(filters);
   const hasFilters = filters.category !== undefined || filters.priceMax !== undefined;
 
-  function locate() {
-    if (!('geolocation' in navigator) || !window.isSecureContext) {
-      toast.error('Géolocalisation indisponible. Indiquez une ville ou une adresse.');
-      return;
-    }
+  /** Les filtres `base` centrés sur la position du visiteur ; `null` si elle reste inconnue. */
+  async function aroundMe(base: SearchFilters): Promise<SearchFilters | null> {
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocating(false);
-        setFilters({
-          ...filters,
-          // Position arrondie (≈ 100 m) avant d'aller dans l'URL et à l'API.
-          center: {
-            lat: roundCoordinate(position.coords.latitude),
-            lng: roundCoordinate(position.coords.longitude),
-          },
-          place: PLACE_MY_POSITION,
-        });
-      },
-      (error) => {
-        setLocating(false);
-        toast.error(
-          error.code === error.PERMISSION_DENIED
-            ? 'Vous avez refusé la géolocalisation. Indiquez une ville ou une adresse.'
-            : 'Position introuvable. Indiquez une ville ou une adresse.',
-        );
-      },
-      { timeout: GEOLOCATION_TIMEOUT_MS, maximumAge: FIVE_MINUTES },
-    );
+    try {
+      return { ...base, center: await currentPosition(), place: PLACE_MY_POSITION };
+    } catch (error) {
+      toast.error(
+        error instanceof GeolocationError
+          ? error.message
+          : 'Position introuvable. Indiquez une ville ou une adresse.',
+      );
+      return null;
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  function locate() {
+    void aroundMe(filters).then((next) => next && setFilters(next));
+  }
+
+  async function onInterpreted(response: InterpretResponse) {
+    const { filters: next, nearMe } = applyInterpretation(filters, response);
+    // « Près de moi » refusé ou impossible : les filtres s'appliquent avec le lieu actuel.
+    const applied = (nearMe && (await aroundMe(next))) || next;
+    setInterpretation({ response, applied });
+    setFilters(applied);
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-        <Field className="lg:flex-1">
-          <FieldLabel htmlFor="search-place">Ville ou adresse</FieldLabel>
-          <PlaceCombobox
-            // Remonté quand le lieu change ailleurs (bouton retour, « Autour de moi », carte).
-            key={filters.place ?? ''}
-            id="search-place"
-            placeholder="Lyon, 12 rue Oberkampf Paris…"
-            defaultText={placeFieldText(filters.place)}
-            className="h-11 md:h-9"
-            onSelect={(place) =>
-              setFilters({
-                ...filters,
-                center: { lat: place.latitude, lng: place.longitude },
-                place: place.kind === 'city' ? place.city : place.label,
-              })
-            }
-          />
-        </Field>
-        <div className="flex gap-3">
-          <Button
-            variant="outline"
-            className="h-11 flex-1 md:h-9 lg:flex-none"
-            onClick={locate}
-            disabled={locating}
-          >
-            {locating ? (
-              <LoaderCircle aria-hidden className="animate-spin" />
-            ) : (
-              <LocateFixed aria-hidden />
-            )}
-            Autour de moi
-          </Button>
-          <Sheet>
-            <SheetTrigger
-              render={<Button variant="outline" className="h-11 flex-1 md:h-9 lg:hidden" />}
+      <div>
+        <AiSearchBar onInterpreted={onInterpreted} />
+        <InterpretationSummary interpretation={shownInterpretation} />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <Field className="lg:flex-1">
+            <FieldLabel htmlFor="search-place">Ville ou adresse</FieldLabel>
+            <PlaceCombobox
+              // Remonté quand le lieu change ailleurs (bouton retour, « Autour de moi », carte).
+              key={filters.place ?? ''}
+              id="search-place"
+              placeholder="Lyon, 12 rue Oberkampf Paris…"
+              defaultText={placeFieldText(filters.place)}
+              className="h-11 md:h-9"
+              onSelect={(place) =>
+                setFilters({
+                  ...filters,
+                  center: { lat: place.latitude, lng: place.longitude },
+                  place: place.kind === 'city' ? place.city : place.label,
+                })
+              }
+            />
+          </Field>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="h-11 flex-1 md:h-9 lg:flex-none"
+              onClick={locate}
+              disabled={locating}
             >
-              <SlidersHorizontal aria-hidden />
-              Filtres{activeFilters > 0 && ` (${activeFilters})`}
-            </SheetTrigger>
-            <SheetContent side="bottom">
-              <SheetHeader>
-                <SheetTitle>Filtres</SheetTitle>
-                <SheetDescription>Affinez les prestataires affichés.</SheetDescription>
-              </SheetHeader>
-              <div className="flex flex-col gap-5 px-4">
-                <SearchFilterFields idPrefix="sheet" filters={filters} onChange={setFilters} />
-              </div>
-              <SheetFooter>
-                <SheetClose render={<Button className="h-11" />}>Voir les résultats</SheetClose>
-              </SheetFooter>
-            </SheetContent>
-          </Sheet>
+              {locating ? (
+                <LoaderCircle aria-hidden className="animate-spin" />
+              ) : (
+                <LocateFixed aria-hidden />
+              )}
+              Autour de moi
+            </Button>
+            <Sheet>
+              <SheetTrigger
+                render={<Button variant="outline" className="h-11 flex-1 md:h-9 lg:hidden" />}
+              >
+                <SlidersHorizontal aria-hidden />
+                Filtres{activeFilters > 0 && ` (${activeFilters})`}
+              </SheetTrigger>
+              <SheetContent side="bottom">
+                <SheetHeader>
+                  <SheetTitle>Filtres</SheetTitle>
+                  <SheetDescription>Affinez les prestataires affichés.</SheetDescription>
+                </SheetHeader>
+                <div className="flex flex-col gap-5 px-4">
+                  <SearchFilterFields idPrefix="sheet" filters={filters} onChange={setFilters} />
+                </div>
+                <SheetFooter>
+                  <SheetClose render={<Button className="h-11" />}>Voir les résultats</SheetClose>
+                </SheetFooter>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
-        <div className="hidden gap-3 lg:grid lg:w-1/2 lg:grid-cols-3">
+        <div className="hidden gap-3 lg:grid lg:grid-cols-4">
           <SearchFilterFields idPrefix="bar" filters={filters} onChange={setFilters} />
         </div>
       </div>
@@ -189,7 +247,7 @@ export function SearchView() {
                 ? 'Recherche en cours…'
                 : results.isError
                   ? ''
-                  : describeResults(total, filters)}
+                  : describeResults(total, filters, capped)}
             </p>
             {results.isPending ? (
               <ResultListSkeleton />
@@ -202,13 +260,24 @@ export function SearchView() {
             ) : items.length === 0 ? (
               <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-6 text-center">
                 <p>
-                  {filters.center
-                    ? 'Aucun prestataire dans ce rayon.'
-                    : 'Aucun prestataire ne correspond à ces filtres.'}
+                  {filters.date
+                    ? 'Aucun prestataire disponible ce jour-là.'
+                    : filters.center
+                      ? 'Aucun prestataire dans ce rayon.'
+                      : 'Aucun prestataire ne correspond à ces filtres.'}
                 </p>
                 <div className="flex flex-wrap justify-center gap-3">
+                  {filters.date && (
+                    <Button
+                      className="h-11 md:h-9"
+                      onClick={() => setFilters({ ...filters, date: undefined })}
+                    >
+                      Retirer la date
+                    </Button>
+                  )}
                   {filters.center && filters.radiusKm < SEARCH_RADIUS_KM_MAX && (
                     <Button
+                      variant={filters.date ? 'outline' : 'default'}
                       className="h-11 md:h-9"
                       onClick={() => setFilters({ ...filters, radiusKm: SEARCH_RADIUS_KM_MAX })}
                     >
@@ -220,7 +289,12 @@ export function SearchView() {
                       variant="outline"
                       className="h-11 md:h-9"
                       onClick={() =>
-                        setFilters({ ...filters, category: undefined, priceMax: undefined })
+                        setFilters({
+                          ...filters,
+                          category: undefined,
+                          priceMax: undefined,
+                          date: undefined,
+                        })
                       }
                     >
                       Réinitialiser les filtres
@@ -232,13 +306,18 @@ export function SearchView() {
               <div
                 className={results.isPlaceholderData ? 'opacity-60 transition-opacity' : undefined}
               >
-                <ResultList items={items} activeId={activeId} onActiveChange={setActiveId} />
+                <ResultList
+                  items={items}
+                  date={resultsDate}
+                  activeId={activeId}
+                  onActiveChange={setActiveId}
+                />
               </div>
             )}
             {total > items.length && !results.isError && (
               <p className="text-muted-foreground text-sm">
-                {items.length} premiers résultats sur {total} : réduisez le rayon ou filtrez pour
-                voir les autres.
+                {items.length} premiers résultats sur {capped && 'au moins '}
+                {total} : réduisez le rayon ou filtrez pour voir les autres.
               </p>
             )}
           </section>
@@ -263,6 +342,7 @@ export function SearchView() {
               <SearchMap
                 token={publicEnv.NEXT_PUBLIC_MAPBOX_TOKEN}
                 items={items}
+                date={resultsDate}
                 center={filters.center}
                 activeId={activeId}
                 onActiveChange={setActiveId}
