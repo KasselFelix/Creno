@@ -134,6 +134,35 @@ describe('bookings_no_overlap', () => {
     );
   });
 
+  it('déplacer une réservation sur un créneau occupé est refusé par la même contrainte (23P01)', async () => {
+    await insertBooking(db, { start: at(10), end: at(11), status: 'confirmed' });
+    const [moving] = await insertBooking(db, {
+      start: at(11),
+      end: at(12),
+      status: 'confirmed',
+    }).returning({ id: bookings.id });
+    await expectSqlState(
+      db.execute(
+        sql`UPDATE bookings SET during = ${toRange(at(10, 30), at(11, 30))}::tstzrange WHERE id = ${moving!.id}`,
+      ),
+      '23P01',
+    );
+  });
+
+  it('révision et date de déplacement vont ensemble, révision positive (23514)', async () => {
+    const [row] = await insertBooking(db, {
+      start: at(10),
+      end: at(11),
+      status: 'confirmed',
+    }).returning({ id: bookings.id });
+    const update = (fragment: ReturnType<typeof sql>) =>
+      db.execute(sql`UPDATE bookings SET ${fragment} WHERE id = ${row!.id}`);
+    await expectSqlState(update(sql`reschedule_count = 1`), '23514');
+    await expectSqlState(update(sql`rescheduled_at = now()`), '23514');
+    await expectSqlState(update(sql`reschedule_count = -1`), '23514');
+    await update(sql`reschedule_count = 1, rescheduled_at = now()`);
+  });
+
   // Deux connexions distinctes qui insèrent le même créneau en même temps, chacune dans sa transaction.
   async function raceTwoInserts(wrap: <T>(fn: () => Promise<T>) => Promise<T>) {
     const a = createDb(testDatabaseUrl(), { max: 1 });

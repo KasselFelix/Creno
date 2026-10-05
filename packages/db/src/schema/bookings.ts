@@ -46,6 +46,13 @@ export const bookings = pgTable(
     checkoutStartedAt: timestamp('checkout_started_at', { withTimezone: true }),
     stripeCheckoutSessionId: text('stripe_checkout_session_id').unique(),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    // Révision de l'horaire : +1 à chaque déplacement par le prestataire. Les notifications qui
+    // dépendent de l'horaire (rappel, « réservation déplacée ») portent la révision pour laquelle
+    // elles ont été écrites : une ligne d'une ancienne révision n'est plus envoyée.
+    rescheduleCount: integer('reschedule_count').notNull().default(0),
+    // Date du dernier déplacement : une réservation déplacée reste annulable par le client jusqu'à
+    // son début (il n'a pas choisi ce nouvel horaire).
+    rescheduledAt: timestamp('rescheduled_at', { withTimezone: true }),
     ...timestamps,
   },
   (t) => [
@@ -71,6 +78,11 @@ export const bookings = pgTable(
     check(
       'bookings_cancelled_has_date',
       sql`${t.status} <> 'cancelled' OR ${t.cancelledAt} IS NOT NULL`,
+    ),
+    check('bookings_reschedule_count_positive', sql`${t.rescheduleCount} >= 0`),
+    check(
+      'bookings_rescheduled_has_date',
+      sql`(${t.rescheduleCount} = 0) = (${t.rescheduledAt} IS NULL)`,
     ),
   ],
 );

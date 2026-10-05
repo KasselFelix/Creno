@@ -10,4 +10,5 @@ export * from './payments.js';
 export * from './providers.js';
 export * from './resources.js';
 export * from './search.js';
+export * from './stats.js';
 export * from './users.js';

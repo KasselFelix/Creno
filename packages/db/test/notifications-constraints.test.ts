@@ -97,6 +97,21 @@ describe('notifications', () => {
     await db.insert(notifications).values(notification({ kind: 'booking_reminder' }));
   });
 
+  it('une nouvelle révision de la réservation peut recevoir le même type de message', async () => {
+    await db.insert(notifications).values(notification({ kind: 'booking_moved' }));
+    await expectSqlState(
+      db.insert(notifications).values(notification({ kind: 'booking_moved' })),
+      '23505',
+    );
+    await db
+      .insert(notifications)
+      .values(notification({ kind: 'booking_moved', bookingRevision: 1 }));
+    await expectSqlState(
+      db.insert(notifications).values(notification({ bookingRevision: -1 })),
+      '23514',
+    );
+  });
+
   it('un événement rejoué n’insère rien avec ON CONFLICT DO NOTHING', async () => {
     const insert = () =>
       db

@@ -11,7 +11,8 @@ export const STRIPE_EVENTS_RETENTION_DAYS = 90;
  * - `booking_cancelled` : au client et au prestataire, quand le client annule ;
  * - `booking_cancelled_by_provider` : au client, quand le prestataire annule ;
  * - `payment_refunded_late` : au client, son paiement est arrivé trop tard et a été remboursé ;
- * - `booking_reminder` : au client, la veille du créneau.
+ * - `booking_reminder` : au client, la veille du créneau ;
+ * - `booking_moved` : au client, le prestataire a déplacé sa réservation.
  */
 export const notificationKinds = [
   'booking_confirmed',
@@ -20,6 +21,7 @@ export const notificationKinds = [
   'booking_cancelled_by_provider',
   'payment_refunded_late',
   'booking_reminder',
+  'booking_moved',
 ] as const;
 export const notificationKindSchema = z.enum(notificationKinds);
 export type NotificationKind = z.infer<typeof notificationKindSchema>;
