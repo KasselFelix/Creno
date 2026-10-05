@@ -102,6 +102,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **L'email d'abord, le compte depuis le lien** : la première étape ne lit jamais `users`, donc sa réponse ne peut pas révéler qui est inscrit ; le mot de passe est choisi par celui qui a reçu le lien, jamais par l'auteur de la demande. → [ADR 0011](docs/adr/0011-pending-registration-uniform-signup.md)
 - **Recherche en langage naturel par Mistral (Ministral 3 8B), le modèle ne produit que des filtres** : sortie contrainte par un JSON Schema généré depuis le schéma Zod partagé, revalidée par ce schéma, jamais de SQL ; offre gratuite hébergée dans l'UE, ~0,11 $ les 1 000 recherches au tarif payant (comparé à Mistral Small 4, Claude Haiku 4.5 et Sonnet 5.5 dans l'ADR). → [ADR 0013](docs/adr/0013-ai-search-mistral.md)
 - **Timeout, une seule reprise, circuit breaker, plafond journalier, repli par mots-clés** : la recherche marche toujours, l'IA en panne, lente ou hors budget ne donne jamais d'erreur 5xx, et chaque appel est mesuré (latence, tokens, coût) dans `ai_requests`. → [ADR 0013](docs/adr/0013-ai-search-mistral.md)
+- **Déplacement d'une réservation par un `UPDATE` sous la même contrainte d'exclusion, client prévenu sans devoir accepter** : la base refuse un créneau pris, le client peut annuler jusqu'au début, et les notifications portent une révision (une ligne neuve par déplacement, jamais recyclée). → [ADR 0015](docs/adr/0015-provider-reschedule.md)
 - **Filtre « disponible le » calculé par le moteur de créneaux, pas en SQL** : 200 candidats de la recherche, chargement par lot (5 requêtes), même résultat que la fiche du prestataire, changements d'heure compris. → [ADR 0014](docs/adr/0014-date-filter-slot-engine.md)
 
 ## Recherche géographique
@@ -157,6 +158,24 @@ docker compose exec db psql -U creno -c "select outcome, model, attempts, latenc
 - `POST /v1/bookings` pose un **hold de 15 minutes** (booking `pending`) : 409 si le créneau est pris, 422 s'il n'est pas proposé. Un hold expiré ne bloque plus rien, sans attendre de tâche de nettoyage.
 - Garde-fous : 5 holds actifs par client et 2 par ressource, 5 réservations gratuites à venir par client (verrou par client, la limite tient face à des demandes simultanées), 200 fermetures à venir par ressource, limites de débit par IP sur les lectures publiques et sur les réservations.
 
+## Dashboard prestataire
+
+- **Aperçu** (`/dashboard`) : occupation et chiffre d'affaires de la semaine, au total et par ressource, et les prochaines réservations.
+- **Réservations** (`/dashboard/bookings`) : tableau paginé, filtres par ressource et par statut, client (nom, email ; anonyme tant qu'il n'a pas payé), actions « Déplacer… » et « Annuler ».
+- **Calendrier** (`/dashboard/calendar`, FullCalendar v7, plugins MIT) : semaine d'une ressource dans son fuseau. Glisser une réservation la déplace après confirmation (dépôt accepté seulement sur un créneau libre) ; sélectionner une plage future la bloque. Le client reçoit un email « réservation déplacée » et son rappel est reprogrammé.
+
+La requête de l'occupation, avec des multiranges Postgres :
+
+```sql
+-- Heures d'ouverture de la semaine, jour par jour en heure locale, moins les fermetures…
+range_agg(tstzrange((day + start_time) AT TIME ZONE timezone, (day + end_time) AT TIME ZONE timezone, '[)'))
+  - range_agg(closures.during)                                   AS open
+-- … puis les réservations confirmées coupées par l'ouverture, durées additionnées.
+SELECT sum(upper(x) - lower(x)) FROM unnest(open * range_agg(bookings.during)) AS x;
+```
+
+Un jour de 25 h ou de 23 h compte sa vraie durée (testé), une réservation sous une fermeture ne compte pas. Détails : [docs/schema.md](docs/schema.md#occupation-de-la-semaine-dashboard) ; tests : [apps/api/test/provider-dashboard.e2e-spec.ts](apps/api/test/provider-dashboard.e2e-spec.ts) et [apps/api/test/bookings-reschedule.e2e-spec.ts](apps/api/test/bookings-reschedule.e2e-spec.ts).
+
 ## Paiement
 
 ```sql
@@ -169,7 +188,7 @@ RETURNING id;   -- rien de renvoyé : événement déjà traité
 - **Client** : « Réserver et payer » bloque le créneau, puis redirige vers Stripe Checkout. Le prix vient de la base, la commission (`STRIPE_PLATFORM_FEE_BPS`, 10 % par défaut) est calculée par le serveur. Le hold de 15 min est prolongé une fois à 31 min au lancement du paiement, et la session Stripe expire au même instant.
 - **Confirmation** : seul le webhook `POST /v1/payments/webhook` confirme une réservation. Signature vérifiée sur le corps brut (sinon 400), événement enregistré et traité dans la même transaction : rejoué, il ne fait rien ; en échec, il n'est pas enregistré et Stripe le renvoie. La page de retour interroge l'API jusqu'à « Confirmée ».
 - **Paiement arrivé trop tard** : si le créneau a été repris, la contrainte d'exclusion le signale et le client est remboursé automatiquement (log `payment.late_refund`).
-- **Annulation** : dans « Mes réservations », remboursement total jusqu'à 24 h avant le début ; le prestataire peut toujours annuler (API). Le remboursement est demandé avant de libérer le créneau, et reprend le versement au prestataire et la commission.
+- **Annulation** : dans « Mes réservations », remboursement total jusqu'à 24 h avant le début (jusqu'au début si le prestataire a déplacé la réservation) ; le prestataire peut annuler depuis son dashboard jusqu'au début. Le remboursement est demandé avant de libérer le créneau, et reprend le versement au prestataire et la commission.
 - Tests : signature invalide, événement rejoué ou reçu deux fois en même temps, paiement tardif, remboursement en échec ([apps/api/test/payments-webhook.e2e-spec.ts](apps/api/test/payments-webhook.e2e-spec.ts)) ; checkout, annulation et accès à la réservation d'un autre ([apps/api/test/bookings-payments.e2e-spec.ts](apps/api/test/bookings-payments.e2e-spec.ts)).
 
 ## Notifications et jobs

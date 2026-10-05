@@ -101,6 +101,8 @@ erDiagram
     timestamptz checkout_started_at "paiement lancé, hold prolongé"
     text stripe_checkout_session_id UK "nullable"
     timestamptz cancelled_at "obligatoire si cancelled"
+    int reschedule_count "révision : +1 à chaque déplacement"
+    timestamptz rescheduled_at "dernier déplacement, ssi révision > 0"
   }
   payments {
     uuid id PK
@@ -127,7 +129,7 @@ erDiagram
     notification_status status "scheduled | pending | sent | failed | skipped"
     timestamptz scheduled_for "instant d'envoi voulu"
     int attempts ">= 0"
-    text reason "motif de skipped / failed"
+    int booking_revision "révision de la réservation visée"
     text provider_message_id "nullable"
     timestamptz sent_at "obligatoire si sent"
   }
@@ -150,20 +152,23 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 
 ## Migrations
 
-| Fichier                                             | Contenu                                                                                                                |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                                      |
-| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                                           |
-| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                                         |
-| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises                  |
-| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                                |
-| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                                        |
-| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`                 |
-| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »               |
-| `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events`   |
-| `0009_email_verification.sql` (générée, ajustée)    | table `pending_registrations` ; `users.email_verified_at` ajoutée, reprise sur les comptes existants, puis `NOT NULL`  |
-| `0010_phone_verification.sql` (générée, ajustée)    | table `phone_verifications` ; `users.phone_verified_at`, numéros non prouvés effacés, `users_phone_unique` et CHECK    |
-| `0011_ai_requests.sql` (générée)                    | table `ai_requests` et enum `ai_request_outcome`, CHECK de cohérence (issue ⇔ appel au modèle), index sur `created_at` |
+| Fichier                                             | Contenu                                                                                                                                          |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0000_extensions.sql` (custom)                      | `postgis`, `btree_gist`, `citext`                                                                                                                |
+| `0001_initial_schema.sql` (générée)                 | tables, enums, clés étrangères, CHECK, index                                                                                                     |
+| `0002_bookings_no_overlap.sql` (custom)             | contrainte d'exclusion anti double réservation                                                                                                   |
+| `0003_bookings_constraints_hardening.sql` (générée) | index GiST non partiel sur `bookings (resource_id, during)`, bornes `[)` imposées, format des devises                                            |
+| `0004_auth.sql` (générée)                           | `users.password_hash`, table `sessions`                                                                                                          |
+| `0005_availability_rules_no_overlap.sql` (custom)   | type `timerange`, contrainte d'exclusion sur les plages horaires d'un même jour                                                                  |
+| `0006_payments.sql` (générée)                       | tables `payments` et `stripe_events`, colonnes de paiement sur `bookings`, état Stripe sur `providers`                                           |
+| `0007_bookings_cancelled_has_date.sql` (générée)    | reprise de `cancelled_at` sur les réservations déjà annulées, puis CHECK « annulée ⇒ date d'annulation »                                         |
+| `0008_notifications.sql` (générée)                  | table `notifications` et ses enums, index partiels (rappels dus, holds à expirer), index de purge de `stripe_events`                             |
+| `0009_email_verification.sql` (générée, ajustée)    | table `pending_registrations` ; `users.email_verified_at` ajoutée, reprise sur les comptes existants, puis `NOT NULL`                            |
+| `0010_phone_verification.sql` (générée, ajustée)    | table `phone_verifications` ; `users.phone_verified_at`, numéros non prouvés effacés, `users_phone_unique` et CHECK                              |
+| `0011_ai_requests.sql` (générée)                    | table `ai_requests` et enum `ai_request_outcome`, CHECK de cohérence (issue ⇔ appel au modèle), index sur `created_at`                           |
+| `0012_booking_reschedule.sql` (générée)             | révision des réservations (`reschedule_count`, `rescheduled_at`), `notifications.booking_revision` dans la clé d'unicité, valeur `booking_moved` |
+
+**Ajouter une valeur à un enum.** `ALTER TYPE … ADD VALUE` (migration 0012) est permis dans une transaction, mais la nouvelle valeur n'est utilisable qu'après le commit. Or `migrate()` de Drizzle applique **toutes** les migrations en attente dans **une seule** transaction : sur une base neuve (clone frais, CI), une migration qui citerait `'booking_moved'` en SQL (prédicat d'index, CHECK, valeur par défaut) échouerait avec « unsafe use of new value ». Aucune migration ne cite donc une valeur d'enum ajoutée par une migration de la même série ; si un jour c'est nécessaire, il faut la poser dans une valeur par défaut côté application, ou appliquer les migrations en deux fois.
 
 Le schéma `pgboss` (file de jobs) n'est pas dans ces migrations : pg-boss l'installe et le met à jour lui-même au démarrage de l'API.
 
@@ -186,6 +191,46 @@ ALTER TABLE bookings ADD CONSTRAINT bookings_no_overlap
 **Piège du `now()`** : le prédicat d'une contrainte doit être immuable, il ne peut donc pas tester `expires_at > now()`. Un hold expiré bloque le créneau tant que sa ligne n'est pas passée à `expired`. La transaction de réservation commence donc par expirer les holds dépassés qui chevauchent le créneau, puis insère ; le calcul des créneaux libres ignore de lui-même les holds expirés.
 
 **Deadlock** : deux insertions simultanées sur le même créneau peuvent s'attendre mutuellement pendant la vérification de la contrainte ; Postgres interrompt alors l'une d'elles avec `40P01` au lieu de `23P01`. La transaction est rejouée par `retryOnDeadlock` (`packages/db/src/errors.ts`), et le second essai obtient `23P01`. Couvert par `packages/db/test/bookings-constraints.test.ts`.
+
+## Déplacer une réservation
+
+Décisions : [ADR 0015](adr/0015-provider-reschedule.md).
+
+Le prestataire déplace une réservation confirmée par un simple `UPDATE` : c'est la même contrainte `bookings_no_overlap` qui refuse un créneau pris (`23P01` → `409 SLOT_UNAVAILABLE`), et la même mécanique qu'à la création (holds expirés passés à `expired` d'abord, `retryOnDeadlock` autour de la transaction).
+
+```sql
+SELECT status, lower(during) FROM bookings WHERE id = $1 FOR UPDATE;   -- une annulation concurrente attend
+UPDATE bookings SET status = 'expired'
+ WHERE resource_id = $2 AND status = 'pending' AND expires_at <= now() AND during && $3;
+UPDATE bookings
+   SET during = $3, reschedule_count = reschedule_count + 1, rescheduled_at = now()
+ WHERE id = $1 AND status = 'confirmed'
+RETURNING reschedule_count;                                             -- la nouvelle révision
+```
+
+- `reschedule_count` est la **révision** de l'horaire ; `bookings_rescheduled_has_date` impose `(reschedule_count = 0) = (rescheduled_at IS NULL)`.
+- Une réservation déplacée (`rescheduled_at` non NULL) reste annulable et remboursée par le client jusqu'à son début, au lieu de 24 h avant.
+
+## Occupation de la semaine (dashboard)
+
+`GET /v1/providers/me/stats?weekStart=` calcule, par ressource, la part des heures d'ouverture réservée sur une semaine locale (`[lundi 00:00, lundi suivant 00:00)` dans le fuseau de la ressource), avec des **multiranges** (Postgres 14+) :
+
+```sql
+-- Ouverture : chaque horaire hebdomadaire, jour par jour, converti en instants dans le fuseau de la ressource.
+SELECT range_agg(tstzrange((day + ar.start_time) AT TIME ZONE r.timezone,
+                           (day + ar.end_time)   AT TIME ZONE r.timezone, '[)'))
+       - coalesce((SELECT range_agg(e.during) FROM availability_exceptions e
+                    WHERE e.resource_id = r.id AND e.during && week), '{}')   -- moins les fermetures
+  AS open
+...
+-- Réservé : réservations confirmées coupées par l'ouverture ; durées additionnées en dépliant le multirange.
+SELECT sum(upper(x) - lower(x)) FROM unnest(open * booked) AS x;
+```
+
+- `range_agg` réunit des plages en un `tstzmultirange` (les plages qui se touchent fusionnent), `-` retire les fermetures, `*` garde l'intersection : une réservation posée sous une fermeture ne compte pas.
+- `AT TIME ZONE` fait le changement d'heure : un dimanche ouvert de 00:00 à 24:00 compte 25 h le 25 octobre 2026 et 23 h le 28 mars 2027 (testé). Conventions : une heure murale **inexistante** (passage à l'heure d'été) est poussée après le saut, comme dans le moteur de créneaux ; une heure **répétée** (passage à l'heure d'hiver) est lue par Postgres comme la **seconde** occurrence, alors que le moteur prend la première. L'écart (1 h) ne touche qu'une règle dont une borne tombe entre 02:00 et 03:00 cette nuit-là.
+- La CTE de l'ouverture est `MATERIALIZED` : elle sert deux fois (durée, intersection) et serait sinon recalculée. EXPLAIN ANALYZE sur la base de démo : ~1,5 ms, réservations lues par l'index de `bookings_no_overlap`, fermetures par `availability_exceptions_resource_during_gix`.
+- Le CA est la somme brute des `price_cents` des réservations confirmées qui **commencent** dans la semaine. Une ressource désactivée a 0 minute d'ouverture (`occupancy: null`), mais son CA compte. Les semaines passées sont calculées avec les horaires actuels (pas d'historique des horaires).
 
 ## Horaires, fermetures et calcul des créneaux
 
@@ -273,7 +318,9 @@ Décisions : [ADR 0010](adr/0010-notifications-outbox-pg-boss.md).
 
 **Outbox transactionnelle.** `notifications` porte une ligne par message à envoyer. La ligne et son job d'envoi (table `pgboss.job`) sont écrits dans la transaction qui change le statut de la réservation : ils sont validés ou annulés avec elle. Le job ne contient que l'identifiant de la notification ; l'adresse et le numéro restent dans `users`.
 
-**Un message par destinataire, quoi qu'il arrive.** `UNIQUE (booking_id, kind, channel, recipient_id)` : un webhook Stripe rejoué n'insère rien, donc ne crée aucun job.
+**Un message par destinataire et par révision, quoi qu'il arrive.** `UNIQUE (booking_id, kind, channel, recipient_id, booking_revision)` : un webhook Stripe rejoué n'insère rien, donc ne crée aucun job.
+
+**Révisions.** Un déplacement crée de **nouvelles** lignes (`booking_moved`, rappels) avec la nouvelle révision, au lieu de remettre les anciennes à `pending` : l'id de la ligne sert de clé d'idempotence chez Resend (gardée 24 h), une ligne recyclée ne repartirait donc pas. Les rappels encore `scheduled` de l'ancien horaire passent à `skipped` (`rescheduled`) ; au moment de l'envoi, le worker écarte un rappel ou un `booking_moved` dont la révision n'est plus celle de la réservation (`superseded`). Les autres types (confirmation, annulation) restent en révision 0.
 
 ```sql
 INSERT INTO notifications (booking_id, recipient_id, kind, channel) VALUES ($1, $2, 'booking_confirmed', 'email')
