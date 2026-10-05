@@ -5,7 +5,11 @@ const resourceId = '0b6c1f5e-7d0a-4a8e-9a43-1f0f5c3b2d11';
 
 describe('calendarQuerySchema', () => {
   it('accepte une semaine', () => {
-    const query = { resourceId, from: '2026-10-19T00:00:00+02:00', to: '2026-10-26T00:00:00+01:00' };
+    const query = {
+      resourceId,
+      from: '2026-10-19T00:00:00+02:00',
+      to: '2026-10-26T00:00:00+01:00',
+    };
     expect(calendarQuerySchema.safeParse(query).success).toBe(true);
   });
 
