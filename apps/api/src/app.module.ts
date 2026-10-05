@@ -21,6 +21,7 @@ import { PaymentsModule } from './payments/payments.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { ResourcesModule } from './resources/resources.module.js';
 import { SearchModule } from './search/search.module.js';
+import { StatsModule } from './stats/stats.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -42,6 +43,7 @@ import { UsersModule } from './users/users.module.js';
     ResourcesModule,
     AvailabilityModule,
     BookingsModule,
+    StatsModule,
     PaymentsModule,
     SearchModule,
     AiSearchModule,

@@ -126,6 +126,19 @@ describe('renderEmail', () => {
     expect(cancelled.text).toContain("après l'annulation de la réservation");
   });
 
+  it('déplacement : le nouvel horaire et le droit d’annuler jusqu’au début', () => {
+    const email = renderEmail(data({ kind: 'booking_moved' }));
+    expect(email.subject).toBe('Réservation déplacée : Studio A chez Studio Lumière');
+    expect(email.text).toContain(
+      'Nouvel horaire : Studio A, jeudi 15 octobre 2026 de 10:00 à 11:00.',
+    );
+    expect(email.text).toContain("remboursé intégralement jusqu'au début du créneau");
+    expect(email.text).toContain('https://creno.test/bookings/123/confirmation');
+
+    const free = renderEmail(data({ kind: 'booking_moved', paidCents: null }));
+    expect(free.text).not.toContain('remboursé');
+  });
+
   it('chaque type de notification a un sujet et un corps', () => {
     for (const kind of notificationKinds) {
       const email = renderEmail(data({ kind }));

@@ -3,9 +3,34 @@ import type { Database, DbHandle } from '@creno/db';
 import type { SendNotificationJob } from '@creno/shared';
 import { DB } from '../database/database.module.js';
 import { JobsService } from '../jobs/jobs.service.js';
-import { type NewNotification, NotificationsRepository } from './notifications.repository.js';
+import {
+  type BookingParties,
+  type NewNotification,
+  NotificationsRepository,
+} from './notifications.repository.js';
 import { SEND_QUEUE } from './notifications.queues.js';
 import { reminderInstantFor } from './reminder.js';
+
+/**
+ * Rappels de la veille (email, et SMS si le client a un numéro vérifié) pour la révision actuelle
+ * de l'horaire. Aucun si l'instant du rappel est déjà passé.
+ */
+function reminders(bookingId: string, parties: BookingParties, now: Date): NewNotification[] {
+  const reminderAt = reminderInstantFor(parties.start, now);
+  if (!reminderAt) return [];
+  const reminder = {
+    bookingId,
+    recipientId: parties.customerId,
+    kind: 'booking_reminder',
+    status: 'scheduled',
+    scheduledFor: reminderAt,
+    bookingRevision: parties.revision,
+  } as const;
+  return [
+    { ...reminder, channel: 'email' },
+    ...(parties.customerHasPhone ? [{ ...reminder, channel: 'sms' } as const] : []),
+  ];
+}
 
 /**
  * Enregistre les notifications à envoyer. Chaque méthode s'appelle DANS la transaction qui change
@@ -29,20 +54,34 @@ export class NotificationsService {
     const rows: NewNotification[] = [
       { bookingId, recipientId: parties.customerId, kind: 'booking_confirmed', channel: 'email' },
       { bookingId, recipientId: parties.ownerUserId, kind: 'booking_received', channel: 'email' },
+      ...reminders(bookingId, parties, now),
     ];
-    const reminderAt = reminderInstantFor(parties.start, now);
-    if (reminderAt) {
-      const reminder = {
-        bookingId,
-        recipientId: parties.customerId,
-        kind: 'booking_reminder',
-        status: 'scheduled',
-        scheduledFor: reminderAt,
-      } as const;
-      rows.push({ ...reminder, channel: 'email' });
-      if (parties.customerHasPhone) rows.push({ ...reminder, channel: 'sms' });
-    }
     await this.enqueue(rows, tx);
+  }
+
+  /**
+   * Horaire changé par le prestataire (révision déjà incrémentée dans la transaction appelante) :
+   * les rappels de l'ancien horaire sont fermés, puis le client est prévenu et de nouveaux rappels
+   * sont planifiés. Toujours de NOUVELLES lignes : l'id d'une ligne sert de clé d'idempotence chez
+   * Resend, une ligne recyclée ne repartirait pas.
+   */
+  async bookingRescheduled(bookingId: string, tx: Database, now = new Date()): Promise<void> {
+    const parties = await this.notifications.parties(bookingId, tx);
+    if (!parties) return;
+    await this.notifications.skipScheduledReminders(bookingId, tx);
+    await this.enqueue(
+      [
+        {
+          bookingId,
+          recipientId: parties.customerId,
+          kind: 'booking_moved',
+          channel: 'email',
+          bookingRevision: parties.revision,
+        },
+        ...reminders(bookingId, parties, now),
+      ],
+      tx,
+    );
   }
 
   /** Réservation confirmée puis annulée : le client est toujours prévenu, le prestataire s'il n'en est pas l'auteur. */

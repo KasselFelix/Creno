@@ -173,8 +173,15 @@ export class NotificationsWorker implements OnModuleInit {
         return context.bookingStatus === 'confirmed' ? null : 'booking_not_confirmed';
       case 'booking_reminder':
         if (context.bookingStatus !== 'confirmed') return 'booking_not_confirmed';
+        // Écrit pour un horaire que le prestataire a changé depuis : un autre rappel le remplace.
+        if (context.revision !== context.bookingRevision) return 'superseded';
         if (context.start <= now) return 'too_late';
         return context.channel === 'sms' && !context.recipientPhone ? 'no_phone' : null;
+      case 'booking_moved':
+        if (context.bookingStatus !== 'confirmed') return 'booking_not_confirmed';
+        // Un déplacement plus récent a son propre message, qui donne l'horaire en vigueur.
+        if (context.revision !== context.bookingRevision) return 'superseded';
+        return context.start <= now ? 'too_late' : null;
       case 'booking_cancelled':
       case 'booking_cancelled_by_provider':
         return context.bookingStatus === 'cancelled' ? null : 'booking_not_cancelled';

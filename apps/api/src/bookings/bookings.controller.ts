@@ -20,8 +20,11 @@ import {
   type CheckoutResponse,
   type CreateBookingInput,
   createBookingSchema,
+  type ProviderBooking,
+  type RescheduleBookingInput,
+  rescheduleBookingSchema,
 } from '@creno/shared';
-import { CurrentUser } from '../auth/auth.decorators.js';
+import { CurrentUser, Roles } from '../auth/auth.decorators.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { OnlyThrottle } from '../common/throttle.js';
 import { ApiZodBody, ApiZodQuery, ZodValidationPipe } from '../common/zod.js';
@@ -80,5 +83,19 @@ export class BookingsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<BookingDetail> {
     return this.bookings.cancel(user, id);
+  }
+
+  // Chaque déplacement envoie un email au client : même limite de débit que la création d'un hold.
+  @Post(':id/reschedule')
+  @HttpCode(200)
+  @Roles('provider')
+  @OnlyThrottle('bookings')
+  @ApiZodBody(rescheduleBookingSchema)
+  reschedule(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(rescheduleBookingSchema)) body: RescheduleBookingInput,
+  ): Promise<ProviderBooking> {
+    return this.bookings.reschedule(user, id, body);
   }
 }

@@ -139,6 +139,19 @@ function parts(data: MessageData): EmailParts {
         paragraphs: [`${what}, ${slot}.`],
         action: seeBooking,
       };
+    case 'booking_moved':
+      // Le message est écrit au moment de l'envoi : il donne l'horaire en vigueur, pas l'ancien.
+      return {
+        subject: `Réservation déplacée : ${what}`,
+        title: 'Votre réservation a été déplacée',
+        paragraphs: [
+          `${data.providerName} a déplacé votre réservation. Nouvel horaire : ${data.resourceName}, ${slot}.`,
+          paid
+            ? 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne et être remboursé intégralement jusqu\'au début du créneau.'
+            : 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne jusqu\'au début du créneau.',
+        ],
+        action: seeBooking,
+      };
   }
 }
 
