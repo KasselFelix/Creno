@@ -43,7 +43,9 @@ export class StatsRepository {
         JOIN providers p ON p.id = r.provider_id
         WHERE p.user_id = ${ownerUserId}
       ),
-      open_time AS (
+      -- MATERIALIZED : \`open\` sert deux fois plus bas (durée, intersection) ; sans cela, Postgres
+      -- intègre la CTE et recalcule l'ouverture à chaque usage.
+      open_time AS MATERIALIZED (
         SELECT res.id AS resource_id,
                coalesce(
                  (SELECT range_agg(
