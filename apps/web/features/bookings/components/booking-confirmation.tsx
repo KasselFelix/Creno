@@ -1,6 +1,6 @@
 'use client';
 
-import { CircleCheck, CircleSlash, Clock, LoaderCircle } from 'lucide-react';
+import { CalendarClock, CircleCheck, CircleSlash, Clock, LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { BookingDetail } from '@creno/shared';
@@ -145,6 +145,16 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
   }
   switch (booking.status) {
     case 'confirmed':
+      // Lien de l'email « réservation déplacée » : le client découvre ici le nouvel horaire.
+      if (booking.rescheduledAt) {
+        return {
+          icon: <CalendarClock aria-hidden className="text-primary size-8" />,
+          title: 'Réservation déplacée',
+          description:
+            "Le prestataire a déplacé cette réservation : l'horaire ci-dessous est le nouveau. S'il ne vous convient pas, vous pouvez l'annuler en ligne jusqu'au début du créneau.",
+          open: true,
+        };
+      }
       return {
         icon: <CircleCheck aria-hidden className="text-primary size-8" />,
         title: 'Réservation confirmée',

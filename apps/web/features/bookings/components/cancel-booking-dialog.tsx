@@ -24,6 +24,10 @@ export function CancelBookingDialog({ booking }: { booking: BookingDetail }) {
   const [open, setOpen] = useState(false);
   const cancel = useCancelBooking();
   const paid = booking.paymentStatus === 'succeeded';
+  // Une réservation déplacée par le prestataire reste annulable jusqu'à son début.
+  const cancellationWindow = booking.rescheduledAt
+    ? "Le prestataire ayant déplacé cette réservation, l'annulation en ligne est possible jusqu'au début du créneau."
+    : `L'annulation en ligne est possible jusqu'à ${FREE_CANCELLATION_HOURS} h avant le début.`;
 
   function confirm() {
     cancel.mutate(booking.id, {
@@ -51,7 +55,7 @@ export function CancelBookingDialog({ booking }: { booking: BookingDetail }) {
           <AlertDialogDescription>
             {booking.resourceName}, {dateTimeInZone(booking.start, booking.timezone)}.{' '}
             {paid
-              ? `Vous serez remboursé de ${formatPrice(booking.priceCents, booking.currency)} sur votre moyen de paiement, sous 5 à 10 jours selon votre banque. L'annulation en ligne est possible jusqu'à ${FREE_CANCELLATION_HOURS} h avant le début.`
+              ? `Vous serez remboursé de ${formatPrice(booking.priceCents, booking.currency)} sur votre moyen de paiement, sous 5 à 10 jours selon votre banque. ${cancellationWindow}`
               : 'Le créneau sera libéré pour les autres clients.'}
           </AlertDialogDescription>
         </AlertDialogHeader>

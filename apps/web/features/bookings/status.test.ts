@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BookingDetail } from '@creno/shared';
-import { bookingStatusView, isPayable } from './status';
+import { bookingStatusView, isPayable, providerBookingStatusView } from './status';
 
 const booking = (overrides: Partial<BookingDetail>): BookingDetail => ({
   id: '3f0c2f0e-6a52-4d53-9a5e-1f7f6f0c9a11',
@@ -19,6 +19,7 @@ const booking = (overrides: Partial<BookingDetail>): BookingDetail => ({
   refundedCents: 0,
   checkoutStarted: false,
   cancellableUntil: '2030-01-01T09:15:00.000Z',
+  rescheduledAt: null,
   ...overrides,
 });
 
@@ -46,5 +47,20 @@ describe('isPayable', () => {
     expect(isPayable(booking({}))).toBe(true);
     expect(isPayable(booking({ cancellableUntil: null }))).toBe(false);
     expect(isPayable(booking({ status: 'confirmed' }))).toBe(false);
+  });
+});
+
+describe('providerBookingStatusView', () => {
+  it.each([
+    [{ status: 'pending', paymentStatus: null }, 'Paiement en cours', 'waiting'],
+    [{ status: 'confirmed', paymentStatus: 'succeeded' }, 'Confirmée', 'success'],
+    [
+      { status: 'cancelled', paymentStatus: 'succeeded' },
+      'Annulée · remboursement en cours',
+      'closed',
+    ],
+    [{ status: 'cancelled', paymentStatus: null }, 'Annulée', 'closed'],
+  ] as const)('%o → %s', (overrides, label, tone) => {
+    expect(providerBookingStatusView(overrides)).toEqual({ label, tone });
   });
 });
