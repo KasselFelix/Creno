@@ -26,7 +26,8 @@ export function EventCalendarToolbar({
 
   return (
     <div className={cn('flex items-center justify-between flex-wrap gap-3', className)}>
-      <div className="flex items-center shrink-0 gap-3">
+      {/* Adapté du registre : le groupe passe à la ligne au lieu de déborder sur mobile. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
         {addButton && (
           <Button
             onClick={(event) => addButton.click?.(event.nativeEvent)}
@@ -65,7 +66,7 @@ export function EventCalendarToolbar({
             <EventCalendarNextIcon />
           </Button>
         </div>
-        <div className="text-xl">{controller.view?.title}</div>
+        <div className="text-lg sm:text-xl">{controller.view?.title}</div>
       </div>
       <Tabs value={controller.view?.type ?? availableViews[0]}>
         {/* Adapté du registre : onglets de 45 px de haut (cible tactile), comme ailleurs dans l'app. */}

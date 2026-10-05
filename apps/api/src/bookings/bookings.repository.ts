@@ -49,6 +49,7 @@ export interface BookingDetailRow extends BookingRow {
   refundedCents: number | null;
   paymentIntentId: string | null;
   rescheduledAt: Date | null;
+  rescheduleCount: number;
 }
 
 /** Une réservation vue par le prestataire : avec son client et la durée actuelle des créneaux. */
@@ -86,6 +87,7 @@ const detailColumns = {
   refundedCents: payments.refundedCents,
   paymentIntentId: payments.stripePaymentIntentId,
   rescheduledAt: bookings.rescheduledAt,
+  rescheduleCount: bookings.rescheduleCount,
 };
 
 const providerColumns = {
@@ -106,10 +108,11 @@ const upcoming = sql`upper(${bookings.during}) > now() AND (${bookings.status} =
 const history = sql`NOT (${upcoming}) AND (${bookings.status} IN ('confirmed', 'cancelled') OR ${payments.id} IS NOT NULL)`;
 
 /**
- * Ce que voit le prestataire : réservations confirmées ou annulées, et holds qui courent encore.
- * Un hold expiré est un panier abandonné : il n'apparaît jamais.
+ * Ce que voit le prestataire : réservations confirmées, réservations annulées APRÈS avoir été
+ * confirmées, et holds qui courent encore. Un hold expiré ou annulé avant paiement est un panier
+ * abandonné : il n'apparaît jamais (et son client avec).
  */
-const visibleToProvider = sql`(${bookings.status} IN ('confirmed', 'cancelled') OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`;
+const visibleToProvider = sql`(${bookings.status} = 'confirmed' OR (${bookings.status} = 'cancelled' AND ${bookings.confirmedAt} IS NOT NULL) OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`;
 
 /** Ce qui occupe un créneau : réservation confirmée, ou hold qui court encore. */
 const occupiesSlot = sql`(${bookings.status} = 'confirmed' OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`;
@@ -406,7 +409,7 @@ export class BookingsRepository {
   async confirmFree(id: string, tx: Database): Promise<boolean> {
     const rows = await tx
       .update(bookings)
-      .set({ status: 'confirmed', expiresAt: null })
+      .set({ status: 'confirmed', expiresAt: null, confirmedAt: sql`now()` })
       .where(and(eq(bookings.id, id), activeHold, eq(bookings.priceCents, 0)))
       .returning({ id: bookings.id });
     return rows.length > 0;
@@ -467,7 +470,12 @@ export class BookingsRepository {
   async confirmPaid(id: string, sessionId: string, tx: Database): Promise<void> {
     await tx
       .update(bookings)
-      .set({ status: 'confirmed', expiresAt: null, stripeCheckoutSessionId: sessionId })
+      .set({
+        status: 'confirmed',
+        expiresAt: null,
+        stripeCheckoutSessionId: sessionId,
+        confirmedAt: sql`now()`,
+      })
       .where(eq(bookings.id, id));
   }
 

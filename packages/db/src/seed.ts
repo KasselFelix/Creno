@@ -237,6 +237,7 @@ async function main(): Promise<void> {
                 customerId: customers[1]!.id,
                 during: parisRange(daysToSaturday(), slot.start, slot.end),
                 status: 'confirmed',
+                confirmedAt: new Date(),
                 priceCents: r.priceCents,
               });
             }
@@ -261,6 +262,7 @@ async function main(): Promise<void> {
           customerId: customers[0]!.id,
           during: parisRange(day, '10:00', '11:00'),
           status: 'confirmed',
+          confirmedAt: new Date(),
           priceCents: 4500,
         })
         .returning({ id: bookings.id });
@@ -281,6 +283,7 @@ async function main(): Promise<void> {
           customerId: customers[1]!.id,
           during: parisRange(day, '10:30', '11:30'),
           status: 'cancelled',
+          confirmedAt: new Date(),
           cancelledAt: new Date(),
           priceCents: 4500,
         },
@@ -309,6 +312,7 @@ async function main(): Promise<void> {
             customerId,
             during: parisRange(monday + weekday, '16:00', '17:00'),
             status: 'confirmed',
+            confirmedAt: new Date(),
             priceCents: 4500,
           },
           {
@@ -316,6 +320,7 @@ async function main(): Promise<void> {
             customerId,
             during: parisRange(monday + weekday, '11:00', '11:30'),
             status: 'confirmed',
+            confirmedAt: new Date(),
             priceCents: 6000,
           },
         );

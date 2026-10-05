@@ -95,7 +95,7 @@ export class NotificationsRepository {
 
   /**
    * Insère les notifications qui n'existent pas encore. La contrainte d'unicité (réservation, type,
-   * canal, destinataire) fait l'idempotence : un événement rejoué n'insère rien, donc ne renvoie rien.
+   * canal, destinataire, révision) fait l'idempotence : un événement rejoué n'insère rien, donc ne renvoie rien.
    */
   async insert(
     rows: NewNotification[],

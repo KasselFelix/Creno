@@ -81,6 +81,12 @@ export const checkoutResponseSchema = z.object({
 });
 export type CheckoutResponse = z.infer<typeof checkoutResponseSchema>;
 
+/**
+ * Déplacements d'une même réservation par le prestataire. Chacun envoie un email au client : sans
+ * plafond, des allers-retours épuiseraient son quota d'emails (et ses emails légitimes avec).
+ */
+export const MAX_RESCHEDULES_PER_BOOKING = 3;
+
 /** Déplacement d'une réservation par le prestataire : nouveau début, même durée. */
 export const rescheduleBookingSchema = z.object({
   /** Début d'un créneau proposé par la ressource (`GET /resources/:id/slots`). */
@@ -104,7 +110,7 @@ export const providerBookingSchema = bookingSchema.extend({
   rescheduledAt: z.iso.datetime({ offset: true }).nullable(),
   /** Dernier instant où le prestataire peut annuler ; `null` s'il ne le peut pas. */
   cancellableUntil: z.iso.datetime({ offset: true }).nullable(),
-  /** Confirmée, pas commencée, et de la durée actuelle des créneaux de la ressource. */
+  /** Confirmée, pas commencée, de la durée actuelle des créneaux, et pas déjà déplacée 3 fois. */
   reschedulable: z.boolean(),
 });
 export type ProviderBooking = z.infer<typeof providerBookingSchema>;

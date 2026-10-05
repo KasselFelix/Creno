@@ -146,59 +146,94 @@ export function BookingsTable() {
           </p>
         ) : (
           <div className="flex flex-col gap-3">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Créneau</TableHead>
-                  <TableHead>Ressource</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Statut</TableHead>
-                  <TableHead className="text-right">Montant</TableHead>
-                  <TableHead>
-                    <span className="sr-only">Actions</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bookings.data.items.map((booking) => (
-                  <TableRow key={booking.id}>
-                    <TableCell className="font-medium first-letter:uppercase">
-                      {slotLabel(booking)}
-                    </TableCell>
-                    <TableCell>{booking.resourceName}</TableCell>
-                    <TableCell>
-                      {booking.customer ? (
-                        <div className="flex flex-col">
-                          <span>{booking.customer.fullName}</span>
-                          <a
-                            href={`mailto:${booking.customer.email}`}
-                            className="text-muted-foreground underline-offset-4 hover:underline"
-                          >
-                            {booking.customer.email}
-                          </a>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">Paiement en cours</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <StatusBadge view={providerBookingStatusView(booking)} />
-                        {booking.rescheduledAt && booking.status === 'confirmed' && (
-                          <RescheduledBadge label="Déplacée" />
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {formatPrice(booking.priceCents, booking.currency)}
-                    </TableCell>
-                    <TableCell>
-                      <BookingActions booking={booking} className="flex justify-end gap-2" />
-                    </TableCell>
+            {/* Sous 768 px, des cartes : un tableau de six colonnes cacherait les actions. */}
+            <ul className="flex flex-col gap-3 md:hidden">
+              {bookings.data.items.map((booking) => (
+                <li key={booking.id} className="flex flex-col gap-3 rounded-lg border p-4">
+                  <div className="flex flex-wrap gap-2">
+                    <StatusBadge view={providerBookingStatusView(booking)} />
+                    {booking.rescheduledAt && booking.status === 'confirmed' && (
+                      <RescheduledBadge label="Déplacée" />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="font-medium first-letter:uppercase">{slotLabel(booking)}</span>
+                    <span className="text-muted-foreground">
+                      {booking.resourceName} · {formatPrice(booking.priceCents, booking.currency)}
+                    </span>
+                    {booking.customer ? (
+                      <span className="min-w-0 break-all">
+                        {booking.customer.fullName} ·{' '}
+                        <a
+                          href={`mailto:${booking.customer.email}`}
+                          className="text-muted-foreground underline-offset-4 hover:underline"
+                        >
+                          {booking.customer.email}
+                        </a>
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Paiement en cours</span>
+                    )}
+                  </div>
+                  <BookingActions booking={booking} />
+                </li>
+              ))}
+            </ul>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Créneau</TableHead>
+                    <TableHead>Ressource</TableHead>
+                    <TableHead>Client</TableHead>
+                    <TableHead>Statut</TableHead>
+                    <TableHead className="text-right">Montant</TableHead>
+                    <TableHead>
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {bookings.data.items.map((booking) => (
+                    <TableRow key={booking.id}>
+                      <TableCell className="font-medium first-letter:uppercase">
+                        {slotLabel(booking)}
+                      </TableCell>
+                      <TableCell>{booking.resourceName}</TableCell>
+                      <TableCell>
+                        {booking.customer ? (
+                          <div className="flex flex-col">
+                            <span>{booking.customer.fullName}</span>
+                            <a
+                              href={`mailto:${booking.customer.email}`}
+                              className="text-muted-foreground underline-offset-4 hover:underline"
+                            >
+                              {booking.customer.email}
+                            </a>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">Paiement en cours</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          <StatusBadge view={providerBookingStatusView(booking)} />
+                          {booking.rescheduledAt && booking.status === 'confirmed' && (
+                            <RescheduledBadge label="Déplacée" />
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatPrice(booking.priceCents, booking.currency)}
+                      </TableCell>
+                      <TableCell>
+                        <BookingActions booking={booking} className="flex justify-end gap-2" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             {pages > 1 && (
               <nav aria-label="Pagination" className="flex items-center justify-end gap-2 text-sm">
                 <Button

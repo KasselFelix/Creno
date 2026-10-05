@@ -56,7 +56,7 @@ export class StatsRepository {
                   FROM generate_series(0, 6) AS i
                   CROSS JOIN LATERAL (SELECT ${weekStart}::date + i AS day) d
                   JOIN availability_rules ar
-                    ON ar.resource_id = res.id AND ar.weekday = extract(isodow FROM d.day)
+                    ON ar.resource_id = res.id AND ar.weekday = extract(isodow FROM d.day)::int
                   CROSS JOIN LATERAL (
                     SELECT (d.day + ar.start_time) AT TIME ZONE res.timezone AS lower_at,
                            (d.day + ar.end_time) AT TIME ZONE res.timezone AS upper_at

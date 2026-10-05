@@ -19,7 +19,8 @@ import { BookingsService } from './bookings.service.js';
 @ApiTags('bookings')
 @Controller('providers/me')
 @UseGuards(ThrottlerGuard)
-@OnlyThrottle()
+// Lectures de données clients : la même limite par IP que les lectures publiques freine l'aspiration.
+@OnlyThrottle('public')
 @Roles('provider')
 export class ProviderBookingsController {
   constructor(private readonly bookings: BookingsService) {}

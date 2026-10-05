@@ -46,6 +46,10 @@ export const bookings = pgTable(
     checkoutStartedAt: timestamp('checkout_started_at', { withTimezone: true }),
     stripeCheckoutSessionId: text('stripe_checkout_session_id').unique(),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    // Date de confirmation (paiement reçu, ou réservation gratuite) : distingue une réservation
+    // confirmée puis annulée d'un hold annulé avant paiement, dont le client reste anonyme pour le
+    // prestataire.
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
     // Révision de l'horaire : +1 à chaque déplacement par le prestataire. Les notifications qui
     // dépendent de l'horaire (rappel, « réservation déplacée ») portent la révision pour laquelle
     // elles ont été écrites : une ligne d'une ancienne révision n'est plus envoyée.

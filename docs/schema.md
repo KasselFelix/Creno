@@ -101,6 +101,7 @@ erDiagram
     timestamptz checkout_started_at "paiement lancé, hold prolongé"
     text stripe_checkout_session_id UK "nullable"
     timestamptz cancelled_at "obligatoire si cancelled"
+    timestamptz confirmed_at "date de confirmation, nullable"
     int reschedule_count "révision : +1 à chaque déplacement"
     timestamptz rescheduled_at "dernier déplacement, ssi révision > 0"
   }
@@ -129,6 +130,7 @@ erDiagram
     notification_status status "scheduled | pending | sent | failed | skipped"
     timestamptz scheduled_for "instant d'envoi voulu"
     int attempts ">= 0"
+    text reason "motif de skipped / failed"
     int booking_revision "révision de la réservation visée"
     text provider_message_id "nullable"
     timestamptz sent_at "obligatoire si sent"
@@ -167,6 +169,7 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 | `0010_phone_verification.sql` (générée, ajustée)    | table `phone_verifications` ; `users.phone_verified_at`, numéros non prouvés effacés, `users_phone_unique` et CHECK                              |
 | `0011_ai_requests.sql` (générée)                    | table `ai_requests` et enum `ai_request_outcome`, CHECK de cohérence (issue ⇔ appel au modèle), index sur `created_at`                           |
 | `0012_booking_reschedule.sql` (générée)             | révision des réservations (`reschedule_count`, `rescheduled_at`), `notifications.booking_revision` dans la clé d'unicité, valeur `booking_moved` |
+| `0013_booking_confirmed_at.sql` (générée, ajustée)  | `bookings.confirmed_at`, reprise depuis les notifications `booking_confirmed`                                                                    |
 
 **Ajouter une valeur à un enum.** `ALTER TYPE … ADD VALUE` (migration 0012) est permis dans une transaction, mais la nouvelle valeur n'est utilisable qu'après le commit. Or `migrate()` de Drizzle applique **toutes** les migrations en attente dans **une seule** transaction : sur une base neuve (clone frais, CI), une migration qui citerait `'booking_moved'` en SQL (prédicat d'index, CHECK, valeur par défaut) échouerait avec « unsafe use of new value ». Aucune migration ne cite donc une valeur d'enum ajoutée par une migration de la même série ; si un jour c'est nécessaire, il faut la poser dans une valeur par défaut côté application, ou appliquer les migrations en deux fois.
 
@@ -209,7 +212,8 @@ RETURNING reschedule_count;                                             -- la no
 ```
 
 - `reschedule_count` est la **révision** de l'horaire ; `bookings_rescheduled_has_date` impose `(reschedule_count = 0) = (rescheduled_at IS NULL)`.
-- Une réservation déplacée (`rescheduled_at` non NULL) reste annulable et remboursée par le client jusqu'à son début, au lieu de 24 h avant.
+- Après un déplacement, le client a au moins 24 h pour annuler avec remboursement, sans dépasser le début (`min(début, max(début − 24 h, rescheduled_at + 24 h))`). Trois déplacements au plus par réservation.
+- `confirmed_at` (migration 0013) date la confirmation. Le prestataire ne voit une réservation annulée, et son client, que si elle avait été confirmée : un hold annulé avant paiement est un panier abandonné, son client reste anonyme. La migration reprend les lignes existantes à partir de l'email de confirmation écrit par l'outbox.
 
 ## Occupation de la semaine (dashboard)
 

@@ -92,6 +92,13 @@
       "when": 1791158960777,
       "tag": "0012_booking_reschedule",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791161324237,
+      "tag": "0013_booking_confirmed_at",
+      "breakpoints": true
     }
   ]
 }

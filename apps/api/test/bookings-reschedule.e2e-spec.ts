@@ -180,7 +180,7 @@ describe('bookings : déplacement par le prestataire', () => {
       expect(logged('booking.rescheduled')).toMatchObject([{ expiredHoldsReleased: 1 }]);
     });
 
-    it('une réservation déplacée reste annulable et remboursée par le client jusqu’à son début', async () => {
+    it('une réservation déplacée laisse au client 24 h pour annuler et être remboursé, sans dépasser le début', async () => {
       const { agent } = await registerAs(app, 'customer');
       const moved = await confirmedBooking(agent);
       const untouched = await confirmedBooking(agent, instantIn(DAY, '09:00'));
@@ -209,6 +209,43 @@ describe('bookings : déplacement par le prestataire', () => {
       await agent.post(`/v1/bookings/${moved.id}/cancel`).expect(200);
       expect((await rowOf(moved.id)).status).toBe('cancelled');
       expect(gateway.refund).toHaveBeenCalledTimes(1);
+    });
+
+    it('délai de décision écoulé (déplacée il y a 2 jours) : la règle des 24 h reprend', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await reschedule(provider.agent, booking.id, instantIn(DAY + 1, '10:00')).expect(200);
+      // Déplacée il y a 2 jours, commence dans 3 h : plus de 24 h ont passé depuis le déplacement.
+      await db()
+        .update(bookings)
+        .set({
+          rescheduledAt: sql`now() - interval '2 days'`,
+          during: sql`tstzrange(now() + interval '3 hours', now() + interval '4 hours', '[)')`,
+        })
+        .where(eq(bookings.id, booking.id));
+
+      const detail = bookingDetailSchema.parse(
+        (await agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
+      );
+      expect(detail.cancellableUntil).toBeNull();
+      expectCode(
+        await agent.post(`/v1/bookings/${booking.id}/cancel`).expect(409),
+        'CANCELLATION_NOT_ALLOWED',
+      );
+      expect(gateway.refund).not.toHaveBeenCalled();
+    });
+
+    it('déplacée il y a 1 h, commence dans 3 jours : échéance = début − 24 h (la plus tardive des deux)', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await reschedule(provider.agent, booking.id, instantIn(DAY + 1, '10:00')).expect(200);
+
+      const detail = bookingDetailSchema.parse(
+        (await agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
+      );
+      expect(new Date(detail.cancellableUntil!).getTime()).toBe(
+        new Date(detail.start).getTime() - 24 * HOUR_MS,
+      );
     });
   });
 
@@ -298,6 +335,28 @@ describe('bookings : déplacement par le prestataire', () => {
       expect((listed.body as { items: { reschedulable: boolean }[] }).items[0]!.reschedulable).toBe(
         false,
       );
+    });
+  });
+
+  describe('plafond', () => {
+    it('au-delà de 3 déplacements → 409 RESCHEDULE_NOT_ALLOWED (le quota d’emails du client est protégé)', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      for (const day of [1, 2, 3]) {
+        await reschedule(provider.agent, booking.id, instantIn(DAY + day, '10:00')).expect(200);
+      }
+
+      expectCode(
+        await reschedule(provider.agent, booking.id, instantIn(DAY + 4, '10:00')).expect(409),
+        'RESCHEDULE_NOT_ALLOWED',
+      );
+      expect((await rowOf(booking.id)).rescheduleCount).toBe(3);
+      const listed = await provider.agent.get('/v1/providers/me/bookings').expect(200);
+      expect(
+        (listed.body as { items: { id: string; reschedulable: boolean }[] }).items.find(
+          (item) => item.id === booking.id,
+        )?.reschedulable,
+      ).toBe(false);
     });
   });
 

@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { dateTimeInZone } from '@/lib/format';
 import { useBooking } from '../api';
 import { isPayable } from '../status';
 import { BookingSummary } from './booking-summary';
@@ -150,8 +151,11 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
         return {
           icon: <CalendarClock aria-hidden className="text-primary size-8" />,
           title: 'Réservation déplacée',
-          description:
-            "Le prestataire a déplacé cette réservation : l'horaire ci-dessous est le nouveau. S'il ne vous convient pas, vous pouvez l'annuler en ligne jusqu'au début du créneau.",
+          description: `Le prestataire a déplacé cette réservation : l'horaire ci-dessous est le nouveau.${
+            booking.cancellableUntil
+              ? ` S'il ne vous convient pas, vous pouvez l'annuler en ligne jusqu'au ${dateTimeInZone(booking.cancellableUntil, booking.timezone)}.`
+              : ''
+          }`,
           open: true,
         };
       }

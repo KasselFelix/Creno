@@ -100,6 +100,7 @@ describe('dashboard prestataire', () => {
       });
       const cancelled = await insertBooking(instantIn(DAY + 1, '09:00'), {
         status: 'cancelled',
+        confirmedAt: new Date(),
         cancelledAt: new Date(),
       });
       // Réservation d'un autre prestataire : jamais visible.
@@ -129,12 +130,29 @@ describe('dashboard prestataire', () => {
       expect(byId.get(cancelled)).toMatchObject({ status: 'cancelled', cancellableUntil: null });
     });
 
+    it('un hold annulé par son client avant paiement n’apparaît pas (ni son client)', async () => {
+      const held = await customer.agent
+        .post('/v1/bookings')
+        .send({ resourceId: resource.id, start: instantIn(DAY, '10:00').toISOString() })
+        .expect(201);
+      await customer.agent
+        .post(`/v1/bookings/${(held.body as { id: string }).id}/cancel`)
+        .expect(200);
+
+      const body = providerBookingListSchema.parse(
+        (await provider.agent.get('/v1/providers/me/bookings').expect(200)).body,
+      );
+      expect(body.total).toBe(0);
+      expect(JSON.stringify(body)).not.toContain(customer.user.email);
+    });
+
     it('passées, filtre de statut, filtre de ressource et pagination', async () => {
       const past = await insertBooking(new Date(Date.now() - 48 * HOUR_MS));
       await insertBooking(instantIn(DAY, '10:00'));
       await insertBooking(instantIn(DAY, '11:00'));
       await insertBooking(instantIn(DAY + 1, '10:00'), {
         status: 'cancelled',
+        confirmedAt: new Date(),
         cancelledAt: new Date(),
       });
 
@@ -179,6 +197,7 @@ describe('dashboard prestataire', () => {
       });
       await insertBooking(instantIn(DAY, '09:00'), {
         status: 'cancelled',
+        confirmedAt: new Date(),
         cancelledAt: new Date(),
       });
       await insertBooking(instantIn(DAY + 1, '09:00'), {
@@ -244,7 +263,11 @@ describe('dashboard prestataire', () => {
       // Sous la fermeture : comptée dans le CA (elle commence dans la semaine), pas dans l'occupation.
       await insertBooking(at(wednesday, '10:00'));
       // Ni annulée, ni hold, ni semaine suivante.
-      await insertBooking(at(monday, '09:00'), { status: 'cancelled', cancelledAt: new Date() });
+      await insertBooking(at(monday, '09:00'), {
+        status: 'cancelled',
+        confirmedAt: new Date(),
+        cancelledAt: new Date(),
+      });
       await insertBooking(at(monday, '11:00'), {
         status: 'pending',
         expiresAt: new Date(Date.now() + 10 * 60_000),

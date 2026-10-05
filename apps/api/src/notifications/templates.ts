@@ -147,8 +147,8 @@ function parts(data: MessageData): EmailParts {
         paragraphs: [
           `${data.providerName} a déplacé votre réservation. Nouvel horaire : ${data.resourceName}, ${slot}.`,
           paid
-            ? 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne et être remboursé intégralement jusqu\'au début du créneau.'
-            : 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne jusqu\'au début du créneau.',
+            ? 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne et être remboursé intégralement pendant au moins 24 h, sans dépasser le début du créneau.'
+            : 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne pendant au moins 24 h, sans dépasser le début du créneau.',
         ],
         action: seeBooking,
       };

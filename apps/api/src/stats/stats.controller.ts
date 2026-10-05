@@ -11,7 +11,8 @@ import { StatsService } from './stats.service.js';
 @ApiTags('stats')
 @Controller('providers/me')
 @UseGuards(ThrottlerGuard)
-@OnlyThrottle()
+// Lectures de données clients : la même limite par IP que les lectures publiques freine l'aspiration.
+@OnlyThrottle('public')
 export class StatsController {
   constructor(private readonly stats: StatsService) {}
 

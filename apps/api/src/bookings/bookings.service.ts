@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { addDays, addMinutes, subHours } from 'date-fns';
+import { addDays, addHours, addMinutes, max, min, subHours } from 'date-fns';
 import { type DbHandle, PG_DEADLOCK_DETECTED, retryOnDeadlock, sqlState } from '@creno/db';
 import {
   type Booking,
@@ -16,6 +16,7 @@ import {
   MAX_ACTIVE_HOLDS,
   MAX_ACTIVE_HOLDS_PER_RESOURCE,
   MAX_FREE_UPCOMING_BOOKINGS,
+  MAX_RESCHEDULES_PER_BOOKING,
   platformFeeCents,
   type ProviderBooking,
   type ProviderBookingList,
@@ -62,18 +63,23 @@ type Viewer = 'customer' | 'provider';
  * Dernier instant où `viewer` peut annuler, ou `null` s'il ne le peut pas.
  * Client : un hold tant qu'il court, une réservation confirmée jusqu'à 24 h avant le début.
  * Prestataire : une réservation confirmée jusqu'à son début.
- * Une réservation déplacée par le prestataire reste annulable par le client jusqu'à son début : il
- * n'a pas choisi ce nouvel horaire.
+ * Réservation déplacée par le prestataire : le client a au moins 24 h après le déplacement pour
+ * annuler (sans dépasser le début), puisqu'il n'a pas choisi ce nouvel horaire ; ensuite, la règle
+ * habituelle reprend.
  */
+function customerCancellationLimit(row: BookingDetailRow): Date {
+  const usual = subHours(row.start, FREE_CANCELLATION_HOURS);
+  if (row.rescheduledAt === null) return usual;
+  const decisionDelay = addHours(row.rescheduledAt, FREE_CANCELLATION_HOURS);
+  return min([row.start, max([usual, decisionDelay])]);
+}
+
 export function cancellableUntil(row: BookingDetailRow, viewer: Viewer, now: Date): Date | null {
   if (row.status === 'pending') {
     return viewer === 'customer' && row.holdActive ? row.expiresAt : null;
   }
   if (row.status !== 'confirmed') return null;
-  const limit =
-    viewer === 'customer' && row.rescheduledAt === null
-      ? subHours(row.start, FREE_CANCELLATION_HOURS)
-      : row.start;
+  const limit = viewer === 'customer' ? customerCancellationLimit(row) : row.start;
   return now < limit ? limit : null;
 }
 
@@ -103,7 +109,10 @@ const toProviderBooking = (row: ProviderBookingRow, now: Date): ProviderBooking 
   rescheduledAt: row.rescheduledAt?.toISOString() ?? null,
   cancellableUntil: cancellableUntil(row, 'provider', now)?.toISOString() ?? null,
   reschedulable:
-    row.status === 'confirmed' && row.start > now && durationMinutes(row) === row.slotMinutes,
+    row.status === 'confirmed' &&
+    row.start > now &&
+    durationMinutes(row) === row.slotMinutes &&
+    row.rescheduleCount < MAX_RESCHEDULES_PER_BOOKING,
 });
 
 const notFound = () => new DomainError('NOT_FOUND', 404, 'Réservation introuvable.');
@@ -280,6 +289,11 @@ export class BookingsService {
     if (row.status !== 'confirmed' || row.start <= now) {
       throw rescheduleNotAllowed(
         'Seule une réservation confirmée et pas encore commencée peut être déplacée.',
+      );
+    }
+    if (row.rescheduleCount >= MAX_RESCHEDULES_PER_BOOKING) {
+      throw rescheduleNotAllowed(
+        `Cette réservation a déjà été déplacée ${MAX_RESCHEDULES_PER_BOOKING} fois : annulez-la si le créneau ne convient plus.`,
       );
     }
     if (durationMinutes(row) !== resource.slotMinutes) {
