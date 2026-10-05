@@ -12,6 +12,7 @@ import { useMyBookings } from '../api';
 import { isPayable } from '../status';
 import { BookingStatusBadge } from './booking-status-badge';
 import { BookingSummary } from './booking-summary';
+import { RescheduledBadge } from './rescheduled-badge';
 import { CancelBookingDialog } from './cancel-booking-dialog';
 import { ResumeCheckoutButton } from './resume-checkout-button';
 
@@ -80,7 +81,10 @@ function BookingCard({ booking }: { booking: BookingDetail }) {
     <Card>
       <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-col gap-2">
-          <BookingStatusBadge booking={booking} />
+          <div className="flex flex-wrap gap-2">
+            <BookingStatusBadge booking={booking} />
+            {booking.status === 'confirmed' && booking.rescheduledAt && <RescheduledBadge />}
+          </div>
           <BookingSummary booking={booking} />
         </div>
         <div className="flex flex-col gap-2 sm:items-end">

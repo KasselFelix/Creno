@@ -55,6 +55,8 @@ export const bookingDetailSchema = bookingSchema.extend({
   checkoutStarted: z.boolean(),
   /** Dernier instant où l'appelant peut annuler ; `null` s'il ne peut plus (ou pas). */
   cancellableUntil: z.iso.datetime({ offset: true }).nullable(),
+  /** Date du dernier déplacement par le prestataire ; `null` si l'horaire n'a jamais changé. */
+  rescheduledAt: z.iso.datetime({ offset: true }).nullable(),
 });
 export type BookingDetail = z.infer<typeof bookingDetailSchema>;
 
@@ -78,3 +80,76 @@ export const checkoutResponseSchema = z.object({
   booking: bookingDetailSchema,
 });
 export type CheckoutResponse = z.infer<typeof checkoutResponseSchema>;
+
+/**
+ * Déplacements d'une même réservation par le prestataire. Chacun envoie un email au client : sans
+ * plafond, des allers-retours épuiseraient son quota d'emails (et ses emails légitimes avec).
+ */
+export const MAX_RESCHEDULES_PER_BOOKING = 3;
+
+/** Déplacement d'une réservation par le prestataire : nouveau début, même durée. */
+export const rescheduleBookingSchema = z.object({
+  /** Début d'un créneau proposé par la ressource (`GET /resources/:id/slots`). */
+  start: z.iso.datetime({ offset: true }),
+});
+export type RescheduleBookingInput = z.infer<typeof rescheduleBookingSchema>;
+
+/** Statuts visibles par le prestataire : un hold expiré (panier abandonné) n'est jamais listé. */
+export const providerBookingStatuses = ['pending', 'confirmed', 'cancelled'] as const;
+export const providerBookingStatusSchema = z.enum(providerBookingStatuses);
+
+/**
+ * Une réservation vue par le prestataire. Le client n'est connu qu'une fois la réservation
+ * confirmée : un hold (`pending`) n'expose ni le nom ni l'email de quelqu'un qui n'a pas payé.
+ */
+export const providerBookingSchema = bookingSchema.extend({
+  resourceName: z.string(),
+  timezone: z.string(),
+  customer: z.object({ fullName: z.string(), email: z.string() }).nullable(),
+  paymentStatus: paymentStatusSchema.nullable(),
+  rescheduledAt: z.iso.datetime({ offset: true }).nullable(),
+  /** Dernier instant où le prestataire peut annuler ; `null` s'il ne le peut pas. */
+  cancellableUntil: z.iso.datetime({ offset: true }).nullable(),
+  /** Confirmée, pas commencée, de la durée actuelle des créneaux, et pas déjà déplacée 3 fois. */
+  reschedulable: z.boolean(),
+});
+export type ProviderBooking = z.infer<typeof providerBookingSchema>;
+
+export const PROVIDER_BOOKINGS_PAGE_SIZE_MAX = 50;
+export const providerBookingsQuerySchema = paginationSchema.extend({
+  pageSize: z.coerce.number().int().min(1).max(PROVIDER_BOOKINGS_PAGE_SIZE_MAX).default(20),
+  scope: z.enum(bookingScopes).default('upcoming'),
+  status: providerBookingStatusSchema.optional(),
+  resourceId: z.uuid().optional(),
+});
+export type ProviderBookingsQuery = z.infer<typeof providerBookingsQuerySchema>;
+
+export const providerBookingListSchema = z.object({
+  items: z.array(providerBookingSchema),
+  total: z.number().int(),
+});
+export type ProviderBookingList = z.infer<typeof providerBookingListSchema>;
+
+/** Plage maximale d'une requête du calendrier : une vue mois de 6 semaines. */
+export const MAX_CALENDAR_RANGE_DAYS = 42;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const calendarQuerySchema = z
+  .object({
+    resourceId: z.uuid(),
+    from: z.iso.datetime({ offset: true }),
+    to: z.iso.datetime({ offset: true }),
+  })
+  .refine((v) => Date.parse(v.from) < Date.parse(v.to), {
+    error: '`from` doit précéder `to`',
+    path: ['to'],
+  })
+  .refine((v) => Date.parse(v.to) - Date.parse(v.from) <= MAX_CALENDAR_RANGE_DAYS * DAY_MS, {
+    error: `${MAX_CALENDAR_RANGE_DAYS} jours maximum`,
+    path: ['to'],
+  });
+export type CalendarQuery = z.infer<typeof calendarQuerySchema>;
+
+/** Réservations confirmées et holds actifs qui chevauchent la plage demandée. */
+export const calendarSchema = z.object({ items: z.array(providerBookingSchema) });
+export type Calendar = z.infer<typeof calendarSchema>;

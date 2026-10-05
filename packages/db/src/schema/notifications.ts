@@ -21,6 +21,9 @@ export const notificationKind = pgEnum('notification_kind', [
   'booking_cancelled_by_provider',
   'payment_refunded_late',
   'booking_reminder',
+  // Ajoutée par `ALTER TYPE … ADD VALUE` : aucune migration ne doit citer cette valeur en SQL (voir
+  // docs/schema.md, « Ajouter une valeur à un enum »).
+  'booking_moved',
 ]);
 
 export const notificationChannel = pgEnum('notification_channel', ['email', 'sms']);
@@ -52,6 +55,9 @@ export const notifications = pgTable(
     // Instant d'envoi voulu : tout de suite, sauf pour un rappel (`scheduled` jusqu'à cet instant).
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }).defaultNow().notNull(),
     attempts: integer('attempts').notNull().default(0),
+    // Révision de la réservation (`bookings.reschedule_count`) pour laquelle le message a été écrit.
+    // Seuls le rappel et « réservation déplacée » en dépendent ; les autres types restent à 0.
+    bookingRevision: integer('booking_revision').notNull().default(0),
     // Motif d'un `skipped` ou d'un `failed` : un code court, jamais le message du fournisseur.
     reason: text('reason'),
     providerMessageId: text('provider_message_id'),
@@ -60,11 +66,14 @@ export const notifications = pgTable(
   },
   (t) => [
     // Idempotence : un événement rejoué ne crée pas un second message pour le même destinataire.
-    unique('notifications_booking_kind_channel_recipient_key').on(
+    // La révision en fait partie : un déplacement crée de nouvelles lignes au lieu de recycler les
+    // anciennes, car l'id de la ligne sert de clé d'idempotence chez Resend.
+    unique('notifications_booking_kind_channel_recipient_revision_key').on(
       t.bookingId,
       t.kind,
       t.channel,
       t.recipientId,
+      t.bookingRevision,
     ),
     // Rappels dus : seules les lignes encore `scheduled` sont indexées.
     index('notifications_scheduled_for_idx')
@@ -72,6 +81,7 @@ export const notifications = pgTable(
       .where(sql`${t.status} = 'scheduled'`),
     index('notifications_recipient_id_idx').on(t.recipientId),
     check('notifications_attempts_positive', sql`${t.attempts} >= 0`),
+    check('notifications_booking_revision_positive', sql`${t.bookingRevision} >= 0`),
     check('notifications_sent_has_date', sql`${t.status} <> 'sent' OR ${t.sentAt} IS NOT NULL`),
     check(
       'notifications_closed_has_reason',

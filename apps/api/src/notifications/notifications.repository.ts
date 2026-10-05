@@ -26,6 +26,8 @@ export interface BookingParties {
   /** Utilisateur propriétaire du prestataire. */
   ownerUserId: string;
   start: Date;
+  /** Révision de l'horaire (`bookings.reschedule_count`). */
+  revision: number;
 }
 
 export interface NewNotification {
@@ -35,6 +37,8 @@ export interface NewNotification {
   channel: NotificationChannel;
   status?: 'pending' | 'scheduled';
   scheduledFor?: Date;
+  /** Révision de la réservation pour laquelle le message est écrit (0 par défaut). */
+  bookingRevision?: number;
 }
 
 /** Une notification avec tout ce qu'il faut pour l'écrire et l'adresser. Jamais loggué en entier. */
@@ -44,6 +48,10 @@ export interface SendContext {
   recipientId: string;
   kind: NotificationKind;
   channel: NotificationChannel;
+  /** Révision pour laquelle la notification a été écrite. */
+  revision: number;
+  /** Révision actuelle de la réservation : un déplacement l'a peut-être fait avancer depuis. */
+  bookingRevision: number;
   recipientEmail: string;
   recipientPhone: string | null;
   recipientName: string;
@@ -75,6 +83,7 @@ export class NotificationsRepository {
         customerHasPhone: isNotNull(users.phone).mapWith(Boolean),
         ownerUserId: providers.userId,
         start: sql<Date>`lower(${bookings.during})`.mapWith(bookings.createdAt),
+        revision: bookings.rescheduleCount,
       })
       .from(bookings)
       .innerJoin(users, eq(users.id, bookings.customerId))
@@ -86,7 +95,7 @@ export class NotificationsRepository {
 
   /**
    * Insère les notifications qui n'existent pas encore. La contrainte d'unicité (réservation, type,
-   * canal, destinataire) fait l'idempotence : un événement rejoué n'insère rien, donc ne renvoie rien.
+   * canal, destinataire, révision) fait l'idempotence : un événement rejoué n'insère rien, donc ne renvoie rien.
    */
   async insert(
     rows: NewNotification[],
@@ -98,6 +107,26 @@ export class NotificationsRepository {
       .values(rows)
       .onConflictDoNothing()
       .returning({ id: notifications.id, status: notifications.status });
+  }
+
+  /**
+   * Ferme les rappels pas encore libérés d'une réservation dont l'horaire vient de changer : ils
+   * visaient l'ancien horaire. Un rappel déjà libéré (`pending`) est écarté par le worker, qui
+   * compare les révisions. Renvoie le nombre de rappels fermés.
+   */
+  async skipScheduledReminders(bookingId: string, tx: Database): Promise<number> {
+    const rows = await tx
+      .update(notifications)
+      .set({ status: 'skipped', reason: 'rescheduled' })
+      .where(
+        and(
+          eq(notifications.bookingId, bookingId),
+          eq(notifications.kind, 'booking_reminder'),
+          eq(notifications.status, 'scheduled'),
+        ),
+      )
+      .returning({ id: notifications.id });
+    return rows.length;
   }
 
   /**
@@ -173,6 +202,8 @@ export class NotificationsRepository {
         recipientId: notifications.recipientId,
         kind: notifications.kind,
         channel: notifications.channel,
+        revision: notifications.bookingRevision,
+        bookingRevision: bookings.rescheduleCount,
         recipientEmail: recipient.email,
         recipientPhone: recipient.phone,
         recipientName: recipient.fullName,

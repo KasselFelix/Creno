@@ -237,6 +237,7 @@ async function main(): Promise<void> {
                 customerId: customers[1]!.id,
                 during: parisRange(daysToSaturday(), slot.start, slot.end),
                 status: 'confirmed',
+                confirmedAt: new Date(),
                 priceCents: r.priceCents,
               });
             }
@@ -261,6 +262,7 @@ async function main(): Promise<void> {
           customerId: customers[0]!.id,
           during: parisRange(day, '10:00', '11:00'),
           status: 'confirmed',
+          confirmedAt: new Date(),
           priceCents: 4500,
         })
         .returning({ id: bookings.id });
@@ -281,6 +283,7 @@ async function main(): Promise<void> {
           customerId: customers[1]!.id,
           during: parisRange(day, '10:30', '11:30'),
           status: 'cancelled',
+          confirmedAt: new Date(),
           cancelledAt: new Date(),
           priceCents: 4500,
         },
@@ -294,10 +297,39 @@ async function main(): Promise<void> {
           priceCents: 4500,
         },
       ]);
+
+      // Semaine en cours du Studio Lumière (jours passés compris) : le dashboard prestataire
+      // affiche une occupation et un CA non nuls. Sans paiement : une annulation de démo n'a
+      // rien à rembourser chez Stripe, donc elle aboutit.
+      const [, portrait] = resourceIds;
+      const monday = -((parisWeekdayIn(0) + 6) % 7);
+      const currentWeek: PgInsertValue<typeof bookings>[] = [];
+      for (let weekday = 0; weekday < 5; weekday++) {
+        const customerId = customers[weekday % 2]!.id;
+        currentWeek.push(
+          {
+            resourceId: studioA!,
+            customerId,
+            during: parisRange(monday + weekday, '16:00', '17:00'),
+            status: 'confirmed',
+            confirmedAt: new Date(),
+            priceCents: 4500,
+          },
+          {
+            resourceId: portrait!,
+            customerId,
+            during: parisRange(monday + weekday, '11:00', '11:30'),
+            status: 'confirmed',
+            confirmedAt: new Date(),
+            priceCents: 6000,
+          },
+        );
+      }
+      await tx.insert(bookings).values(currentWeek);
     });
 
     process.stdout.write(
-      `${JSON.stringify({ level: 'info', event: 'db.seeded', providers: providerSeeds.length, resources: providerSeeds.reduce((n, p) => n + p.resources.length, 0), bookings: 3 + fullSaturday.length })}\n`,
+      `${JSON.stringify({ level: 'info', event: 'db.seeded', providers: providerSeeds.length, resources: providerSeeds.reduce((n, p) => n + p.resources.length, 0), bookings: 3 + 10 + fullSaturday.length })}\n`,
     );
   } finally {
     await pool.end();

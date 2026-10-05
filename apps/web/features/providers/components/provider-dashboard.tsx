@@ -16,6 +16,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { UpcomingBookings } from '@/features/dashboard/components/upcoming-bookings';
+import { WeekStats } from '@/features/dashboard/components/week-stats';
 import { PaymentsCard, type StripeReturn } from '@/features/payments/components/payments-card';
 import { formatDuration, formatPrice } from '@/lib/format';
 import { useMyProvider, useMyResources } from '../api';
@@ -63,6 +65,8 @@ export function ProviderDashboard({ stripeReturn }: { stripeReturn: StripeReturn
   }
   return (
     <>
+      <WeekStats />
+      <UpcomingBookings />
       <ProfileCard provider={provider.data} />
       <PaymentsCard stripeReturn={stripeReturn} />
       <ResourcesCard />

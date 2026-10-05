@@ -1,6 +1,6 @@
 'use client';
 
-import { CircleCheck, CircleSlash, Clock, LoaderCircle } from 'lucide-react';
+import { CalendarClock, CircleCheck, CircleSlash, Clock, LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { BookingDetail } from '@creno/shared';
@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { dateTimeInZone } from '@/lib/format';
 import { useBooking } from '../api';
 import { isPayable } from '../status';
 import { BookingSummary } from './booking-summary';
@@ -145,6 +146,19 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
   }
   switch (booking.status) {
     case 'confirmed':
+      // Lien de l'email « réservation déplacée » : le client découvre ici le nouvel horaire.
+      if (booking.rescheduledAt) {
+        return {
+          icon: <CalendarClock aria-hidden className="text-primary size-8" />,
+          title: 'Réservation déplacée',
+          description: `Le prestataire a déplacé cette réservation : l'horaire ci-dessous est le nouveau.${
+            booking.cancellableUntil
+              ? ` S'il ne vous convient pas, vous pouvez l'annuler en ligne jusqu'au ${dateTimeInZone(booking.cancellableUntil, booking.timezone)}.`
+              : ''
+          }`,
+          open: true,
+        };
+      }
       return {
         icon: <CircleCheck aria-hidden className="text-primary size-8" />,
         title: 'Réservation confirmée',

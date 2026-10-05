@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { SiteHeader } from '@/components/site-header';
 import { ProviderDashboard } from '@/features/providers/components/provider-dashboard';
 import { getCurrentUser } from '@/lib/api/server';
 
@@ -20,14 +19,11 @@ export default async function DashboardPage({
 
   return (
     <>
-      <SiteHeader />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-10">
-        <h1 className="text-3xl font-semibold tracking-tight">Espace prestataire</h1>
-        {/* `?stripe=` : posé par Stripe au retour du formulaire d'inscription du prestataire. */}
-        <ProviderDashboard
-          stripeReturn={stripe === 'return' || stripe === 'refresh' ? stripe : null}
-        />
-      </main>
+      <h1 className="text-3xl font-semibold tracking-tight">Espace prestataire</h1>
+      {/* `?stripe=` : posé par Stripe au retour du formulaire d'inscription du prestataire. */}
+      <ProviderDashboard
+        stripeReturn={stripe === 'return' || stripe === 'refresh' ? stripe : null}
+      />
     </>
   );
 }

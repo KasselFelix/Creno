@@ -3,7 +3,7 @@
 import { LoaderCircle } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { type BookingDetail, FREE_CANCELLATION_HOURS } from '@creno/shared';
+import type { BookingDetail } from '@creno/shared';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -24,6 +24,10 @@ export function CancelBookingDialog({ booking }: { booking: BookingDetail }) {
   const [open, setOpen] = useState(false);
   const cancel = useCancelBooking();
   const paid = booking.paymentStatus === 'succeeded';
+  // L'échéance vient de l'API : 24 h avant le début, ou plus tard si le prestataire a déplacé la réservation.
+  const cancellationWindow = booking.cancellableUntil
+    ? `L'annulation en ligne est possible jusqu'au ${dateTimeInZone(booking.cancellableUntil, booking.timezone)}.`
+    : '';
 
   function confirm() {
     cancel.mutate(booking.id, {
@@ -51,7 +55,7 @@ export function CancelBookingDialog({ booking }: { booking: BookingDetail }) {
           <AlertDialogDescription>
             {booking.resourceName}, {dateTimeInZone(booking.start, booking.timezone)}.{' '}
             {paid
-              ? `Vous serez remboursé de ${formatPrice(booking.priceCents, booking.currency)} sur votre moyen de paiement, sous 5 à 10 jours selon votre banque. L'annulation en ligne est possible jusqu'à ${FREE_CANCELLATION_HOURS} h avant le début.`
+              ? `Vous serez remboursé de ${formatPrice(booking.priceCents, booking.currency)} sur votre moyen de paiement, sous 5 à 10 jours selon votre banque. ${cancellationWindow}`
               : 'Le créneau sera libéré pour les autres clients.'}
           </AlertDialogDescription>
         </AlertDialogHeader>

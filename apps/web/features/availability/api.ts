@@ -75,12 +75,13 @@ export function useDeleteException(resourceId: string) {
 }
 
 /** Créneaux d'une ressource entre deux dates locales (incluses). */
-export function useSlots(resourceId: string, from: string, to: string) {
+export function useSlots(resourceId: string, from: string, to: string, { enabled = true } = {}) {
   return useQuery({
     queryKey: availabilityKeys.slots(resourceId, from, to),
     queryFn: () =>
       apiFetch(`/v1/resources/${resourceId}/slots?from=${from}&to=${to}`, {
         schema: slotsResponseSchema,
       }),
+    enabled,
   });
 }

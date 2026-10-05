@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { SiteHeader } from '@/components/site-header';
 import { BackToDashboard, ResourceEditor } from '@/features/resources/components/resource-editor';
 import { getCurrentUser } from '@/lib/api/server';
 
@@ -13,12 +12,9 @@ export default async function ResourcePage({ params }: { params: Promise<{ id: s
   if (user.role !== 'provider') redirect('/account');
 
   return (
-    <>
-      <SiteHeader />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-10">
-        <BackToDashboard />
-        <ResourceEditor resourceId={id} />
-      </main>
-    </>
+    <div className="flex w-full max-w-3xl flex-col gap-6">
+      <BackToDashboard />
+      <ResourceEditor resourceId={id} />
+    </div>
   );
 }

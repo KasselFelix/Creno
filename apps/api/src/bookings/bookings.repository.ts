@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull, lt, sql } from 'drizzle-orm';
 import {
   bookings,
   type Database,
@@ -15,7 +15,9 @@ import {
   type BookingStatus,
   CHECKOUT_MINUTES,
   HOLD_MINUTES,
+  MAX_RESCHEDULES_PER_BOOKING,
   type PaymentStatus,
+  type ProviderBookingsQuery,
 } from '@creno/shared';
 import type { Interval } from '../availability/slots.engine.js';
 import { DB } from '../database/database.module.js';
@@ -47,6 +49,15 @@ export interface BookingDetailRow extends BookingRow {
   paymentStatus: PaymentStatus | null;
   refundedCents: number | null;
   paymentIntentId: string | null;
+  rescheduledAt: Date | null;
+  rescheduleCount: number;
+}
+
+/** Une réservation vue par le prestataire : avec son client et la durée actuelle des créneaux. */
+export interface ProviderBookingRow extends BookingDetailRow {
+  customerName: string;
+  customerEmail: string;
+  slotMinutes: number;
 }
 
 const bookingColumns = {
@@ -76,6 +87,15 @@ const detailColumns = {
   paymentStatus: payments.status,
   refundedCents: payments.refundedCents,
   paymentIntentId: payments.stripePaymentIntentId,
+  rescheduledAt: bookings.rescheduledAt,
+  rescheduleCount: bookings.rescheduleCount,
+};
+
+const providerColumns = {
+  ...detailColumns,
+  customerName: users.fullName,
+  customerEmail: users.email,
+  slotMinutes: resources.slotMinutes,
 };
 
 /** Hold dont l'échéance n'est pas passée. */
@@ -87,6 +107,16 @@ const activeHold = and(eq(bookings.status, 'pending'), sql`${bookings.expiresAt}
  */
 const upcoming = sql`upper(${bookings.during}) > now() AND (${bookings.status} = 'confirmed' OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`;
 const history = sql`NOT (${upcoming}) AND (${bookings.status} IN ('confirmed', 'cancelled') OR ${payments.id} IS NOT NULL)`;
+
+/**
+ * Ce que voit le prestataire : réservations confirmées, réservations annulées APRÈS avoir été
+ * confirmées, et holds qui courent encore. Un hold expiré ou annulé avant paiement est un panier
+ * abandonné : il n'apparaît jamais (et son client avec).
+ */
+const visibleToProvider = sql`(${bookings.status} = 'confirmed' OR (${bookings.status} = 'cancelled' AND ${bookings.confirmedAt} IS NOT NULL) OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`;
+
+/** Ce qui occupe un créneau : réservation confirmée, ou hold qui court encore. */
+const occupiesSlot = sql`(${bookings.status} = 'confirmed' OR (${bookings.status} = 'pending' AND ${bookings.expiresAt} > now()))`;
 
 @Injectable()
 export class BookingsRepository {
@@ -224,6 +254,113 @@ export class BookingsRepository {
     return { rows, total: totals?.total ?? 0 };
   }
 
+  private providerDetails(db: Database) {
+    return db
+      .select(providerColumns)
+      .from(bookings)
+      .innerJoin(users, eq(users.id, bookings.customerId))
+      .innerJoin(resources, eq(resources.id, bookings.resourceId))
+      .innerJoin(providers, eq(providers.id, resources.providerId))
+      .leftJoin(payments, eq(payments.bookingId, bookings.id));
+  }
+
+  async findForProvider(id: string): Promise<ProviderBookingRow | undefined> {
+    const [row] = await this.providerDetails(this.handle.db).where(eq(bookings.id, id));
+    return row;
+  }
+
+  /**
+   * Réservations des ressources d'un prestataire, une page à la fois. « À venir » : créneau pas
+   * terminé, du plus proche au plus lointain ; « passées » : l'inverse.
+   */
+  async listForProvider(
+    ownerUserId: string,
+    { scope, status, resourceId, page, pageSize }: ProviderBookingsQuery,
+  ): Promise<{ rows: ProviderBookingRow[]; total: number }> {
+    const where = and(
+      eq(providers.userId, ownerUserId),
+      visibleToProvider,
+      scope === 'upcoming'
+        ? sql`upper(${bookings.during}) > now()`
+        : sql`upper(${bookings.during}) <= now()`,
+      status ? eq(bookings.status, status) : undefined,
+      resourceId ? eq(bookings.resourceId, resourceId) : undefined,
+    );
+    const start = sql`lower(${bookings.during})`;
+    const [rows, [totals]] = await Promise.all([
+      this.providerDetails(this.handle.db)
+        .where(where)
+        .orderBy(scope === 'upcoming' ? asc(start) : desc(start), asc(bookings.id))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize),
+      this.handle.db
+        .select({ total: count() })
+        .from(bookings)
+        .innerJoin(resources, eq(resources.id, bookings.resourceId))
+        .innerJoin(providers, eq(providers.id, resources.providerId))
+        .where(where),
+    ]);
+    return { rows, total: totals?.total ?? 0 };
+  }
+
+  /** Réservations confirmées et holds actifs d'une ressource qui chevauchent la plage. */
+  async calendarOf(resourceId: string, range: Interval): Promise<ProviderBookingRow[]> {
+    return this.providerDetails(this.handle.db)
+      .where(
+        and(
+          eq(bookings.resourceId, resourceId),
+          occupiesSlot,
+          sql`${bookings.during} && ${toRange(range.start, range.end)}::tstzrange`,
+        ),
+      )
+      .orderBy(asc(sql`lower(${bookings.during})`));
+  }
+
+  /**
+   * Verrouille la réservation avant de la déplacer : une annulation concurrente attend la fin de
+   * la transaction, et le statut relu ici est celui qui sera modifié.
+   */
+  async lockForReschedule(
+    id: string,
+    tx: Database,
+  ): Promise<{ status: BookingStatus; start: Date } | undefined> {
+    const [row] = await tx
+      .select({
+        status: bookings.status,
+        start: sql<Date>`lower(${bookings.during})`.mapWith(bookings.createdAt),
+      })
+      .from(bookings)
+      .where(eq(bookings.id, id))
+      .for('update');
+    return row;
+  }
+
+  /**
+   * Déplace une réservation confirmée et fait avancer sa révision. C'est la contrainte
+   * `bookings_no_overlap` qui refuse un créneau déjà occupé (23P01), comme pour un INSERT.
+   * Renvoie la nouvelle révision, ou `undefined` si la réservation n'est plus confirmée ou a atteint
+   * le plafond de déplacements.
+   */
+  async reschedule(id: string, slot: Interval, tx: Database): Promise<number | undefined> {
+    const [row] = await tx
+      .update(bookings)
+      .set({
+        during: toRange(slot.start, slot.end),
+        rescheduleCount: sql`${bookings.rescheduleCount} + 1`,
+        rescheduledAt: sql`now()`,
+      })
+      // Plafond revérifié ici, sous verrou : deux déplacements simultanés ne le dépassent pas.
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.status, 'confirmed'),
+          lt(bookings.rescheduleCount, MAX_RESCHEDULES_PER_BOOKING),
+        ),
+      )
+      .returning({ revision: bookings.rescheduleCount });
+    return row?.revision;
+  }
+
   /** Email du client, transmis à Stripe pour préremplir la page de paiement. Jamais loggué. */
   async customerEmail(customerId: string): Promise<string | undefined> {
     const [row] = await this.handle.db
@@ -281,7 +418,7 @@ export class BookingsRepository {
   async confirmFree(id: string, tx: Database): Promise<boolean> {
     const rows = await tx
       .update(bookings)
-      .set({ status: 'confirmed', expiresAt: null })
+      .set({ status: 'confirmed', expiresAt: null, confirmedAt: sql`now()` })
       .where(and(eq(bookings.id, id), activeHold, eq(bookings.priceCents, 0)))
       .returning({ id: bookings.id });
     return rows.length > 0;
@@ -342,7 +479,12 @@ export class BookingsRepository {
   async confirmPaid(id: string, sessionId: string, tx: Database): Promise<void> {
     await tx
       .update(bookings)
-      .set({ status: 'confirmed', expiresAt: null, stripeCheckoutSessionId: sessionId })
+      .set({
+        status: 'confirmed',
+        expiresAt: null,
+        stripeCheckoutSessionId: sessionId,
+        confirmedAt: sql`now()`,
+      })
       .where(eq(bookings.id, id));
   }
 

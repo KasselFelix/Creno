@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { addDays, addMinutes, subHours } from 'date-fns';
+import { addDays, addHours, addMinutes, max, min, subHours } from 'date-fns';
 import { type DbHandle, PG_DEADLOCK_DETECTED, retryOnDeadlock, sqlState } from '@creno/db';
 import {
   type Booking,
@@ -7,6 +7,8 @@ import {
   type BookingDetail,
   type BookingList,
   type BookingsQuery,
+  type Calendar,
+  type CalendarQuery,
   type CheckoutResponse,
   type CreateBookingInput,
   FREE_CANCELLATION_HOURS,
@@ -14,7 +16,12 @@ import {
   MAX_ACTIVE_HOLDS,
   MAX_ACTIVE_HOLDS_PER_RESOURCE,
   MAX_FREE_UPCOMING_BOOKINGS,
+  MAX_RESCHEDULES_PER_BOOKING,
   platformFeeCents,
+  type ProviderBooking,
+  type ProviderBookingList,
+  type ProviderBookingsQuery,
+  type RescheduleBookingInput,
 } from '@creno/shared';
 import type { AuthUser } from '../auth/auth.types.js';
 import { AvailabilityService } from '../availability/availability.service.js';
@@ -35,6 +42,7 @@ import {
   type BookingDetailRow,
   type BookingRow,
   BookingsRepository,
+  type ProviderBookingRow,
 } from './bookings.repository.js';
 
 const toBooking = (row: BookingRow): Booking => ({
@@ -55,13 +63,23 @@ type Viewer = 'customer' | 'provider';
  * Dernier instant où `viewer` peut annuler, ou `null` s'il ne le peut pas.
  * Client : un hold tant qu'il court, une réservation confirmée jusqu'à 24 h avant le début.
  * Prestataire : une réservation confirmée jusqu'à son début.
+ * Réservation déplacée par le prestataire : le client a au moins 24 h après le déplacement pour
+ * annuler (sans dépasser le début), puisqu'il n'a pas choisi ce nouvel horaire ; ensuite, la règle
+ * habituelle reprend.
  */
+function customerCancellationLimit(row: BookingDetailRow): Date {
+  const usual = subHours(row.start, FREE_CANCELLATION_HOURS);
+  if (row.rescheduledAt === null) return usual;
+  const decisionDelay = addHours(row.rescheduledAt, FREE_CANCELLATION_HOURS);
+  return min([row.start, max([usual, decisionDelay])]);
+}
+
 export function cancellableUntil(row: BookingDetailRow, viewer: Viewer, now: Date): Date | null {
   if (row.status === 'pending') {
     return viewer === 'customer' && row.holdActive ? row.expiresAt : null;
   }
   if (row.status !== 'confirmed') return null;
-  const limit = viewer === 'customer' ? subHours(row.start, FREE_CANCELLATION_HOURS) : row.start;
+  const limit = viewer === 'customer' ? customerCancellationLimit(row) : row.start;
   return now < limit ? limit : null;
 }
 
@@ -75,6 +93,26 @@ const toDetail = (row: BookingDetailRow, viewer: Viewer, now = new Date()): Book
   refundedCents: row.refundedCents ?? 0,
   checkoutStarted: row.checkoutStartedAt !== null,
   cancellableUntil: cancellableUntil(row, viewer, now)?.toISOString() ?? null,
+  rescheduledAt: row.rescheduledAt?.toISOString() ?? null,
+});
+
+const durationMinutes = (row: BookingRow) => (row.end.getTime() - row.start.getTime()) / 60_000;
+
+const toProviderBooking = (row: ProviderBookingRow, now: Date): ProviderBooking => ({
+  ...toBooking(row),
+  resourceName: row.resourceName,
+  timezone: row.timezone,
+  // Un hold n'expose pas son client : quelqu'un qui n'a pas (encore) payé reste anonyme.
+  customer:
+    row.status === 'pending' ? null : { fullName: row.customerName, email: row.customerEmail },
+  paymentStatus: row.paymentStatus,
+  rescheduledAt: row.rescheduledAt?.toISOString() ?? null,
+  cancellableUntil: cancellableUntil(row, 'provider', now)?.toISOString() ?? null,
+  reschedulable:
+    row.status === 'confirmed' &&
+    row.start > now &&
+    durationMinutes(row) === row.slotMinutes &&
+    row.rescheduleCount < MAX_RESCHEDULES_PER_BOOKING,
 });
 
 const notFound = () => new DomainError('NOT_FOUND', 404, 'Réservation introuvable.');
@@ -92,6 +130,12 @@ const paymentsNotReady = () =>
   );
 const cancellationNotAllowed = (message: string) =>
   new DomainError('CANCELLATION_NOT_ALLOWED', 409, message);
+const rescheduleNotAllowed = (message: string) =>
+  new DomainError('RESCHEDULE_NOT_ALLOWED', 409, message);
+const slotNotOffered = () =>
+  new DomainError('SLOT_NOT_OFFERED', 422, "Ce créneau n'est pas proposé par cette ressource.");
+const slotUnavailable = () =>
+  new DomainError('SLOT_UNAVAILABLE', 409, "Ce créneau n'est plus disponible.");
 
 @Injectable()
 export class BookingsService {
@@ -119,8 +163,7 @@ export class BookingsService {
     const start = new Date(input.start);
     const slot = { start, end: addMinutes(start, resource.slotMinutes) };
 
-    const notOffered = () =>
-      new DomainError('SLOT_NOT_OFFERED', 422, "Ce créneau n'est pas proposé par cette ressource.");
+    const notOffered = slotNotOffered;
     // Écarte tout de suite une date passée ou lointaine, avant le moindre calcul (dates extrêmes).
     const now = new Date();
     if (start <= now || start > addDays(now, BOOKING_HORIZON_DAYS + 1)) throw notOffered();
@@ -198,10 +241,121 @@ export class BookingsService {
           resourceId: resource.id,
           sqlState: state,
         });
-        throw new DomainError('SLOT_UNAVAILABLE', 409, "Ce créneau n'est plus disponible.");
+        throw slotUnavailable();
       }
       throw mapPgError(error) ?? error;
     }
+  }
+
+  /** Réservations des ressources du prestataire connecté (tableau du dashboard). */
+  async listForProvider(
+    current: AuthUser,
+    query: ProviderBookingsQuery,
+  ): Promise<ProviderBookingList> {
+    if (query.resourceId) await this.resources.requireOwned(current, query.resourceId);
+    const { rows, total } = await this.bookings.listForProvider(current.id, query);
+    const now = new Date();
+    return { items: rows.map((row) => toProviderBooking(row, now)), total };
+  }
+
+  /** Réservations confirmées et holds actifs d'une ressource du prestataire, sur une plage. */
+  async calendar(current: AuthUser, query: CalendarQuery): Promise<Calendar> {
+    await this.resources.requireOwned(current, query.resourceId);
+    const rows = await this.bookings.calendarOf(query.resourceId, {
+      start: new Date(query.from),
+      end: new Date(query.to),
+    });
+    const now = new Date();
+    return { items: rows.map((row) => toProviderBooking(row, now)) };
+  }
+
+  /**
+   * Déplace une réservation confirmée vers un autre créneau de la même ressource (même durée).
+   * Le client est prévenu par email ; le paiement ne change pas.
+   *
+   * Comme pour la création, ce n'est pas un contrôle applicatif qui empêche de déplacer sur un
+   * créneau pris : c'est la contrainte `bookings_no_overlap`, vérifiée au moment de l'UPDATE.
+   */
+  async reschedule(
+    current: AuthUser,
+    id: string,
+    input: RescheduleBookingInput,
+  ): Promise<ProviderBooking> {
+    const row = await this.bookings.findDetail(id);
+    if (!row) throw notFound();
+    // Propriété : la ressource de la réservation doit appartenir au prestataire connecté.
+    const resource = await this.resources.requireOwned(current, row.resourceId);
+    const now = new Date();
+    if (row.status !== 'confirmed' || row.start <= now) {
+      throw rescheduleNotAllowed(
+        'Seule une réservation confirmée et pas encore commencée peut être déplacée.',
+      );
+    }
+    if (row.rescheduleCount >= MAX_RESCHEDULES_PER_BOOKING) {
+      throw rescheduleNotAllowed(
+        `Cette réservation a déjà été déplacée ${MAX_RESCHEDULES_PER_BOOKING} fois : annulez-la si le créneau ne convient plus.`,
+      );
+    }
+    if (durationMinutes(row) !== resource.slotMinutes) {
+      throw rescheduleNotAllowed(
+        'La durée des créneaux de cette ressource a changé depuis cette réservation : annulez-la plutôt.',
+      );
+    }
+    const start = new Date(input.start);
+    if (start.getTime() === row.start.getTime()) return this.providerView(id);
+    if (start <= now || start > addDays(now, BOOKING_HORIZON_DAYS + 1)) throw slotNotOffered();
+    if (!(await this.availability.isOffered(resource, start, now))) throw slotNotOffered();
+
+    const slot = { start, end: addMinutes(start, resource.slotMinutes) };
+    let attempts = 0;
+    try {
+      const { revision, released } = await retryOnDeadlock(() => {
+        attempts += 1;
+        return this.handle.db.transaction(async (tx) => {
+          // Relu sous verrou : une annulation a pu passer depuis la lecture ci-dessus.
+          const locked = await this.bookings.lockForReschedule(id, tx);
+          if (locked?.status !== 'confirmed' || locked.start <= new Date()) {
+            throw rescheduleNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
+          }
+          const released = await this.bookings.expireOverlappingHolds(resource.id, slot, tx);
+          const revision = await this.bookings.reschedule(id, slot, tx);
+          if (revision === undefined) {
+            throw rescheduleNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
+          }
+          await this.notifications.bookingRescheduled(id, tx, now);
+          return { revision, released };
+        });
+      });
+      if (attempts > 1) this.logDeadlockRetry(resource.id, attempts);
+      this.logger.log({
+        event: 'booking.rescheduled',
+        bookingId: id,
+        resourceId: resource.id,
+        revision,
+        expiredHoldsReleased: released,
+      });
+    } catch (error) {
+      if (attempts > 1) this.logDeadlockRetry(resource.id, attempts);
+      if (error instanceof DomainError) throw error;
+      const state = sqlState(error);
+      if (state === '23P01' || state === PG_DEADLOCK_DETECTED) {
+        this.logger.log({
+          event: 'booking.slot_conflict',
+          resourceId: resource.id,
+          sqlState: state,
+          operation: 'reschedule',
+        });
+        throw slotUnavailable();
+      }
+      throw mapPgError(error) ?? error;
+    }
+    return this.providerView(id);
+  }
+
+  private async providerView(id: string): Promise<ProviderBooking> {
+    const row = await this.bookings.findForProvider(id);
+    if (!row) throw notFound();
+    return toProviderBooking(row, new Date());
   }
 
   async listMine(current: AuthUser, query: BookingsQuery): Promise<BookingList> {
