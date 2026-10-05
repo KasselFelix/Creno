@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull, lt, sql } from 'drizzle-orm';
 import {
   bookings,
   type Database,
@@ -15,6 +15,7 @@ import {
   type BookingStatus,
   CHECKOUT_MINUTES,
   HOLD_MINUTES,
+  MAX_RESCHEDULES_PER_BOOKING,
   type PaymentStatus,
   type ProviderBookingsQuery,
 } from '@creno/shared';
@@ -337,7 +338,8 @@ export class BookingsRepository {
   /**
    * Déplace une réservation confirmée et fait avancer sa révision. C'est la contrainte
    * `bookings_no_overlap` qui refuse un créneau déjà occupé (23P01), comme pour un INSERT.
-   * Renvoie la nouvelle révision, ou `undefined` si la réservation n'est plus confirmée.
+   * Renvoie la nouvelle révision, ou `undefined` si la réservation n'est plus confirmée ou a atteint
+   * le plafond de déplacements.
    */
   async reschedule(id: string, slot: Interval, tx: Database): Promise<number | undefined> {
     const [row] = await tx
@@ -347,7 +349,14 @@ export class BookingsRepository {
         rescheduleCount: sql`${bookings.rescheduleCount} + 1`,
         rescheduledAt: sql`now()`,
       })
-      .where(and(eq(bookings.id, id), eq(bookings.status, 'confirmed')))
+      // Plafond revérifié ici, sous verrou : deux déplacements simultanés ne le dépassent pas.
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.status, 'confirmed'),
+          lt(bookings.rescheduleCount, MAX_RESCHEDULES_PER_BOOKING),
+        ),
+      )
       .returning({ revision: bookings.rescheduleCount });
     return row?.revision;
   }
