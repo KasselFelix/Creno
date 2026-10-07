@@ -23,9 +23,9 @@ Creno doit être en ligne comme démo publique de portfolio : API NestJS, Postgr
 
 **Un job de migration** (Container Apps Job, même image que l'API) lancé par la CI avant chaque mise à jour : migrations Drizzle, schéma `pgboss` (l'API démarre pg-boss avec `migrate: false`), rôle applicatif, seed de démo sur une base vide. Il tourne sous un verrou consultatif Postgres. Le même `migrateAll` sert en dev (`pnpm db:migrate`) et dans le setup des tests : le chemin de production est exercé à chaque `pnpm test`.
 
-**Secrets dans Key Vault**, lus par l'API et le job via une identité managée (références Key Vault de Container Apps) ; aucun secret dans le Bicep ni dans les paramètres.
+**Secrets dans deux Key Vault**, lus via des identités managées (références Key Vault de Container Apps) : celui de l'API, et celui de la migration (URL du rôle propriétaire du schéma, mot de passe admin). L'identité de l'API ne lit pas le second : une faille dans l'API ne donne pas les droits de DDL. Aucun secret dans le Bicep ni dans les paramètres.
 
-**GitHub Actions s'authentifie par OIDC** sur une identité managée avec identifiant fédéré (`repo:KasselFelix/Creno:environment:production`) : un jeton à durée courte, sans App Registration ni secret client. Cette identité ne peut que modifier l'API, le job et l'environnement Container Apps.
+**GitHub Actions s'authentifie par OIDC** sur une identité managée avec identifiant fédéré (`repo:KasselFelix/Creno:environment:production`) : un jeton à durée courte, sans App Registration ni secret client. Cette identité ne peut que modifier l'API, le job et l'environnement Container Apps (et leur rattacher leurs identités) : ni la base ni les coffres. Risque accepté : un workflow compromis sur `main` pourrait modifier le job de migration, qui lit l'URL du rôle propriétaire ; d'où l'environnement GitHub `production` limité à `main`, et `main` protégée par revue.
 
 **Déploiement continu** : le job `deploy` de la CI (`needs` sur tous les autres jobs, push sur `main` seulement) appelle le workflow réutilisable `deploy-api.yml`. Il déploie le **digest** de l'image construite et testée par le job `prod-image` (migration puis API démarrée en mode production sous le rôle applicatif), puis vérifie que `GET /health` renvoie le nouveau commit. `workflow_run` a été écarté : son filtre de branche porte sur le nom de la branche d'origine, et une PR venant d'un fork nommée `main` aurait pu déclencher un déploiement.
 
@@ -53,3 +53,4 @@ Creno doit être en ligne comme démo publique de portfolio : API NestJS, Postgr
 - Premier chargement lent après une pause ; tâches planifiées en pause pendant la veille.
 - Toute évolution du schéma reste compatible avec la version précédente de l'API, qui tourne pendant la migration (colonne `NOT NULL` en deux migrations, pas de renommage en une fois).
 - Les previews Vercel appellent l'API de production en lecture seule (leurs POST sont refusés par le contrôle d'origine).
+- Le job crée le rôle applicatif avec `CREATE ROLE … PASSWORD '<clair>'` : si l'instruction échouait, Postgres pourrait journaliser son texte côté serveur. Risque accepté (logs du serveur, accès restreint) ; évolution possible : envoyer un vérificateur SCRAM calculé dans le job.

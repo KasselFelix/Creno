@@ -42,7 +42,9 @@ export CRENO_BUDGET_EMAIL="<votre email>"
 export CRENO_PG_ADMIN_PASSWORD="$(openssl rand -hex 32)"
 ```
 
-> Le mot de passe admin de Postgres est généré **une seule fois** et rangé dans le coffre à l'étape 4. Pour toute relance du Bicep ensuite : `export CRENO_PG_ADMIN_PASSWORD="$(az keyvault secret show --vault-name "$KV" -n postgres-admin-password --query value -o tsv)"` (sinon le mot de passe changerait).
+> Pour toute relance du Bicep après le premier mois, fixer aussi le mois de départ du budget créé au premier passage : `export CRENO_BUDGET_START=AAAA-MM-01` (Azure refuse de le décaler).
+
+> Le mot de passe admin de Postgres est généré **une seule fois** et rangé dans le coffre à l'étape 4. Pour toute relance du Bicep ensuite : `export CRENO_PG_ADMIN_PASSWORD="$(az keyvault secret show --vault-name "$KV_MIGRATE" -n postgres-admin-password --query value -o tsv)"` (sinon le mot de passe changerait).
 
 ## 3. Infra, premier passage (sans API)
 
@@ -52,7 +54,8 @@ az deployment group what-if -g rg-creno --parameters infra/main.bicepparam
 az deployment group create -g rg-creno --parameters infra/main.bicepparam
 
 out() { az deployment group show -g rg-creno -n main --query "properties.outputs.$1.value" -o tsv; }
-export KV="$(out keyVaultName)" PG_HOST="$(out postgresHost)" API_URL="$(out apiUrl)"
+export KV="$(out keyVaultName)" KV_MIGRATE="$(out migrationKeyVaultName)"
+export PG_HOST="$(out postgresHost)" API_URL="$(out apiUrl)"
 echo "$API_URL"   # https://ca-creno-api.<…>.francecentral.azurecontainerapps.io
 ```
 
@@ -74,12 +77,15 @@ Crée : Log Analytics, Key Vault, identités (API, GitHub), PostgreSQL B1ms, env
 Puis les secrets. Les valeurs tapées passent par `read -rs` (ni écho, ni historique) :
 
 ```bash
-secret() { az keyvault secret set --vault-name "$KV" -n "$1" --value "$2" -o none; }
+# Valeur passée par l'entrée standard : jamais en argument de commande (visible dans `ps`).
+put() { printf '%s' "$3" | az keyvault secret set --vault-name "$1" -n "$2" --file /dev/stdin -o none; }
+secret() { put "$KV" "$1" "$2"; }               # coffre de l'API
+migration_secret() { put "$KV_MIGRATE" "$1" "$2"; }   # coffre de la migration (l'API ne le lit pas)
 # Si « Forbidden » : le rôle Key Vault Secrets Officer met quelques minutes à se propager.
 
 APP_DB_PASSWORD="$(openssl rand -hex 32)"
-secret postgres-admin-password "$CRENO_PG_ADMIN_PASSWORD"
-secret database-url-migrate "postgres://creno_admin:${CRENO_PG_ADMIN_PASSWORD}@${PG_HOST}:5432/creno?sslmode=verify-full"
+migration_secret postgres-admin-password "$CRENO_PG_ADMIN_PASSWORD"
+migration_secret database-url-migrate "postgres://creno_admin:${CRENO_PG_ADMIN_PASSWORD}@${PG_HOST}:5432/creno?sslmode=verify-full"
 secret database-url "postgres://creno_app:${APP_DB_PASSWORD}@${PG_HOST}:5432/creno?sslmode=verify-full"
 secret jwt-access-secret "$(openssl rand -base64 48)"
 secret client-ip-secret "$(openssl rand -hex 32)"   # aussi dans Vercel (étape 7)
@@ -150,6 +156,8 @@ Tant que `AZURE_CLIENT_ID` n'existe pas, le job `deploy` de la CI est sauté.
 | `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | envoi des sourcemaps                                                                  | —          |
 | `ENABLE_EXPERIMENTAL_COREPACK`                      | `1` (pnpm de `packageManager`)                                                        | `1`        |
 
+Laisser activée l'option « Automatically expose System Environment Variables » (Settings → Environment Variables) : Sentry lit `NEXT_PUBLIC_VERCEL_ENV` pour nommer l'environnement.
+
 Domaine : ajouter `creno.<votre-domaine>` (CNAME vers Vercel). Les previews appellent l'API de production **en lecture seule** : leurs POST sont refusés (origine ≠ `WEB_ORIGIN`). Même chose pour l'alias `*.vercel.app` : utiliser le domaine.
 
 **Mapbox** : restreindre le token aux URL `https://creno.<votre-domaine>` et `http://localhost:3000`.
@@ -183,7 +191,9 @@ ContainerAppConsoleLogs_CL
 ```bash
 PG_NAME="${PG_HOST%%.*}"; MY_IP="$(curl -s https://api.ipify.org)"
 az postgres flexible-server firewall-rule create -g rg-creno -n "$PG_NAME" --rule-name poste --start-ip-address "$MY_IP" --end-ip-address "$MY_IP"
-psql "$(az keyvault secret show --vault-name "$KV" -n database-url-migrate --query value -o tsv)"
+PGURL="$(az keyvault secret show --vault-name "$KV_MIGRATE" -n database-url-migrate --query value -o tsv)"
+psql "$PGURL"
+unset PGURL
 az postgres flexible-server firewall-rule delete -g rg-creno -n "$PG_NAME" --rule-name poste --yes
 ```
 

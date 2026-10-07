@@ -29,6 +29,21 @@ describe('scrubEvent (web)', () => {
   });
 });
 
+describe('jeton du lien d’inscription (fragment de l’URL)', () => {
+  it('ne part jamais : ni dans l’URL de l’erreur, ni dans le fil d’Ariane', () => {
+    const event = scrubEvent({
+      type: undefined,
+      request: { url: 'https://creno.test/register/complete#jeton-secret' },
+    });
+    expect(event.request).toEqual({ url: 'https://creno.test/register/complete' });
+    const crumb = scrubBreadcrumb({
+      category: 'navigation',
+      data: { from: '/register/complete#jeton-secret', to: '/account' },
+    });
+    expect(JSON.stringify(crumb)).not.toContain('jeton-secret');
+  });
+});
+
 describe('scrubBreadcrumb', () => {
   it('nettoie les navigations et les appels de recherche ou de géocodage', () => {
     expect(

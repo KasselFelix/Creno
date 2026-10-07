@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: Image à déployer (ghcr.io/kasselfelix/creno-api@sha256:… ou :<sha>)
+        description: Image à déployer (ghcr.io/kasselfelix/creno-api@sha256:…)
         required: true
         type: string
       sha:
@@ -47,6 +47,18 @@ jobs:
       RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
       API_URL: ${{ vars.API_URL }}
     steps:
+      # Seule une image de ce dépôt, désignée par son digest (immuable), peut être déployée.
+      - name: Image à déployer
+        run: |
+          if ! [[ "$IMAGE" =~ ^ghcr\.io/kasselfelix/creno-api@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Image refusée : ghcr.io/kasselfelix/creno-api@sha256:<digest> attendue."
+            exit 1
+          fi
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::SHA de commit attendu (40 caractères hexadécimaux)."
+            exit 1
+          fi
+
       # OIDC : un jeton à durée courte émis pour ce dépôt et cet environnement. Aucun secret.
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:

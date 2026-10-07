@@ -3,11 +3,16 @@ import type { Breadcrumb, ErrorEvent } from '@sentry/nextjs';
 // Pages et appels dont la query string porte la position du visiteur ou l'adresse tapée.
 const PRIVATE_QUERY = /\/(search|api\/v1\/search|api\/v1\/geocoding)(\/|\?|$)/i;
 
-function withoutPrivateQuery(url: string): string {
-  return PRIVATE_QUERY.test(url) ? url.split('?')[0]! : url;
+/**
+ * URL publiable : jamais de fragment (le lien d'inscription y porte son jeton, `#…`), et pas de
+ * query sur la recherche (position, adresse).
+ */
+function cleanUrl(url: string): string {
+  const withoutFragment = url.split('#')[0]!;
+  return PRIVATE_QUERY.test(withoutFragment) ? withoutFragment.split('?')[0]! : withoutFragment;
 }
 
-/** Dernier filtre avant l'envoi à Sentry : ni position, ni adresse, ni cookie, ni corps. */
+/** Dernier filtre avant l'envoi à Sentry : ni jeton, ni position, ni adresse, ni cookie, ni corps. */
 export function scrubEvent(event: ErrorEvent): ErrorEvent {
   if (event.request) {
     const request = { ...event.request };
@@ -21,11 +26,10 @@ export function scrubEvent(event: ErrorEvent): ErrorEvent {
       );
     }
     if (request.url) {
-      const cleaned = withoutPrivateQuery(request.url);
-      if (cleaned !== request.url) {
-        request.url = cleaned;
-        delete request.query_string;
-      }
+      const cleaned = cleanUrl(request.url);
+      // Query retirée (recherche) : sa copie aussi.
+      if (!cleaned.includes('?')) delete request.query_string;
+      request.url = cleaned;
     }
     event.request = request;
   }
@@ -39,7 +43,7 @@ export function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
   if (!data) return breadcrumb;
   const cleaned = { ...data };
   for (const key of ['url', 'from', 'to']) {
-    if (typeof cleaned[key] === 'string') cleaned[key] = withoutPrivateQuery(cleaned[key]);
+    if (typeof cleaned[key] === 'string') cleaned[key] = cleanUrl(cleaned[key]);
   }
   return { ...breadcrumb, data: cleaned };
 }

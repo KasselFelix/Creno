@@ -45,7 +45,13 @@ const MIGRATION_LOCK = "SELECT pg_advisory_lock(hashtext('creno.migrate'))";
  */
 export async function deployDatabase(env: DeployEnv, log: DeployLog): Promise<void> {
   // Sans limite de durée : le job attend que l'autre ait fini (le timeout du job borne l'attente).
-  const lockHandle = createDb(env.DATABASE_URL_MIGRATE, { max: 1, statement_timeout: 0 });
+  // keepAlive : la connexion reste inactive pendant la migration ; sans lui, un équipement réseau
+  // pourrait la couper en silence, et le verrou avec elle.
+  const lockHandle = createDb(env.DATABASE_URL_MIGRATE, {
+    max: 1,
+    statement_timeout: 0,
+    keepAlive: true,
+  });
   const lockClient = await lockHandle.pool.connect();
   try {
     await lockClient.query(MIGRATION_LOCK);

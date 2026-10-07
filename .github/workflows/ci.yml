@@ -143,8 +143,8 @@ jobs:
       - name: Logs de l'API en cas d'échec
         if: failure()
         run: docker logs api || true
-      # Pas de push pour une PR venant d'un fork (son jeton est en lecture seule de toute façon).
-      - if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+      # Pas de push pour une PR venant d'un fork ou de Dependabot (leur jeton est en lecture seule).
+      - if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -152,7 +152,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push (l'image testée est celle qui sera déployée)
         id: push
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
         run: |
           docker push "$IMAGE:$GITHUB_SHA"
           echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"

@@ -54,8 +54,11 @@ export class JobsService implements OnApplicationShutdown {
       supervise: workers,
       schedule: workers,
       // Le schéma `pgboss` est installé par les migrations (`migrateAll` de @creno/db) : l'API tourne
-      // sous un rôle sans droit de DDL. pg-boss vérifie seulement qu'il est à la bonne version.
+      // sous un rôle sans droit de DDL. pg-boss vérifie seulement qu'il est à la bonne version. Pour
+      // la même raison, la reconstruction des index gonflés est faite par le job de migration, et
+      // `persistQueueStats` (qui crée des partitions à l'exécution) ne doit pas être activé.
       migrate: false,
+      reindex: false,
     });
     // Sans écouteur, un événement `error` (connexion coupée…) arrêterait le processus.
     this.boss.on('error', (error) => {

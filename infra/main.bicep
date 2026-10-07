@@ -46,8 +46,9 @@ param postgresAdminPassword string
 param budgetAmount int = 5
 @description('Email des alertes de budget. Vide : pas de budget.')
 param budgetContactEmail string = ''
-@description('Premier jour du mois de départ du budget (format imposé par Azure).')
-param budgetStartDate string = utcNow('yyyy-MM-01')
+@description('Début du budget (premier jour d\'un mois). Vide : le mois en cours ; à fixer pour relancer le Bicep un autre mois.')
+param budgetStartDate string = ''
+param currentMonth string = utcNow('yyyy-MM-01')
 
 var suffix = take(uniqueString(resourceGroup().id), 6)
 var apiName = 'ca-creno-api'
@@ -60,6 +61,8 @@ var roles = {
   vaultReader: '4633458b-17de-408a-b874-0445c86b69e6'
   // « Key Vault Secrets Officer » : les écrire.
   vaultWriter: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
+  // « Managed Identity Operator » : rattacher une identité à une ressource.
+  identityOperator: 'f1a07417-d97a-45cb-824c-7a7467783830'
 }
 
 // ─── Journaux ────────────────────────────────────────────────────────────────────────────────
@@ -75,6 +78,9 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 }
 
 // ─── Secrets ─────────────────────────────────────────────────────────────────────────────────
+// Deux coffres : celui de l'API, et celui de la migration (URL du rôle propriétaire du schéma,
+// mot de passe admin de Postgres). L'API ne peut pas lire le second : une faille dans l'API ne donne
+// pas les droits de DDL.
 resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: 'kv-creno-${suffix}'
   location: location
@@ -88,6 +94,18 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
+resource migrationVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: 'kv-crenom-${suffix}'
+  location: location
+  properties: {
+    tenantId: subscription().tenantId
+    sku: { family: 'A', name: 'standard' }
+    enableRbacAuthorization: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 7
+  }
+}
+
 resource operatorSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(vault.id, operatorObjectId, roles.vaultWriter)
   scope: vault
@@ -98,8 +116,18 @@ resource operatorSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04
   }
 }
 
+resource operatorMigrationSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(migrationVault.id, operatorObjectId, roles.vaultWriter)
+  scope: migrationVault
+  properties: {
+    principalId: operatorObjectId
+    principalType: 'User'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.vaultWriter)
+  }
+}
+
 // ─── Identités ───────────────────────────────────────────────────────────────────────────────
-// L'API et le job lisent leurs secrets dans le coffre avec cette identité (aucun mot de passe).
+// L'API lit ses secrets dans son coffre avec cette identité (aucun mot de passe).
 resource apiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-creno-api'
   location: location
@@ -110,6 +138,33 @@ resource apiSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: vault
   properties: {
     principalId: apiIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.vaultReader)
+  }
+}
+
+// Le job de migration lit les deux coffres : l'URL du rôle de l'API (pour créer ce rôle) et celle
+// du rôle de migration.
+resource migrateIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-creno-migrate'
+  location: location
+}
+
+resource migrateReadsApiVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(vault.id, migrateIdentity.id, roles.vaultReader)
+  scope: vault
+  properties: {
+    principalId: migrateIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.vaultReader)
+  }
+}
+
+resource migrateReadsMigrationVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(migrationVault.id, migrateIdentity.id, roles.vaultReader)
+  scope: migrationVault
+  properties: {
+    principalId: migrateIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.vaultReader)
   }
@@ -309,7 +364,7 @@ resource migrateJob 'Microsoft.App/jobs@2024-03-01' = if (deployApp) {
   location: location
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: { '${apiIdentity.id}': {} }
+    userAssignedIdentities: { '${migrateIdentity.id}': {} }
   }
   properties: {
     environmentId: environment.id
@@ -319,11 +374,18 @@ resource migrateJob 'Microsoft.App/jobs@2024-03-01' = if (deployApp) {
       replicaTimeout: 600
       replicaRetryLimit: 0
       manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
-      secrets: map(['database-url', 'database-url-migrate'], name => {
-        name: name
-        keyVaultUrl: '${vault.properties.vaultUri}secrets/${name}'
-        identity: apiIdentity.id
-      })
+      secrets: [
+        {
+          name: 'database-url'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/database-url'
+          identity: migrateIdentity.id
+        }
+        {
+          name: 'database-url-migrate'
+          keyVaultUrl: '${migrationVault.properties.vaultUri}secrets/database-url-migrate'
+          identity: migrateIdentity.id
+        }
+      ]
     }
     template: {
       containers: [
@@ -343,10 +405,13 @@ resource migrateJob 'Microsoft.App/jobs@2024-03-01' = if (deployApp) {
       ]
     }
   }
-  dependsOn: [apiSecretsUser, azureServicesOnly]
+  dependsOn: [migrateReadsApiVault, migrateReadsMigrationVault, azureServicesOnly]
 }
 
-// La CI peut changer l'image de l'API et du job, et lancer le job : rien d'autre (ni base, ni coffre).
+// La CI change l'image de l'API et du job, et lance le job. Contributor sur ces deux ressources
+// (et l'environnement), pas sur la base ni les coffres. Risque accepté : un workflow compromis sur
+// main pourrait modifier le job, qui lit l'URL du rôle de migration. D'où l'environnement GitHub
+// `production` limité à la branche main, et main protégée par revue.
 resource githubOnApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployApp) {
   name: guid(resourceGroup().id, apiName, githubIdentity.id, roles.contributor)
   scope: api
@@ -364,6 +429,27 @@ resource githubOnJob 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (
     principalId: githubIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.contributor)
+  }
+}
+
+// L'app et le job portent chacun une identité : les mettre à jour demande de pouvoir la rattacher.
+resource githubOnApiIdentity 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(apiIdentity.id, githubIdentity.id, roles.identityOperator)
+  scope: apiIdentity
+  properties: {
+    principalId: githubIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.identityOperator)
+  }
+}
+
+resource githubOnMigrateIdentity 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(migrateIdentity.id, githubIdentity.id, roles.identityOperator)
+  scope: migrateIdentity
+  properties: {
+    principalId: githubIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.identityOperator)
   }
 }
 
@@ -385,7 +471,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-05-01' = if (!empty(budgetCo
     category: 'Cost'
     amount: budgetAmount
     timeGrain: 'Monthly'
-    timePeriod: { startDate: budgetStartDate }
+    timePeriod: { startDate: empty(budgetStartDate) ? currentMonth : budgetStartDate }
     notifications: {
       firstEuro: {
         enabled: true
@@ -415,6 +501,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-05-01' = if (!empty(budgetCo
 // ─── Sorties (utilisées par le runbook et la CI) ─────────────────────────────────────────────
 output apiUrl string = 'https://${apiName}.${environment.properties.defaultDomain}'
 output keyVaultName string = vault.name
+output migrationKeyVaultName string = migrationVault.name
 output postgresHost string = postgres.properties.fullyQualifiedDomainName
 output githubClientId string = githubIdentity.properties.clientId
 output resourceGroupName string = resourceGroup().name

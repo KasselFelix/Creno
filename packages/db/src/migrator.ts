@@ -15,14 +15,14 @@ export async function migrateDatabase(connectionString: string): Promise<void> {
   }
 }
 
-/** Le schéma de pg-boss se met à jour sur plusieurs secondes au plus (index construits en tâche de fond). */
+/** Le schéma de pg-boss se met à jour en quelques secondes (index construits en tâche de fond). */
 const JOBS_BACKGROUND_MIGRATION_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Installe ou met à jour le schéma `pgboss` (file de jobs). L'API démarre pg-boss avec
  * `migrate: false` : elle tourne sous un rôle sans droit de DDL, c'est cette étape (rôle de
  * migration) qui crée et fait évoluer le schéma. pg-boss 12 construit certains index en tâche de
- * fond après sa migration : on attend qu'ils soient finis avant de rendre la main.
+ * fond après sa migration : on attend qu'ils soient finis, puis on reconstruit les index gonflés.
  */
 export async function installJobsSchema(connectionString: string): Promise<void> {
   const boss = new PgBoss({
@@ -38,8 +38,8 @@ export async function installJobsSchema(connectionString: string): Promise<void>
   boss.on('error', (error) => {
     failure = error;
   });
-  await boss.start();
   try {
+    await boss.start();
     const deadline = Date.now() + JOBS_BACKGROUND_MIGRATION_TIMEOUT_MS;
     for (;;) {
       if (failure) throw failure;
@@ -48,10 +48,19 @@ export async function installJobsSchema(connectionString: string): Promise<void>
       const outstanding = status
         .filter((row) => row.status !== 'completed')
         .reduce((total, row) => total + row.count, 0);
-      if (outstanding === 0) return;
+      if (outstanding === 0) break;
       if (Date.now() > deadline)
         throw new Error('pg-boss : migrations en tâche de fond inachevées');
       await delay(1000);
+    }
+    // L'API tourne sous un rôle qui ne possède pas les index de `pgboss` : elle ne peut pas les
+    // reconstruire (`reindex: false` dans jobs.service.ts). Le job de migration, propriétaire, le fait
+    // pour ceux que pg-boss juge gonflés (REINDEX CONCURRENTLY : la file reste utilisable).
+    const { pool } = createDb(connectionString, { max: 1, statement_timeout: 5 * 60_000 });
+    try {
+      for (const command of await boss.getReindexCommands()) await pool.query(command);
+    } finally {
+      await pool.end();
     }
   } finally {
     await boss.stop({ graceful: false, timeout: 5_000 });

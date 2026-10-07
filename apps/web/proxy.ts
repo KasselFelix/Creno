@@ -40,26 +40,42 @@ function withRefreshedCookies(request: NextRequest, setCookies: string[]): Heade
   return new Headers(request.headers);
 }
 
+/** Seules les routes versionnées de l'API sont relayées (le navigateur n'appelle rien d'autre). */
+const API_PREFIX = '/api/v1/';
+
 /**
- * Appel du navigateur à l'API (`/api/*` sur le domaine du front, cookies first-party) : relayé tel
- * quel vers l'API, avec l'IP du visiteur et le secret qui la garantit. Les en-têtes `x-creno-*`
- * envoyés par le navigateur sont retirés : seul ce serveur peut les poser.
+ * Appel du navigateur à l'API (`/api/v1/*` sur le domaine du front, cookies first-party) : relayé
+ * vers l'API, avec l'IP du visiteur et le secret qui la garantit. Les en-têtes `x-creno-*` envoyés
+ * par le navigateur sont retirés : seul ce serveur peut les poser.
+ *
+ * La cible garde toujours l'hôte de l'API : on ne remplace que son chemin. `new URL(chemin, base)`
+ * suivrait un chemin comme `//autre-site/x` vers un autre hôte, qui recevrait le secret partagé.
  */
 function forwardToApi(request: NextRequest): NextResponse {
+  const { pathname, search } = request.nextUrl;
+  const api = new URL(apiInternalUrl());
+  const target = new URL(api);
+  target.pathname = pathname.slice('/api'.length);
+  target.search = search;
+  if (!pathname.startsWith(API_PREFIX) || pathname.includes('//') || target.origin !== api.origin) {
+    return NextResponse.json(
+      { statusCode: 404, code: 'NOT_FOUND', message: 'Élément introuvable.' },
+      { status: 404 },
+    );
+  }
+
   const headers = new Headers(request.headers);
   headers.delete(CLIENT_IP_HEADERS.ip);
   headers.delete(CLIENT_IP_HEADERS.secret);
   for (const [name, value] of Object.entries(clientIpHeaders(request.headers))) {
     headers.set(name, value);
   }
-  const { pathname, search } = request.nextUrl;
-  const target = new URL(`${pathname.slice('/api'.length)}${search}`, apiInternalUrl());
   return NextResponse.rewrite(target, { request: { headers } });
 }
 
 /**
  * S'exécute avant chaque requête (c'est le « middleware » de Next 16) :
- * 1. relaie `/api/*` vers l'API ;
+ * 1. relaie `/api/v1/*` vers l'API ;
  * 2. pose la Content Security Policy des pages, avec un nonce neuf ;
  * 3. renouvelle la session côté serveur quand l'access token a expiré ;
  * 4. redirige les pages protégées vers /login quand il n'y a aucun cookie de session.
