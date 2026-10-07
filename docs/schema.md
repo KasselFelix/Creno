@@ -173,7 +173,20 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 
 **Ajouter une valeur à un enum.** `ALTER TYPE … ADD VALUE` (migration 0012) est permis dans une transaction, mais la nouvelle valeur n'est utilisable qu'après le commit. Or `migrate()` de Drizzle applique **toutes** les migrations en attente dans **une seule** transaction : sur une base neuve (clone frais, CI), une migration qui citerait `'booking_moved'` en SQL (prédicat d'index, CHECK, valeur par défaut) échouerait avec « unsafe use of new value ». Aucune migration ne cite donc une valeur d'enum ajoutée par une migration de la même série ; si un jour c'est nécessaire, il faut la poser dans une valeur par défaut côté application, ou appliquer les migrations en deux fois.
 
-Le schéma `pgboss` (file de jobs) n'est pas dans ces migrations : pg-boss l'installe et le met à jour lui-même au démarrage de l'API.
+Le schéma `pgboss` (file de jobs) n'est pas dans ces migrations Drizzle : il est installé et mis à jour par pg-boss lui-même, dans `migrateAll` (`packages/db/src/migrator.ts`), juste après elles. C'est le seul chemin, en dev (`pnpm db:migrate`), dans le setup des tests et dans le job de migration de production ; l'API démarre pg-boss avec `migrate: false` et vérifie seulement que le schéma est à la bonne version.
+
+## Rôles et droits
+
+Décisions : [ADR 0016](adr/0016-deploiement-azure-container-apps.md). En local et en CI, un seul rôle (`creno`) fait tout. En production :
+
+| Rôle          | Utilisé par                               | Droits                                                                                                                                                                               |
+| ------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `creno_admin` | job de migration (`DATABASE_URL_MIGRATE`) | administrateur du serveur Azure, propriétaire des objets : migrations, schéma `pgboss`, création du rôle applicatif                                                                  |
+| `creno_app`   | API (`DATABASE_URL`)                      | `SELECT/INSERT/UPDATE/DELETE` sur les tables de `public` et `pgboss`, séquences, `EXECUTE` sur les fonctions de `pgboss` ; **aucun DDL** (ni `CREATE` sur un schéma, ni sur la base) |
+
+Le job crée `creno_app` (ou remet à jour son mot de passe, lu dans `DATABASE_URL`) et réapplique les droits à chaque passage (`ensureAppRole`, `packages/db/src/roles.ts`). `ALTER DEFAULT PRIVILEGES` donne les mêmes droits sur les tables et fonctions que `creno_admin` créera plus tard. pg-boss ne fait pas de DDL à l'exécution : nos files ne sont pas partitionnées, `createQueue` n'est qu'un `INSERT` dans `pgboss.queue`. Le test `deploy-database.e2e-spec.ts` vérifie, sur une base neuve, que `creno_app` lit et écrit, fait tourner pg-boss sans migrer, et reçoit `42501` sur un `CREATE TABLE`.
+
+Le job tient un verrou consultatif (`pg_advisory_lock(hashtext('creno.migrate'))`) pendant tout son passage : deux déploiements rapprochés ne migrent jamais en parallèle.
 
 ## La contrainte `bookings_no_overlap`
 
