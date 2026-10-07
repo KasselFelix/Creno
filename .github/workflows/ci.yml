@@ -5,12 +5,19 @@ on:
   push:
     branches: [main]
 
+# Une PR mise à jour annule son run en cours ; un run de main n'est jamais coupé (il peut être en
+# train de déployer, entre la migration et la mise à jour de l'API).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+
+env:
+  IMAGE: ghcr.io/kasselfelix/creno-api
+  TURBO_TELEMETRY_DISABLED: 1
+  NEXT_TELEMETRY_DISABLED: 1
 
 jobs:
   check:
@@ -34,14 +41,12 @@ jobs:
       # Base éphémère du job : identifiants factices, aucun secret.
       DATABASE_URL: postgres://creno:creno@localhost:5432/creno_test
       DATABASE_URL_TEST: postgres://creno:creno@localhost:5432/creno_test
-      TURBO_TELEMETRY_DISABLED: 1
-      NEXT_TELEMETRY_DISABLED: 1
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -49,21 +54,131 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Migrations (base de test)
+      - name: Migrations (base de test, schéma métier puis pg-boss)
         run: pnpm db:migrate
       - run: pnpm test
       - name: Cohérence du schéma et des migrations
         run: pnpm --filter @creno/db exec drizzle-kit check
       - run: pnpm build
 
+  infra:
+    name: Bicep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # La CLI Azure est installée sur les runners GitHub.
+      - run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+  prod-image:
+    name: Image de production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: creno
+          POSTGRES_PASSWORD: creno
+          POSTGRES_DB: creno
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U creno -d creno"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: runtime
+          build-args: SENTRY_RELEASE=${{ github.sha }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          load: true
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      # Valeurs factices générées à l'exécution (jamais écrites dans le dépôt). L'image démarre en
+      # mode production, comme sur Azure, sous un rôle applicatif sans DDL créé par le job de migration.
+      - name: Job de migration puis API sous le rôle applicatif
+        run: |
+          app_password="$(openssl rand -hex 24)"
+          admin_url="postgres://creno:creno@localhost:5432/creno"
+          app_url="postgres://creno_app:${app_password}@localhost:5432/creno"
+          docker run --rm --network host \
+            -e NODE_ENV=production -e DEMO_MODE=true \
+            -e DATABASE_URL_MIGRATE="$admin_url" -e DATABASE_URL="$app_url" \
+            "$IMAGE:$GITHUB_SHA" node dist/cli/migrate.js
+          docker run -d --name api --network host \
+            -e NODE_ENV=production -e DEMO_MODE=true -e TRUST_PROXY=1 \
+            -e DATABASE_URL="$app_url" \
+            -e WEB_ORIGIN=https://creno.example.com \
+            -e JWT_ACCESS_SECRET="$(openssl rand -hex 32)" \
+            -e CLIENT_IP_SECRET="$(openssl rand -hex 32)" \
+            -e STRIPE_SECRET_KEY="sk""_test_$(openssl rand -hex 16)" \
+            -e STRIPE_WEBHOOK_SECRET="whsec""_$(openssl rand -hex 16)" \
+            -e STRIPE_CONNECT_WEBHOOK_SECRET="whsec""_$(openssl rand -hex 16)" \
+            -e RESEND_API_KEY="re""_$(openssl rand -hex 16)" \
+            -e EMAIL_FROM="Creno <bonjour@example.com>" \
+            "$IMAGE:$GITHUB_SHA"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4000/health/ready > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4000/health/ready
+          release="$(curl -fsS http://127.0.0.1:4000/health | jq -r .release)"
+          test "$release" = "$GITHUB_SHA"
+      - name: Logs de l'API en cas d'échec
+        if: failure()
+        run: docker logs api || true
+      # Pas de push pour une PR venant d'un fork (son jeton est en lecture seule de toute façon).
+      - if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push (l'image testée est celle qui sera déployée)
+        id: push
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+
   secrets-scan:
     name: Secrets scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: gitleaks/gitleaks-action@v3
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Déploiement de l'API après chaque merge sur main, seulement si tout est vert. Sauté tant que
+  # l'infra Azure n'est pas configurée (variable AZURE_CLIENT_ID absente).
+  deploy:
+    name: Déploiement
+    needs: [check, infra, prod-image, secrets-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AZURE_CLIENT_ID != ''
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-api.yml
+    with:
+      image: ${{ needs.prod-image.outputs.image }}
+      sha: ${{ github.sha }}

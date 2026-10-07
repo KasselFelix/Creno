@@ -1,0 +1,94 @@
+name: Deploy API
+
+# Appelé par la CI après un merge sur main (job `deploy`), ou à la main pour redéployer une image
+# (retour arrière). Pas de déclencheur `workflow_run` : son filtre de branche porte sur le nom de la
+# branche d'origine, et une PR venant d'un fork nommée `main` pourrait déclencher un déploiement.
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Image à déployer (ghcr.io/kasselfelix/creno-api@sha256:…)
+        required: true
+        type: string
+      sha:
+        description: Commit attendu dans la réponse de GET /health
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Image à déployer (ghcr.io/kasselfelix/creno-api@sha256:… ou :<sha>)
+        required: true
+        type: string
+      sha:
+        description: Commit attendu dans la réponse de GET /health
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+# Un déploiement à la fois, jamais annulé en cours de route.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Migrations, API, smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # L'environnement porte la règle « branche main seulement » et le sujet OIDC attendu par Azure.
+    environment: production
+    env:
+      IMAGE: ${{ inputs.image }}
+      SHA: ${{ inputs.sha }}
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      API_URL: ${{ vars.API_URL }}
+    steps:
+      # OIDC : un jeton à durée courte émis pour ce dépôt et cet environnement. Aucun secret.
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Job de migration (migrations, pg-boss, rôle applicatif, seed de démo)
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors
+          az containerapp job update -n caj-creno-migrate -g "$RESOURCE_GROUP" --image "$IMAGE" --only-show-errors > /dev/null
+          execution="$(az containerapp job start -n caj-creno-migrate -g "$RESOURCE_GROUP" --query name -o tsv)"
+          echo "Exécution : $execution"
+          for _ in $(seq 1 60); do
+            status="$(az containerapp job execution show -n caj-creno-migrate -g "$RESOURCE_GROUP" \
+              --job-execution-name "$execution" --query properties.status -o tsv)"
+            echo "Statut : $status"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded) echo "::error::Migration en échec : l'API garde l'ancienne image."; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Migration trop longue (10 min)."
+          exit 1
+
+      - name: Nouvelle révision de l'API
+        run: |
+          az containerapp update -n ca-creno-api -g "$RESOURCE_GROUP" --image "$IMAGE" --only-show-errors > /dev/null
+
+      # La première requête réveille l'API (0 réplica au repos) ; on attend que la nouvelle révision
+      # réponde avec le bon commit, puis que la base soit joignable.
+      - name: Smoke test
+        run: |
+          for _ in $(seq 1 36); do
+            release="$(curl -fsS --max-time 30 "$API_URL/health" | jq -r .release || true)"
+            if [ "$release" = "$SHA" ]; then
+              curl -fsS --max-time 30 "$API_URL/health/ready"
+              exit 0
+            fi
+            echo "Release en service : ${release:-aucune réponse}, attendue : $SHA"
+            sleep 5
+          done
+          echo "::error::La nouvelle révision ne répond pas."
+          exit 1
