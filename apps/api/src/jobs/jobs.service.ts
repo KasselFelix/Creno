@@ -53,6 +53,9 @@ export class JobsService implements OnApplicationShutdown {
       // Une instance sans workers ne fait qu'écrire des jobs : ni maintenance, ni tâches planifiées.
       supervise: workers,
       schedule: workers,
+      // Le schéma `pgboss` est installé par les migrations (`migrateAll` de @creno/db) : l'API tourne
+      // sous un rôle sans droit de DDL. pg-boss vérifie seulement qu'il est à la bonne version.
+      migrate: false,
     });
     // Sans écouteur, un événement `error` (connexion coupée…) arrêterait le processus.
     this.boss.on('error', (error) => {
@@ -60,7 +63,7 @@ export class JobsService implements OnApplicationShutdown {
     });
   }
 
-  /** Démarre pg-boss une seule fois (il installe ou met à jour son schéma), à la première utilisation. */
+  /** Démarre pg-boss une seule fois, à la première utilisation. */
   private start(): Promise<void> {
     this.starting ??= this.boss.start().then(
       () => {

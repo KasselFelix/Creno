@@ -3,12 +3,16 @@ import { isIP } from 'node:net';
 import type { NextFunction, Request, Response } from 'express';
 import { CLIENT_IP_HEADERS } from '@creno/shared';
 
-declare module 'express-serve-static-core' {
-  interface Request {
-    /** IP du visiteur : celle transmise par le front (secret valide), sinon celle de la connexion. */
-    clientIp?: string;
-    /** D'où vient `clientIp` : journalisé (sans l'IP) pour vérifier en production que le secret passe. */
-    ipSource?: 'header' | 'socket';
+declare global {
+  // Augmentation de la requête Express (même mécanisme que `req.user` de Passport).
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** IP du visiteur : celle transmise par le front (secret valide), sinon celle de la connexion. */
+      clientIp?: string;
+      /** D'où vient `clientIp` : journalisé (sans l'IP) pour vérifier en production que le secret passe. */
+      ipSource?: 'header' | 'socket';
+    }
   }
 }
 
