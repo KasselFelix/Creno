@@ -2,7 +2,9 @@ import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
+import { clientIpMiddleware } from './common/client-ip.js';
 import { originCheck } from './common/origin-check.middleware.js';
 import type { AppConfig } from './config/env.js';
 
@@ -19,6 +21,13 @@ export function setupApp(app: INestApplication, config: AppConfig): void {
   // L'API ne sert que du JSON ; la CSP ne gêne que l'interface Swagger (scripts inline), active en dev seulement.
   app.use(helmet({ contentSecurityPolicy: swagger ? false : undefined }));
   app.use(cookieParser());
+  app.use(clientIpMiddleware(config.CLIENT_IP_SECRET));
+  // Rien de ce que renvoie l'API ne doit être gardé en cache (navigateur, CDN de Vercel) : les
+  // réponses portent des données de compte (dashboard : nom et email des clients).
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.use(originCheck(config.WEB_ORIGIN));
 
   app.setGlobalPrefix('v1', { exclude: ['health', 'health/ready'] });

@@ -15,6 +15,7 @@ import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import { DB } from '../database/database.module.js';
 import { JobsService } from '../jobs/jobs.service.js';
+import { SMS_GATEWAY, type SmsGateway, UnconfiguredGateway } from '../notifications/delivery.js';
 import { PHONE_CODE_QUEUE } from './phone-code.queues.js';
 import { PhoneVerificationsRepository } from './phone-verifications.repository.js';
 import { toPublicUser } from './users.mapper.js';
@@ -41,6 +42,7 @@ export class PhoneVerificationService {
     private readonly users: UsersRepository,
     private readonly verifications: PhoneVerificationsRepository,
     private readonly jobs: JobsService,
+    @Inject(SMS_GATEWAY) private readonly sms: SmsGateway,
   ) {}
 
   /**
@@ -48,6 +50,16 @@ export class PhoneVerificationService {
    * réponse ne dit jamais si le numéro appartient déjà à un autre compte.
    */
   async requestCode(current: AuthUser, phone: string): Promise<PhoneCodeRequested> {
+    // Sans passerelle SMS (démo sans Twilio), le code ne partirait jamais : on le dit tout de suite
+    // plutôt que de laisser la personne attendre un SMS.
+    if (this.sms instanceof UnconfiguredGateway) {
+      this.logger.warn({ event: 'user.phone_code_unavailable', userId: current.id });
+      throw new DomainError(
+        'SMS_UNAVAILABLE',
+        503,
+        "La vérification par SMS n'est pas disponible pour le moment.",
+      );
+    }
     // Frein à la fraude vers des numéros surtaxés : refusé avant toute écriture.
     if (!this.config.SMS_ALLOWED_PREFIXES.some((prefix) => phone.startsWith(prefix))) {
       throw new DomainError(

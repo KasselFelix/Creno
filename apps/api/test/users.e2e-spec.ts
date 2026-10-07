@@ -109,4 +109,12 @@ describe('users', () => {
       });
     });
   });
+
+  it('sans passerelle SMS (démo sans Twilio) : 503 SMS_UNAVAILABLE, rien n’est enregistré', async () => {
+    const { agent } = await registerAs(app);
+    const res = await agent.post('/v1/users/me/phone').send({ phone: '+33612345678' }).expect(503);
+    expect(apiErrorSchema.parse(res.body).code).toBe('SMS_UNAVAILABLE');
+    const me = await agent.get('/v1/users/me').expect(200);
+    expect(publicUserSchema.parse(me.body).phone).toBeNull();
+  });
 });

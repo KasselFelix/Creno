@@ -22,6 +22,16 @@ const codeByStatus: Partial<Record<number, ErrorCode>> = {
 
 const GENERIC_SERVER_ERROR = 'Erreur interne.';
 
+/** Corps refusé par body-parser (limite de 100 ko d'Express) : une erreur du client, pas du serveur. */
+function isPayloadTooLarge(exception: unknown): boolean {
+  return (
+    typeof exception === 'object' &&
+    exception !== null &&
+    'type' in exception &&
+    exception.type === 'entity.too.large'
+  );
+}
+
 /** Drizzle écrit les valeurs de la requête dans le message : `Failed query: …\nparams: …`. */
 function withoutQueryParams(text: string | undefined): string | undefined {
   return text?.replace(/\nparams:[^\n]*/g, '\nparams: [redacted]');
@@ -59,6 +69,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
         res.status(exception.getStatus()).json(exception.getResponse());
         return;
       }
+    }
+
+    if (isPayloadTooLarge(exception)) {
+      this.logger.warn({ event: 'http.payload_too_large' });
+      res.status(413).json({
+        statusCode: 413,
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Requête trop volumineuse.',
+      } satisfies ApiError);
+      return;
     }
 
     const body = this.toApiError(exception);

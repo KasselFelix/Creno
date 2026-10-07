@@ -22,6 +22,7 @@ import {
 } from './notifications.queues.js';
 import { NotificationsRepository, type SendContext } from './notifications.repository.js';
 import { NotificationsService } from './notifications.service.js';
+import { isReservedEmailDomain } from './reserved-domains.js';
 import { type MessageData, renderEmail, renderReminderSms } from './templates.js';
 
 /**
@@ -95,6 +96,12 @@ export class NotificationsWorker implements OnModuleInit {
     if (obsolete) {
       await this.notifications.close(id, 'skipped', obsolete);
       this.logger.log({ event: 'notification.skipped', ...base, reason: obsolete });
+      return;
+    }
+    // Comptes de démo (`@example.com`) : prévu, donc `info`, pas `warn`.
+    if (context.channel === 'email' && isReservedEmailDomain(context.recipientEmail)) {
+      await this.notifications.close(id, 'skipped', 'reserved_domain');
+      this.logger.log({ event: 'notification.skipped', ...base, reason: 'reserved_domain' });
       return;
     }
     const refused = await this.refusalReason(context);

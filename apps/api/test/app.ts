@@ -73,6 +73,8 @@ export interface TestAppOptions {
   aiModel?: string;
   /** Remplace l'horloge (circuit breaker, attente avant reprise). */
   clock?: Clock;
+  /** Secret partagé avec le front pour transmettre l'IP du visiteur (vide par défaut : désactivé). */
+  clientIpSecret?: string;
 }
 
 /** Démarre l'application complète sur la base de test (jamais de base mockée). */
@@ -108,6 +110,11 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     AI_TIMEOUT_MS: String(options.aiTimeoutMs ?? 3000),
     AI_RATE_LIMIT_PER_MINUTE: String(options.aiRateLimit ?? 100_000),
     AI_DAILY_REQUEST_CAP: String(options.aiDailyCap ?? 100_000),
+    CLIENT_IP_SECRET: options.clientIpSecret ?? '',
+    DEMO_MODE: 'false',
+    // Vide = absente : aucun test n'écrit à Sentry, même si le .env local contient un DSN.
+    SENTRY_DSN: '',
+    SENTRY_RELEASE: 'dev',
   });
 
   const builder = Test.createTestingModule({ imports: [AppModule] });

@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { asc, eq, sql } from 'drizzle-orm';
 import type request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bookings, notifications } from '@creno/db';
+import { bookings, notifications, users } from '@creno/db';
 import { type Booking, REMINDER_LEAD_HOURS, type Resource } from '@creno/shared';
 import { JobsService } from '../src/jobs/jobs.service.js';
 import { DeliveryError } from '../src/notifications/delivery.js';
@@ -106,6 +106,25 @@ describe('notifications', () => {
       .where(eq(notifications.status, 'scheduled'));
 
   describe('réservation confirmée', () => {
+    it('compte de démo en @example.com : notification sautée (reserved_domain), rien ne part', async () => {
+      const { agent, user } = await registerAs(app, 'customer');
+      await db()
+        .update(users)
+        .set({ email: `demo.${user.id}@example.com` })
+        .where(eq(users.id, user.id));
+      const booking = await confirmedBooking(agent);
+      await runJobs(app, SEND_QUEUE);
+
+      // Seul le prestataire (adresse normale) reçoit son email.
+      expect(emails().map((message) => message.to)).toEqual([provider.user.email]);
+      expect(
+        (await rowsOf(booking.id)).find((row) => row.kind === 'booking_confirmed'),
+      ).toMatchObject({ status: 'skipped', reason: 'reserved_domain' });
+      expect(logged('notification.skipped')).toMatchObject([
+        { level: 30, reason: 'reserved_domain' },
+      ]);
+    });
+
     it('paiement reçu → confirmation au client, avis au prestataire, rappel planifié 24 h avant', async () => {
       const { agent, user } = await registerAs(app, 'customer');
       const booking = await confirmedBooking(agent);

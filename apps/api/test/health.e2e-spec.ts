@@ -16,7 +16,7 @@ describe('health', () => {
 
   it('GET /health → 200 sans toucher la base', async () => {
     const res = await request(app.getHttpServer()).get('/health').expect(200);
-    expect(res.body).toEqual({ status: 'ok' });
+    expect(res.body).toEqual({ status: 'ok', release: 'dev' });
   });
 
   it('GET /health/ready → 200 quand la base répond', async () => {
@@ -32,6 +32,11 @@ describe('health', () => {
       .get('/health')
       .set('x-request-id', 'trace-123');
     expect(forwarded.headers['x-request-id']).toBe('trace-123');
+  });
+
+  it('Cache-Control: no-store sur toutes les réponses', async () => {
+    const res = await request(app.getHttpServer()).get('/health');
+    expect(res.headers['cache-control']).toBe('no-store');
   });
 
   it('route inconnue → 404 au format d’erreur commun', async () => {
