@@ -2,7 +2,22 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-> Projet portfolio en cours de construction, étape par étape. Étapes livrées : **socle technique** (monorepo, base de données, API, CI), **authentification** (comptes, sessions, rôles), **disponibilités** (ressources, horaires, calcul des créneaux, hold de réservation), **recherche géographique** (prestataires dans un rayon, liste et carte) **réservation payée** (Stripe Connect, Checkout, webhook idempotent, annulation remboursée), **notifications** (emails et SMS de rappel par jobs pg-boss, outbox transactionnelle, tâches de ménage), **inscription par lien envoyé par email** (le compte naît depuis le lien, l'inscription ne révèle pas qui est inscrit) et **recherche en langage naturel** (phrase → filtres validés par Zod, Mistral avec repli par mots-clés, filtre « disponible le »).
+Projet portfolio terminé, livré en neuf étapes (une PR chacune) : socle technique, authentification, disponibilités, recherche géographique, réservation payée, notifications, recherche en langage naturel, dashboard prestataire, puis mise en ligne. Ce qui compte ici : la base qui garantit l'absence de double réservation, les migrations, la CI/CD, les tests sur une vraie base, les logs sans donnée personnelle et les arbitrages expliqués ci-dessous.
+
+![Recherche, fiche prestataire et réservation](docs/demo.gif)
+
+## Démo en ligne
+
+**https://creno.DOMAINE_A_RENSEIGNER** — démo en mode test : aucun vrai paiement, carte `4242 4242 4242 4242` (date future, n'importe quel code). L'API se met en veille après 5 minutes sans visite : le premier chargement peut prendre une vingtaine de secondes.
+
+Mot de passe des comptes de démo : `creno-demo-2026`.
+
+| Rôle        | Email                        | À essayer                                                     |
+| ----------- | ---------------------------- | ------------------------------------------------------------- |
+| Client      | `lea.petit@example.com`      | réserver et payer un créneau, « Mes réservations », annuler   |
+| Prestataire | `studio.lumiere@example.com` | « Espace prestataire » : calendrier, déplacer une réservation |
+
+Les comptes de démo sont partagés : n'importe qui peut modifier leurs données. Aucun email n'est envoyé aux adresses `@example.com` ; pour recevoir les emails (lien d'inscription, confirmation, rappel), créer un compte avec sa propre adresse.
 
 ## Démarrer
 
@@ -24,7 +39,7 @@ Pour chercher un prestataire : http://localhost:3000/search (liste et carte ; la
 
 Au démarrage, l'API applique les migrations et, si la base est vide, charge un jeu de données de démo (24 prestataires autour de Paris, Lyon et Bordeaux, aux horaires variés ; Padel Mérignac est complet le samedi qui suit le chargement, pour voir le filtre « disponible le »). `pnpm db:seed` remet ce jeu de données à zéro à la demande.
 
-**Comptes de démo** (développement uniquement), mot de passe `creno-demo-2026` :
+**Comptes de démo en local**, mot de passe `creno-demo-2026` (la démo en ligne n'a pas de compte admin) :
 
 | Rôle        | Email                        |
 | ----------- | ---------------------------- |
@@ -74,7 +89,54 @@ packages/config  tsconfig, ESLint, Prettier
 docs/            schéma de la base, décisions d'architecture (ADR)
 ```
 
-- **Schéma relationnel** : [docs/schema.md](docs/schema.md) (diagramme + explication des contraintes).
+```mermaid
+erDiagram
+  users ||--o| providers : "possède (rôle provider)"
+  users ||--o{ bookings : "réserve (client)"
+  users ||--o{ sessions : "appareils connectés"
+  providers ||--o{ resources : propose
+  resources ||--o{ availability_rules : "horaires hebdo"
+  resources ||--o{ availability_exceptions : fermetures
+  resources ||--o{ bookings : "est réservée"
+  bookings ||--o| payments : "est payée par"
+  bookings ||--o{ notifications : déclenche
+
+  users {
+    uuid id PK
+    citext email UK
+    text phone "UK, numéro vérifié seulement"
+    user_role role "customer | provider | admin"
+  }
+  providers {
+    uuid id PK
+    uuid user_id FK
+    geography location "Point 4326, index GiST"
+    text stripe_account_id "compte Connect Express"
+  }
+  resources {
+    uuid id PK
+    uuid provider_id FK
+    text timezone "IANA"
+    int slot_minutes
+    int price_cents
+  }
+  bookings {
+    uuid id PK
+    uuid resource_id FK
+    uuid customer_id FK
+    tstzrange during "[) — EXCLUDE anti-chevauchement"
+    booking_status status "pending | confirmed | cancelled | expired"
+    timestamptz expires_at "hold de 15 min"
+  }
+  payments {
+    uuid id PK
+    uuid booking_id FK
+    text stripe_payment_intent_id UK
+    int amount_cents
+  }
+```
+
+- **Schéma complet** (toutes les tables, contraintes, index, plans d'exécution, rôles et droits) : [docs/schema.md](docs/schema.md).
 - **Décisions** : [docs/adr/](docs/adr/).
 
 ## La requête mise en avant : la double réservation est impossible
@@ -103,6 +165,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Recherche en langage naturel par Mistral (Ministral 3 8B), le modèle ne produit que des filtres** : sortie contrainte par un JSON Schema généré depuis le schéma Zod partagé, revalidée par ce schéma, jamais de SQL ; offre gratuite hébergée dans l'UE, ~0,11 $ les 1 000 recherches au tarif payant (comparé à Mistral Small 4, Claude Haiku 4.5 et Sonnet 5.5 dans l'ADR). → [ADR 0013](docs/adr/0013-ai-search-mistral.md)
 - **Timeout, une seule reprise, circuit breaker, plafond journalier, repli par mots-clés** : la recherche marche toujours, l'IA en panne, lente ou hors budget ne donne jamais d'erreur 5xx, et chaque appel est mesuré (latence, tokens, coût) dans `ai_requests`. → [ADR 0013](docs/adr/0013-ai-search-mistral.md)
 - **Déplacement d'une réservation par un `UPDATE` sous la même contrainte d'exclusion, client prévenu sans devoir accepter** : la base refuse un créneau pris, le client a 24 h pour annuler, trois déplacements au plus, et les notifications portent une révision (une ligne neuve par déplacement, jamais recyclée). → [ADR 0015](docs/adr/0015-provider-reschedule.md)
+- **Hébergement à 0 € : Azure Container Apps mis en veille, Postgres B1ms, Vercel** : l'API descend à zéro réplica sans trafic (quota gratuit), la base reste dans l'offre gratuite de 12 mois, sans VNet (+22 €/mois) ni registre Azure (images sur GHCR) ; deux rôles Postgres (l'API n'a aucun droit de DDL), secrets dans Key Vault, déploiement par OIDC sans secret. → [ADR 0016](docs/adr/0016-deploiement-azure-container-apps.md)
 - **Filtre « disponible le » calculé par le moteur de créneaux, pas en SQL** : 200 candidats de la recherche, chargement par lot (5 requêtes), même résultat que la fiche du prestataire, changements d'heure compris. → [ADR 0014](docs/adr/0014-date-filter-slot-engine.md)
 
 ## Recherche géographique
@@ -211,15 +274,33 @@ docker compose exec db psql -U creno -c "select name, cron from pgboss.schedule;
 ## Authentification et autorisations
 
 - Inscription (client ou prestataire) **par lien envoyé par email** : on ne saisit d'abord que son adresse, puis rôle, nom et mot de passe depuis le lien reçu ; le formulaire répond la même chose que l'adresse soit déjà inscrite ou non. Connexion, « Mon compte » avec la liste des appareils connectés.
-- Access token JWT de 15 min et refresh token de 30 jours, tous deux en cookies `HttpOnly` ; le navigateur ne parle qu'au front (`/api/*` est réécrit vers l'API), les cookies restent donc first-party.
+- Access token JWT de 15 min et refresh token de 30 jours, tous deux en cookies `HttpOnly` ; le navigateur ne parle qu'au front (`/api/*` est relayé vers l'API par `proxy.ts`), les cookies restent donc first-party.
 - **Refresh rotatif** : chaque renouvellement remplace le refresh token (compare-and-swap en base). Un ancien token rejoué après 10 s révoque la session : c'est le signe d'un vol.
 - Mots de passe hachés en argon2id ; même réponse et même durée pour « mauvais mot de passe » et « email inconnu ».
 - Autorisation par **rôle** (`@Roles('admin')`) et par **propriété**, vérifiée dans les services : lire le compte ou révoquer la session d'un autre utilisateur renvoie 403 (tests IDOR).
 - Helmet, vérification de l'en-tête `Origin`, limitation du nombre de tentatives sur les routes d'auth (429).
+- **IP réelle du visiteur** : tous les appels arrivent de Vercel ; le serveur Next transmet l'IP du visiteur avec un secret partagé, sans lequel l'API l'ignore. Les limites de débit comptent donc par visiteur (par compte pour les lectures et réservations authentifiées, par IP pour les SMS, l'IA et les identifiants).
+- **Front** : Content Security Policy avec un nonce par requête (aucun script inline sans lui), HSTS, `nosniff`, `Permissions-Policy` ; réponses de l'API en `Cache-Control: no-store`.
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format, lint, typecheck, migrations sur une base PostGIS éphémère, tests, cohérence schéma/migrations (`drizzle-kit check`), build, et scan de secrets (gitleaks). _Déploiement Azure (API) et Vercel (web) : à venir._
+GitHub Actions, toutes les actions épinglées par SHA :
+
+- **CI** (`.github/workflows/ci.yml`, chaque PR et `main`) : format, lint, typecheck, migrations sur une base PostGIS éphémère, tests, cohérence schéma/migrations (`drizzle-kit check`), build, compilation du Bicep, scan de secrets (gitleaks). Le job **`prod-image`** construit l'image de production, lance le job de migration puis démarre l'API en mode production sous le rôle applicatif sans DDL, vérifie `/health/ready`, et pousse l'image sur GHCR.
+- **Déploiement** (`.github/workflows/deploy-api.yml`, après un merge sur `main` si tout est vert) : connexion à Azure par **OIDC** (aucun secret chez GitHub), job de migration, nouvelle révision de l'API avec le digest de l'image testée, puis smoke test : `GET /health` doit renvoyer le nouveau commit. Une migration en échec arrête tout, l'API garde l'ancienne image.
+- **Front** : Vercel déploie chaque PR (preview) et `main` (production).
+
+## Déploiement
+
+| Partie                        | Hébergement                                       | Coût                        |
+| ----------------------------- | ------------------------------------------------- | --------------------------- |
+| Front Next.js                 | Vercel, fonctions à Paris                         | 0 € (Hobby)                 |
+| API NestJS + job de migration | Azure Container Apps (Consumption, 0 à 1 réplica) | 0 € (quota mensuel gratuit) |
+| PostgreSQL 17 + PostGIS       | Azure Database for PostgreSQL, B1ms, 32 Go        | 0 € pendant 12 mois         |
+| Secrets, journaux             | Key Vault, Log Analytics                          | ≈ 0 €                       |
+| Images                        | GitHub Container Registry                         | 0 €                         |
+
+Infra décrite en Bicep ([infra/main.bicep](infra/main.bicep)) ; mise en place, exploitation et garde-fous de coût dans le **runbook** [docs/deploy.md](docs/deploy.md).
 
 ## Observabilité
 
@@ -227,52 +308,61 @@ GitHub Actions (`.github/workflows/ci.yml`) sur chaque PR et sur `main` : format
 - Notifications : `notification.sent` (latence, numéro d'essai), `notification.retry` et `notification.skipped` (canal non configuré) en `warn`, `notification.failed` en `error` ; les logs d'un job portent un `jobId` à la place du `requestId`, jamais de destinataire ni de contenu. Ménage : `maintenance.holds_expired`, `maintenance.sessions_purged`, `maintenance.stripe_events_purged`.
 - Recherche en langage naturel : `ai.request` (issue, tentatives, latence, tokens, coût ; `info` si le modèle a répondu, `warn` en repli, `error` si la clé ou la requête est refusée), `ai.retry`, `ai.circuit_opened` et `ai.budget_exceeded` en `warn`, `ai.circuit_closed` en `info`, `ai.persist_failed` en `error` ; jamais la phrase, le lieu ni le message d'une erreur du fournisseur. `search.performed` dit si une date était demandée (`hasDate`).
 - Logs JSON (pino) avec un `requestId` par requête (repris de l'en-tête `x-request-id` s'il est fourni) et un champ `event` pour les événements métier ; emails, téléphones, cookies et en-têtes d'authentification sont masqués, ainsi que la query string des routes de recherche et de géocodage (position du visiteur, adresse saisie).
-- `GET /health` (liveness, ne dépend pas de la base) et `GET /health/ready` (readiness, 503 si la base est injoignable).
-- _Sentry : à venir._
+- `GET /health` (liveness, ne dépend pas de la base, renvoie le commit déployé) et `GET /health/ready` (readiness, 503 si la base est injoignable).
+- **Sentry** (API et front, région UE) : chaque log `error` devient une erreur Sentry, construite depuis la ligne JSON déjà masquée par pino ; ni cookie, ni en-tête, ni corps, ni query string, ni IP. Le navigateur passe par un tunnel (`/monitoring`) sur le domaine du front. `release` = commit déployé.
+- **Production** : logs JSON dans Log Analytics (30 jours, requête KQL dans le [runbook](docs/deploy.md#exploitation)) ; `ipSource` dit pour chaque requête si l'IP du visiteur a été reconnue.
 
 ## Variables d'environnement
 
-| Variable                           | Utilisée par     | Défaut / exemple                                   | Rôle                                                                                                                         |
-| ---------------------------------- | ---------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                         | api, web         | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                                            |
-| `DB_PORT`                          | docker compose   | `5432`                                             | port exposé de Postgres                                                                                                      |
-| `DATABASE_URL`                     | api, db          | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                                              |
-| `DATABASE_URL_TEST`                | tests            | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                                 |
-| `API_PORT`                         | api              | `4000`                                             | port HTTP de l'API                                                                                                           |
-| `LOG_LEVEL`                        | api              | `info`                                             | niveau des logs pino                                                                                                         |
-| `WEB_ORIGIN`                       | api              | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                                     |
-| `API_INTERNAL_URL`                 | web (serveur)    | `http://localhost:4000`                            | URL de l'API pour le rewrite `/api/*` et les Server Components                                                               |
-| `JWT_ACCESS_SECRET`                | api              | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production                 |
-| `ACCESS_TOKEN_TTL_MINUTES`         | api              | `15`                                               | durée de vie de l'access token                                                                                               |
-| `REFRESH_TOKEN_TTL_DAYS`           | api              | `30`                                               | durée de vie (glissante) d'une session                                                                                       |
-| `AUTH_RATE_LIMIT_PER_MINUTE`       | api              | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                                    |
-| `REGISTRATION_RATE_LIMIT_PER_HOUR` | api              | `20`                                               | demandes d'inscription par heure et par IP (chacune envoie un email)                                                         |
-| `PUBLIC_RATE_LIMIT_PER_MINUTE`     | api              | `120`                                              | lectures publiques (fiche, ressource, créneaux, recherche, géocodage) par minute, par IP et par route                        |
-| `BOOKING_RATE_LIMIT_PER_MINUTE`    | api              | `20`                                               | demandes de réservation par minute et par IP                                                                                 |
-| `PHONE_CODE_RATE_LIMIT_PER_HOUR`   | api              | `10`                                               | demandes de code de vérification du téléphone par heure et par IP (chacune envoie un SMS)                                    |
-| `TRUST_PROXY`                      | api              | `false`                                            | nombre de proxys devant l'API (IP réelle pour le rate limit)                                                                 |
-| `GEOCODER_URL`                     | api              | `https://data.geopf.fr/geocodage`                  | géocodeur d'adresses (API Adresse de l'État, sans clé)                                                                       |
-| `STRIPE_SECRET_KEY`                | api, stripe-cli  | vide                                               | clé secrète Stripe ; vide : paiements indisponibles (503). Clé de test obligatoire hors production                           |
-| `STRIPE_WEBHOOK_SECRET`            | api              | vide                                               | secret de signature du webhook (`whsec_…`), affiché par le service `stripe-cli`                                              |
-| `STRIPE_CONNECT_WEBHOOK_SECRET`    | api              | vide                                               | production : secret de l'endpoint « Connect » (`account.updated`)                                                            |
-| `STRIPE_PLATFORM_FEE_BPS`          | api              | `1000`                                             | commission Creno en points de base (1000 = 10 %)                                                                             |
-| `SEED_STRIPE_ACCOUNT_ID`           | seed             | vide                                               | compte Express de test rattaché à « Studio Lumière » par le seed                                                             |
-| `RESEND_API_KEY`                   | api              | vide                                               | clé API Resend (`re_…`) pour les emails ; obligatoire en production                                                          |
-| `EMAIL_FROM`                       | api              | `Creno <onboarding@resend.dev>`                    | expéditeur des emails (domaine vérifié chez Resend)                                                                          |
-| `MAILPIT_URL`                      | api              | `http://mailpit:8025` (docker compose)             | boîte de réception de dev, utilisée sans clé Resend ; refusée en production                                                  |
-| `TWILIO_ACCOUNT_SID`               | api              | vide                                               | compte Twilio pour les SMS (code, rappel) ; les trois variables `TWILIO_*` ensemble, ou aucune                               |
-| `TWILIO_AUTH_TOKEN`                | api              | vide                                               | jeton d'authentification Twilio                                                                                              |
-| `TWILIO_FROM`                      | api              | vide                                               | numéro expéditeur (`+33…`) ou Messaging Service (`MG…`)                                                                      |
-| `SMS_ALLOWED_PREFIXES`             | api              | `+336,+337`                                        | préfixes des numéros qui peuvent recevoir un SMS (mobiles français par défaut)                                               |
-| `MISTRAL_API_KEY`                  | api              | vide                                               | clé Mistral AI pour la recherche en langage naturel ; vide : analyse par mots-clés. Désactiver l'entraînement dans le compte |
-| `AI_MODEL`                         | api              | `ministral-8b-2512`                                | version datée du modèle (son tarif sert au calcul du coût) ; `mistral-small-2603` pour Mistral Small 4                       |
-| `AI_TIMEOUT_MS`                    | api              | `3000`                                             | timeout de chaque appel au modèle (de 100 à 10 000 ms)                                                                       |
-| `AI_RATE_LIMIT_PER_MINUTE`         | api              | `10`                                               | phrases interprétées par minute et par IP                                                                                    |
-| `AI_DAILY_REQUEST_CAP`             | api              | `500`                                              | appels au modèle par jour (UTC), toutes IP confondues ; `0` coupe l'IA                                                       |
-| `JOBS_WORKERS_ENABLED`             | api              | `true`                                             | `false` : l'instance crée des jobs sans les exécuter (ni workers, ni tâches planifiées)                                      |
-| `NEXT_PUBLIC_MAPBOX_TOKEN`         | web (navigateur) | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé                              |
+| Variable                                            | Utilisée par       | Défaut / exemple                                   | Rôle                                                                                                                         |
+| --------------------------------------------------- | ------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                                          | api, web           | `development`                                      | environnement (obligatoire pour l'API : pas de valeur par défaut)                                                            |
+| `DB_PORT`                                           | docker compose     | `5432`                                             | port exposé de Postgres                                                                                                      |
+| `DATABASE_URL`                                      | api, db            | `postgres://creno:creno@localhost:5432/creno`      | base principale                                                                                                              |
+| `DATABASE_URL_TEST`                                 | tests              | `postgres://creno:creno@localhost:5432/creno_test` | base des tests d'intégration                                                                                                 |
+| `DATABASE_URL_MIGRATE`                              | job de migration   | vide                                               | production : URL du rôle de migration (propriétaire des objets) ; `DATABASE_URL` est alors celle du rôle de l'API            |
+| `API_PORT`                                          | api                | `4000`                                             | port HTTP de l'API                                                                                                           |
+| `LOG_LEVEL`                                         | api                | `info`                                             | niveau des logs pino                                                                                                         |
+| `WEB_ORIGIN`                                        | api                | `http://localhost:3000`                            | origine autorisée (CORS)                                                                                                     |
+| `API_INTERNAL_URL`                                  | web (serveur)      | `http://localhost:4000`                            | URL de l'API pour le relais `/api/*` (`proxy.ts`) et les Server Components ; https obligatoire sur Vercel                    |
+| `JWT_ACCESS_SECRET`                                 | api                | valeur d'exemple (dev)                             | secret de signature des access tokens, 32 caractères minimum ; la valeur d'exemple est refusée en production                 |
+| `ACCESS_TOKEN_TTL_MINUTES`                          | api                | `15`                                               | durée de vie de l'access token                                                                                               |
+| `REFRESH_TOKEN_TTL_DAYS`                            | api                | `30`                                               | durée de vie (glissante) d'une session                                                                                       |
+| `AUTH_RATE_LIMIT_PER_MINUTE`                        | api                | `10`                                               | tentatives de login/inscription par minute et par IP (×3 pour le refresh)                                                    |
+| `REGISTRATION_RATE_LIMIT_PER_HOUR`                  | api                | `20`                                               | demandes d'inscription par heure et par IP (chacune envoie un email)                                                         |
+| `PUBLIC_RATE_LIMIT_PER_MINUTE`                      | api                | `120`                                              | lectures publiques (fiche, ressource, créneaux, recherche, géocodage) par minute, par IP et par route                        |
+| `BOOKING_RATE_LIMIT_PER_MINUTE`                     | api                | `20`                                               | demandes de réservation par minute et par IP                                                                                 |
+| `PHONE_CODE_RATE_LIMIT_PER_HOUR`                    | api                | `10`                                               | demandes de code de vérification du téléphone par heure et par IP (chacune envoie un SMS)                                    |
+| `TRUST_PROXY`                                       | api                | `false`                                            | nombre de proxys devant l'API (`1` derrière Container Apps) ; `false` et `true` refusés en production                        |
+| `CLIENT_IP_SECRET`                                  | api, web           | vide                                               | secret partagé : l'API ne croit l'IP transmise par le front que s'il l'accompagne ; obligatoire en production (même valeur)  |
+| `DEMO_MODE`                                         | api                | `false`                                            | démo publique : clé Stripe de test exigée, Twilio facultatif, seed de démo sur base vide                                     |
+| `SENTRY_DSN`                                        | api                | vide                                               | erreurs vers Sentry ; vide : rien n'est envoyé                                                                               |
+| `SENTRY_RELEASE`                                    | api                | `dev`                                              | commit déployé, posé dans l'image par la CI (`GET /health`, erreurs Sentry)                                                  |
+| `GEOCODER_URL`                                      | api                | `https://data.geopf.fr/geocodage`                  | géocodeur d'adresses (API Adresse de l'État, sans clé)                                                                       |
+| `STRIPE_SECRET_KEY`                                 | api, stripe-cli    | vide                                               | clé secrète Stripe ; vide : paiements indisponibles (503). Test hors production et en démo, live en vraie production         |
+| `STRIPE_WEBHOOK_SECRET`                             | api                | vide                                               | secret de signature du webhook (`whsec_…`), affiché par le service `stripe-cli`                                              |
+| `STRIPE_CONNECT_WEBHOOK_SECRET`                     | api                | vide                                               | production : secret de l'endpoint « Connect » (`account.updated`)                                                            |
+| `STRIPE_PLATFORM_FEE_BPS`                           | api                | `1000`                                             | commission Creno en points de base (1000 = 10 %)                                                                             |
+| `SEED_STRIPE_ACCOUNT_ID`                            | seed               | vide                                               | compte Express de test rattaché à « Studio Lumière » par le seed                                                             |
+| `RESEND_API_KEY`                                    | api                | vide                                               | clé API Resend (`re_…`) pour les emails ; obligatoire en production                                                          |
+| `EMAIL_FROM`                                        | api                | `Creno <onboarding@resend.dev>`                    | expéditeur des emails (domaine vérifié chez Resend)                                                                          |
+| `MAILPIT_URL`                                       | api                | `http://mailpit:8025` (docker compose)             | boîte de réception de dev, utilisée sans clé Resend ; refusée en production                                                  |
+| `TWILIO_ACCOUNT_SID`                                | api                | vide                                               | compte Twilio pour les SMS (code, rappel) ; les trois variables `TWILIO_*` ensemble, ou aucune                               |
+| `TWILIO_AUTH_TOKEN`                                 | api                | vide                                               | jeton d'authentification Twilio                                                                                              |
+| `TWILIO_FROM`                                       | api                | vide                                               | numéro expéditeur (`+33…`) ou Messaging Service (`MG…`)                                                                      |
+| `SMS_ALLOWED_PREFIXES`                              | api                | `+336,+337`                                        | préfixes des numéros qui peuvent recevoir un SMS (mobiles français par défaut)                                               |
+| `MISTRAL_API_KEY`                                   | api                | vide                                               | clé Mistral AI pour la recherche en langage naturel ; vide : analyse par mots-clés. Désactiver l'entraînement dans le compte |
+| `AI_MODEL`                                          | api                | `ministral-8b-2512`                                | version datée du modèle (son tarif sert au calcul du coût) ; `mistral-small-2603` pour Mistral Small 4                       |
+| `AI_TIMEOUT_MS`                                     | api                | `3000`                                             | timeout de chaque appel au modèle (de 100 à 10 000 ms)                                                                       |
+| `AI_RATE_LIMIT_PER_MINUTE`                          | api                | `10`                                               | phrases interprétées par minute et par IP                                                                                    |
+| `AI_DAILY_REQUEST_CAP`                              | api                | `500`                                              | appels au modèle par jour (UTC), toutes IP confondues ; `0` coupe l'IA                                                       |
+| `JOBS_WORKERS_ENABLED`                              | api                | `true`                                             | `false` : l'instance crée des jobs sans les exécuter (ni workers, ni tâches planifiées)                                      |
+| `NEXT_PUBLIC_MAPBOX_TOKEN`                          | web (navigateur)   | vide                                               | token **public** Mapbox (`pk.…`) pour la carte ; vide : liste seule. Un token secret est refusé                              |
+| `NEXT_PUBLIC_DEMO_MODE`                             | web (navigateur)   | `false`                                            | bandeau « Démo » sur toutes les pages                                                                                        |
+| `NEXT_PUBLIC_SENTRY_DSN`                            | web                | vide                                               | erreurs du front vers Sentry (DSN public par nature)                                                                         |
+| `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | build web (Vercel) | vide                                               | envoi des sourcemaps à Sentry au build ; sans jeton, build normal                                                            |
 
-La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Les variables lues par le navigateur le sont dans `apps/web/lib/env.ts`. Aucun secret n'est versionné.
+La configuration de l'API est validée par Zod au démarrage (`apps/api/src/config/env.ts`) : une variable manquante ou invalide empêche l'API de démarrer. Côté front : `apps/web/lib/env.ts` (navigateur) et `apps/web/lib/api/upstream.ts` (serveur, vérifiées à l'exécution). En production, les secrets de l'API sont dans Key Vault et ceux du front dans Vercel. Aucun secret n'est versionné.
 
 ## Licence
 
