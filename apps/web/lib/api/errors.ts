@@ -26,6 +26,8 @@ const messages: Partial<Record<ErrorCode, string>> = {
   RESCHEDULE_NOT_ALLOWED: 'Cette réservation ne peut plus être déplacée.',
   PHONE_NOT_ALLOWED: 'Seuls les numéros mobiles français (06 ou 07) sont acceptés pour l’instant.',
   PHONE_CODE_INVALID: 'Code incorrect ou expiré.',
+  SMS_UNAVAILABLE: "La vérification par SMS n'est pas disponible dans la démo.",
+  PAYLOAD_TOO_LARGE: 'Envoi trop volumineux.',
   SEARCH_DATE_OUT_OF_RANGE: `Choisissez une date entre aujourd'hui et dans ${BOOKING_HORIZON_DAYS} jours.`,
 };
 

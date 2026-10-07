@@ -1,4 +1,5 @@
 import { healthResponseSchema } from '@creno/shared';
+import { API_TIMEOUT_MS, apiInternalUrl } from '@/lib/api/upstream';
 
 export type ApiStatus = 'up' | 'down';
 
@@ -11,11 +12,12 @@ export function toApiStatus(httpStatus: number, body: unknown): ApiStatus {
 
 /** Appel serveur (Server Component) : l'URL interne de l'API n'est jamais exposée au navigateur. */
 export async function fetchApiStatus(): Promise<ApiStatus> {
-  const apiUrl = process.env.API_INTERNAL_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${apiUrl}/health/ready`, {
+    // Le premier appel après une mise en veille réveille l'API : la carte d'état s'affiche en différé
+    // (Suspense) pendant ce temps.
+    const res = await fetch(`${apiInternalUrl()}/health/ready`, {
       cache: 'no-store',
-      signal: AbortSignal.timeout(2000),
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
     return toApiStatus(res.status, await res.json().catch(() => null));
   } catch {

@@ -3,8 +3,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Global, Module } from '@nestjs/common';
 import type { Request } from 'express';
 import type { Params } from 'nestjs-pino';
-import type { DestinationStream } from 'pino';
+import * as Sentry from '@sentry/nestjs';
+import { type DestinationStream, multistream } from 'pino';
 import type { AppConfig } from '../config/env.js';
+import { sentryErrorStream } from './sentry.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
 const REQUEST_ID_FORMAT = /^[A-Za-z0-9._-]{8,128}$/;
@@ -108,5 +110,17 @@ export function loggerParams(config: AppConfig, stream: DestinationStream | null
     redact: { paths: REDACT_PATHS, censor: '[redacted]' },
     serializers: { req: loggableRequest },
   } satisfies Params['pinoHttp'];
-  return { pinoHttp: stream ? [options, stream] : options };
+  return { pinoHttp: [options, stream ?? defaultDestination()] };
+}
+
+/**
+ * stdout, plus Sentry pour les logs `error` quand il est initialisé (instrument.ts) : chaque erreur
+ * qui demande une action arrive dans Sentry, après la redaction de pino.
+ */
+function defaultDestination(): DestinationStream {
+  if (!Sentry.isInitialized()) return process.stdout;
+  return multistream([
+    { level: 'trace', stream: process.stdout },
+    { level: 'error', stream: sentryErrorStream() },
+  ]);
 }
