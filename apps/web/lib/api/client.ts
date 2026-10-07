@@ -41,7 +41,7 @@ function send(
 }
 
 /**
- * Appel de l'API depuis le navigateur, via le rewrite `/api/*` (cookies HttpOnly first-party).
+ * Appel de l'API depuis le navigateur, via le relais `/api/v1/*` de proxy.ts (cookies HttpOnly first-party).
  * Sur 401, tente un refresh de session puis rejoue la requête une fois.
  */
 export async function apiFetch<T extends z.ZodType>(
