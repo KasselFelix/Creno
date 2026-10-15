@@ -51,7 +51,7 @@ export CRENO_PG_ADMIN_PASSWORD="$(openssl rand -hex 32)"
 ```bash
 cd creno
 az deployment group what-if -g rg-creno --parameters infra/main.bicepparam
-az deployment group create -g rg-creno --parameters infra/main.bicepparam
+az deployment group create -g rg-creno -n main --parameters infra/main.bicepparam
 
 out() { az deployment group show -g rg-creno -n main --query "properties.outputs.$1.value" -o tsv; }
 export KV="$(out keyVaultName)" KV_MIGRATE="$(out migrationKeyVaultName)"
@@ -103,7 +103,7 @@ Compte Stripe de démo (facultatif) : l'identifiant `acct_…` d'un compte Expre
 
 ## 5. Première image
 
-Pousser la branche et ouvrir la PR : le job `prod-image` de la CI construit l'image, la teste (migration + API sous le rôle applicatif) et la pousse sur `ghcr.io/kasselfelix/creno-api:<sha>`.
+Pousser la branche et ouvrir la PR : le job `prod-image` de la CI construit l'image, la teste (migration + API sous le rôle applicatif) et la pousse sur `ghcr.io/kasselfelix/creno-api:<sha>`. Sur une PR, `<sha>` est celui du commit de merge que GitHub prépare (`refs/pull/<n>/merge`), pas le dernier commit de la branche : le relire dans le résumé du job ou dans Packages → `creno-api`.
 
 1. GitHub → Packages → `creno-api` → Package settings → **Change visibility → Public** (une fois : Container Apps la tire sans identifiants ; l'image ne contient aucun secret).
 2. Récupérer son digest (immuable) :
@@ -115,7 +115,7 @@ Pousser la branche et ouvrir la PR : le job `prod-image` de la CI construit l'im
 ## 6. Infra, second passage (API et job de migration)
 
 ```bash
-az deployment group create -g rg-creno --parameters infra/main.bicepparam
+az deployment group create -g rg-creno -n main --parameters infra/main.bicepparam
 
 # Premier lancement du job : migrations, schéma pg-boss, rôle creno_app, seed de démo.
 az config set extension.use_dynamic_install=yes_without_prompt

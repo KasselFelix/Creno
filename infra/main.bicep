@@ -283,7 +283,7 @@ var apiEnv = concat(
     { name: 'WEB_ORIGIN', value: webOrigin }
     // Un proxy de confiance devant l'API : l'ingress de Container Apps (Envoy).
     { name: 'TRUST_PROXY', value: '1' }
-    { name: 'DEMO_MODE', value: string(demoMode) }
+    { name: 'DEMO_MODE', value: demoMode ? 'true' : 'false' }
     { name: 'EMAIL_FROM', value: emailFrom }
     { name: 'JOBS_WORKERS_ENABLED', value: 'true' }
   ],
@@ -398,7 +398,7 @@ resource migrateJob 'Microsoft.App/jobs@2024-03-01' = if (deployApp) {
             { name: 'NODE_ENV', value: 'production' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }
             { name: 'DATABASE_URL_MIGRATE', secretRef: 'database-url-migrate' }
-            { name: 'DEMO_MODE', value: string(demoMode) }
+            { name: 'DEMO_MODE', value: demoMode ? 'true' : 'false' }
             { name: 'SEED_STRIPE_ACCOUNT_ID', value: seedStripeAccountId }
           ]
         }
