@@ -2,13 +2,13 @@
 
 Marketplace de réservation de créneaux (salles, coiffeurs, terrains, photographes) : carte interactive, calendrier de disponibilités, paiement Stripe Connect, confirmations email/SMS et recherche en langage naturel.
 
-Projet portfolio terminé, livré en neuf étapes (une PR chacune) : socle technique, authentification, disponibilités, recherche géographique, réservation payée, notifications, recherche en langage naturel, dashboard prestataire, puis mise en ligne. Ce qui compte ici : la base qui garantit l'absence de double réservation, les migrations, la CI/CD, les tests sur une vraie base, les logs sans donnée personnelle et les arbitrages expliqués ci-dessous.
+Projet terminé, livré en neuf étapes (une PR chacune) : socle technique, authentification, disponibilités, recherche géographique, réservation payée, notifications, recherche en langage naturel, dashboard prestataire, mise en ligne. La base qui garantit l'absence de double réservation, les migrations, la CI/CD, les tests, les logs sans donnée personnelle et les arbitrages sont expliqués ci-dessous.
 
 ![Recherche, fiche prestataire et réservation](docs/demo.gif)
 
 ## Démo en ligne
 
-**https://creno.DOMAINE_A_RENSEIGNER** — démo en mode test : aucun vrai paiement, carte `4242 4242 4242 4242` (date future, n'importe quel code). L'API se met en veille après 5 minutes sans visite : le premier chargement peut prendre une vingtaine de secondes.
+**https://creno.kassel-f.pro** — démo en mode test : aucun vrai paiement, carte `4242 4242 4242 4242` (date future, n'importe quel code). L'API se met en veille après 5 minutes sans visite : le premier chargement peut prendre une vingtaine de secondes.
 
 Mot de passe des comptes de démo : `creno-demo-2026`.
 
@@ -63,7 +63,7 @@ docker compose up -d api                         # relit .env
 
 Ensuite : connecté en prestataire, « Espace prestataire » → « Activer les paiements » (formulaire Stripe de test) ; connecté en client, réserver un créneau et payer avec la carte `4242 4242 4242 4242`. Pour ne pas refaire l'onboarding après chaque `pnpm db:seed`, mettre l'identifiant du compte créé (`acct_…`) dans `SEED_STRIPE_ACCOUNT_ID`.
 
-**Recherche en langage naturel (facultatif)** : sans clé, la phrase est analysée par mots-clés et tout fonctionne. Pour l'interpréter avec Mistral : créer une clé sur https://console.mistral.ai (niveau gratuit, sans carte bancaire), **désactiver l'entraînement sur vos données** (Settings → Privacy, activé par défaut sur l'offre gratuite), puis la mettre dans `.env` (`MISTRAL_API_KEY`) et relancer l'API (`docker compose up -d api`).
+**Recherche en langage naturel (facultatif)** : sans clé Mistral, la phrase est analysée par mots-clés et tout fonctionne. Pour l'interpréter avec Mistral : créer une clé sur https://console.mistral.ai (niveau gratuit, sans carte bancaire), **désactiver l'entraînement sur vos données** (Settings → Privacy, activé par défaut sur l'offre gratuite), puis la mettre dans `.env` (`MISTRAL_API_KEY`) et relancer l'API (`docker compose up -d api`).
 
 > Après un changement de dépendances (`package.json`), reconstruire avec `docker compose up -d --build -V` : sans `-V` (`--renew-anon-volumes`), Compose réutilise les anciens `node_modules` des conteneurs.
 
@@ -165,7 +165,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Recherche en langage naturel par Mistral (Ministral 3 8B), le modèle ne produit que des filtres** : sortie contrainte par un JSON Schema généré depuis le schéma Zod partagé, revalidée par ce schéma, jamais de SQL ; offre gratuite hébergée dans l'UE, ~0,11 $ les 1 000 recherches au tarif payant (comparé à Mistral Small 4, Claude Haiku 4.5 et Sonnet 5.5 dans l'ADR). → [ADR 0013](docs/adr/0013-ai-search-mistral.md)
 - **Timeout, une seule reprise, circuit breaker, plafond journalier, repli par mots-clés** : la recherche marche toujours, l'IA en panne, lente ou hors budget ne donne jamais d'erreur 5xx, et chaque appel est mesuré (latence, tokens, coût) dans `ai_requests`. → [ADR 0013](docs/adr/0013-ai-search-mistral.md)
 - **Déplacement d'une réservation par un `UPDATE` sous la même contrainte d'exclusion, client prévenu sans devoir accepter** : la base refuse un créneau pris, le client a 24 h pour annuler, trois déplacements au plus, et les notifications portent une révision (une ligne neuve par déplacement, jamais recyclée). → [ADR 0015](docs/adr/0015-provider-reschedule.md)
-- **Hébergement à 0 € : Azure Container Apps mis en veille, Postgres B1ms, Vercel** : l'API descend à zéro réplica sans trafic (quota gratuit), la base reste dans l'offre gratuite de 12 mois, sans VNet (+22 €/mois) ni registre Azure (images sur GHCR) ; deux rôles Postgres (l'API n'a aucun droit de DDL), secrets dans Key Vault, déploiement par OIDC sans secret. → [ADR 0016](docs/adr/0016-deploiement-azure-container-apps.md)
+- **Hébergement : Azure Container Apps mis en veille, Postgres B1ms, Vercel** : l'API descend à zéro réplica sans trafic (quota gratuit), la base reste dans l'offre gratuite de 12 mois, sans VNet (+22 €/mois) ni registre Azure (images sur GHCR) ; deux rôles Postgres (l'API n'a aucun droit de DDL), secrets dans Key Vault, déploiement par OIDC sans secret. → [ADR 0016](docs/adr/0016-deploiement-azure-container-apps.md)
 - **Filtre « disponible le » calculé par le moteur de créneaux, pas en SQL** : 200 candidats de la recherche, chargement par lot (5 requêtes), même résultat que la fiche du prestataire, changements d'heure compris. → [ADR 0014](docs/adr/0014-date-filter-slot-engine.md)
 
 ## Recherche géographique
