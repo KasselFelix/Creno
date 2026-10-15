@@ -132,7 +132,7 @@ Si l'API a démarré avant le job (rôle absent), `/health/ready` répond 503 : 
 
 ## 7. GitHub et Vercel
 
-**GitHub**, Settings → Environments → `production` : « Deployment branches » = `main` seulement. Puis Settings → Secrets and variables → Actions → **Variables** (pas des secrets : rien de sensible) :
+**GitHub**, Settings → Environments → `production` : « Deployment branches » = `main` seulement. Si Vercel a déjà créé `Production` (premier déploiement), c'est le même environnement (GitHub ignore la casse) : le configurer lui ; le Bicep accepte les deux casses dans l'identifiant fédéré. Puis Settings → Secrets and variables → Actions → **Variables** (pas des secrets : rien de sensible) :
 
 | Variable                | Valeur                                       |
 | ----------------------- | -------------------------------------------- |

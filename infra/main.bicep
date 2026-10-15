@@ -187,6 +187,19 @@ resource githubFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/fede
   }
 }
 
+// L'intégration Vercel crée l'environnement GitHub « Production » : GitHub ignore la casse des noms,
+// Azure non. Les identifiants fédérés d'une identité s'écrivent l'un après l'autre (dependsOn).
+resource githubFederationCapitalized 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: githubIdentity
+  name: 'github-production-capitalized'
+  properties: {
+    issuer: 'https://token.actions.githubusercontent.com'
+    subject: 'repo:${githubRepository}:environment:Production'
+    audiences: ['api://AzureADTokenExchange']
+  }
+  dependsOn: [githubFederation]
+}
+
 // ─── Base de données ─────────────────────────────────────────────────────────────────────────
 resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2025-08-01' = {
   name: 'psql-creno-${suffix}'
