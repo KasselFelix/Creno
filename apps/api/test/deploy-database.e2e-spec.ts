@@ -2,13 +2,14 @@ import { randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, type DbHandle, providers, sqlState, users } from '@creno/db';
+import { createDb, type DbHandle, ensureAppRole, providers, sqlState, users } from '@creno/db';
 import { deployDatabase, describeDeployError } from '../src/cli/deploy-database.js';
 import { testDatabaseUrl } from './app.js';
 
 const suffix = randomBytes(4).toString('hex');
 const DATABASE = `creno_deploy_${suffix}`;
 const APP_ROLE = `creno_app_${suffix}`;
+const ADMIN_ROLE = `creno_admin_${suffix}`;
 // Mot de passe tiré au hasard : aucun secret en dur dans le dépôt.
 const APP_PASSWORD = randomBytes(24).toString('hex');
 const STRIPE_ACCOUNT = `acct_seed${suffix}`;
@@ -54,6 +55,7 @@ describe('job de migration (base neuve, rôle applicatif)', () => {
     await app?.pool.end();
     await server.db.execute(sql.raw(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`));
     await server.db.execute(sql.raw(`DROP ROLE IF EXISTS ${APP_ROLE}`));
+    await server.db.execute(sql.raw(`DROP ROLE IF EXISTS ${ADMIN_ROLE}`));
     await server.pool.end();
   }, 150_000);
 
@@ -125,6 +127,39 @@ describe('job de migration (base neuve, rôle applicatif)', () => {
     ]);
     expect(await app.db.select({ id: users.id }).from(users)).toHaveLength(before.length);
   }, 60_000);
+
+  it('relancé par un admin sans SUPERUSER (comme sur Azure) : le rôle applicatif est mis à jour', async () => {
+    // Sur Azure, le rôle de migration n'est pas superutilisateur ; il a créé le rôle applicatif, donc
+    // en détient l'option ADMIN (PostgreSQL 16+). Les tests tournent sinon en superutilisateur.
+    const admin = { name: ADMIN_ROLE, password: randomBytes(24).toString('hex') };
+    await server.db.execute(
+      sql.raw(
+        `CREATE ROLE ${admin.name} LOGIN CREATEROLE NOSUPERUSER PASSWORD '${admin.password}'`,
+      ),
+    );
+    await server.db.execute(sql.raw(`GRANT ${APP_ROLE} TO ${admin.name} WITH ADMIN OPTION`));
+    const handle = createDb(urlFor(DATABASE, admin), { max: 1 });
+    try {
+      await ensureAppRole(handle.db, { name: APP_ROLE, password: APP_PASSWORD });
+    } finally {
+      await handle.pool.end();
+    }
+    const [row] = (await app.db.execute<{ ok: number }>(sql`SELECT 1 AS ok`)).rows;
+    expect(row?.ok).toBe(1);
+  });
+
+  it('refuse un rôle applicatif qui a des droits d’administration (CREATEDB…)', async () => {
+    await server.db.execute(sql.raw(`ALTER ROLE ${APP_ROLE} CREATEDB`));
+    const handle = createDb(adminUrl(), { max: 1 });
+    try {
+      await expect(
+        ensureAppRole(handle.db, { name: APP_ROLE, password: APP_PASSWORD }),
+      ).rejects.toThrow(/droits d'administration/);
+    } finally {
+      await handle.pool.end();
+      await server.db.execute(sql.raw(`ALTER ROLE ${APP_ROLE} NOCREATEDB`));
+    }
+  });
 
   it('un échec de requête ne journalise que le code SQL, jamais le mot de passe', () => {
     const queryError = Object.assign(

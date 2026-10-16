@@ -11,8 +11,11 @@ param location string = resourceGroup().location
 @description('Identifiant d\'objet Entra de la personne qui déploie : reçoit le droit d\'écrire les secrets du coffre.')
 param operatorObjectId string
 
+// Sujet OIDC de GitHub au format à identifiants immuables (propriétaire@id/dépôt@id) : un dépôt
+// recréé sous le même nom, par quelqu'un d'autre, aurait un autre identifiant et ne pourrait pas
+// déployer.
 @description('Dépôt GitHub autorisé à déployer (OIDC, environnement « production »).')
-param githubRepository string = 'KasselFelix/Creno'
+param githubOidcRepository string = 'KasselFelix@56416063/Creno@1398774913'
 
 @description('Image de l\'API (ghcr.io/…@sha256:…). Vide au premier passage : ni API ni job de migration.')
 param apiImage string = ''
@@ -182,7 +185,7 @@ resource githubFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/fede
   name: 'github-production'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepository}:environment:production'
+    subject: 'repo:${githubOidcRepository}:environment:production'
     audiences: ['api://AzureADTokenExchange']
   }
 }
@@ -194,7 +197,7 @@ resource githubFederationCapitalized 'Microsoft.ManagedIdentity/userAssignedIden
   name: 'github-production-capitalized'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepository}:environment:Production'
+    subject: 'repo:${githubOidcRepository}:environment:Production'
     audiences: ['api://AzureADTokenExchange']
   }
   dependsOn: [githubFederation]

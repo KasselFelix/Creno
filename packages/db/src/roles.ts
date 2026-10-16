@@ -26,14 +26,21 @@ export function roleOf(connectionString: string): AppRole {
 export async function ensureAppRole(db: Database, role: AppRole): Promise<void> {
   const name = escapeIdentifier(role.name);
   const password = escapeLiteral(role.password);
-  const exists = await db.execute<{ found: boolean }>(
-    sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${role.name}) AS found`,
+  const existing = await db.execute<{ powerful: boolean }>(
+    sql`SELECT rolsuper OR rolcreatedb OR rolcreaterole AS powerful FROM pg_roles WHERE rolname = ${role.name}`,
   );
+  const current = existing.rows[0];
+  // Écrire SUPERUSER, CREATEDB ou CREATEROLE dans un ALTER ROLE exige de détenir soi-même
+  // l'attribut, même pour le laisser à faux : le rôle de migration d'Azure n'est pas
+  // superutilisateur. Un rôle existant est donc vérifié, pas réécrit.
+  if (current?.powerful) {
+    throw new Error(`Le rôle applicatif ${role.name} a des droits d'administration : refusé.`);
+  }
   // Le mot de passe est réécrit à chaque passage : il suit celui du coffre de secrets (rotation).
   await db.execute(
     sql.raw(
-      exists.rows[0]?.found
-        ? `ALTER ROLE ${name} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD ${password}`
+      current
+        ? `ALTER ROLE ${name} WITH LOGIN PASSWORD ${password}`
         : `CREATE ROLE ${name} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD ${password}`,
     ),
   );
