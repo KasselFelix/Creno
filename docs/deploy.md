@@ -36,7 +36,7 @@ Le fichier `infra/main.bicepparam` lit ses valeurs dans l'environnement du shell
 ```bash
 export CRENO_OPERATOR_ID="$(az ad signed-in-user show --query id -o tsv)"
 export CRENO_WEB_ORIGIN="https://creno.<votre-domaine>"
-export CRENO_EMAIL_FROM="Creno <bonjour@<votre-domaine>>"
+export CRENO_EMAIL_FROM="Creno <bonjour@<domaine vérifié chez Resend>>"   # exactement le domaine (ou sous-domaine) ajouté dans Resend
 export CRENO_BUDGET_EMAIL="<votre email>"
 # Hexadécimal : aucun caractère à échapper dans une URL Postgres.
 export CRENO_PG_ADMIN_PASSWORD="$(openssl rand -hex 32)"
