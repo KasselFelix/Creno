@@ -143,8 +143,9 @@ export function AiSearchBar({
               </Button>
             </div>
             {/* Visible dès que le champ a été sélectionné, puis gardée (un clic sur le lien ne la
-                masque pas) ; toujours lue par les lecteurs d'écran. */}
-            <FieldDescription id="ai-query-help" className={noticeShown ? undefined : 'sr-only'}>
+                masque pas). Avant, `invisible` garde sa place (rien ne bouge à l'apparition) ;
+                `aria-describedby` la fait lire quand même avec le champ. */}
+            <FieldDescription id="ai-query-help" className={noticeShown ? undefined : 'invisible'}>
               Phrase analysée par Mistral AI (UE) ·{' '}
               <Link href="/confidentialite" className="underline underline-offset-4">
                 Confidentialité
