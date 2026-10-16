@@ -15,6 +15,7 @@ import {
   type FilterExtractor,
   FilterExtractorError,
 } from '../src/ai-search/filter-extractor.js';
+import { parseKeywords } from '../src/ai-search/keyword-parser.js';
 import { addLocalDays, localDateOf } from '../src/availability/slots.engine.js';
 import { type Geocoder, GeocoderError } from '../src/geocoding/geocoder.js';
 import { createTestApp, dbOf, resetDatabase } from './app.js';
@@ -55,6 +56,9 @@ const extractor = {
 
 /** Faux géocodeur : connaît Lyon, rien d'autre (sauf réglage dans un test). */
 const geocoder = { search: vi.fn<Geocoder['search']>() } satisfies Geocoder;
+
+/** Date calculée par le parseur (référence indépendante du modèle). */
+const parseKeywordsDate = (query: string, today: string) => parseKeywords(query, today).date!;
 
 const lastRow = async (app: INestApplication) =>
   (await dbOf(app).db.select().from(aiRequests).orderBy(desc(aiRequests.createdAt)).limit(1))[0];
@@ -203,6 +207,16 @@ describe('POST /v1/search/interpret (modèle configuré)', () => {
       extractor.extract.mockResolvedValue(answer({ ...EMPTY, date: inThreeDays }));
       expect((await interpret(app, 'terrain dans trois jours')).body.filters).toEqual({
         date: inThreeDays,
+      });
+    });
+
+    it('jour cité mais date du modèle sur un autre jour → la date calculée l’emporte', async () => {
+      const today = localDateOf(new Date(), SEARCH_TIMEZONE);
+      const nextMonday = parseKeywordsDate('lundi', today);
+      const wrongDay = addLocalDays(nextMonday, 1);
+      extractor.extract.mockResolvedValue(answer({ ...EMPTY, date: wrongDay }));
+      expect((await interpret(app, 'coiffeur lundi après-midi')).body.filters).toEqual({
+        date: nextMonday,
       });
     });
 

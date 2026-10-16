@@ -34,13 +34,29 @@
     "AI_MODEL",
     "AI_TIMEOUT_MS",
     "AI_RATE_LIMIT_PER_MINUTE",
-    "AI_DAILY_REQUEST_CAP"
+    "AI_DAILY_REQUEST_CAP",
+    "REGISTRATION_RATE_LIMIT_PER_HOUR",
+    "PHONE_CODE_RATE_LIMIT_PER_HOUR",
+    "CLIENT_IP_SECRET",
+    "DEMO_MODE",
+    "SENTRY_DSN",
+    "SENTRY_RELEASE",
+    "DATABASE_URL_MIGRATE"
   ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["API_INTERNAL_URL", "NEXT_PUBLIC_MAPBOX_TOKEN"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "env": [
+        "NEXT_PUBLIC_MAPBOX_TOKEN",
+        "NEXT_PUBLIC_DEMO_MODE",
+        "NEXT_PUBLIC_SENTRY_DSN",
+        "NEXT_PUBLIC_VERCEL_ENV",
+        "SENTRY_ORG",
+        "SENTRY_PROJECT",
+        "VERCEL_GIT_COMMIT_SHA"
+      ],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "passThroughEnv": ["SENTRY_AUTH_TOKEN", "CI"]
     },
     "dev": {
       "dependsOn": ["^build"],

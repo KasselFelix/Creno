@@ -30,6 +30,8 @@ export const errorCodes = [
   'PHONE_NOT_ALLOWED',
   'PHONE_CODE_INVALID',
   'SEARCH_DATE_OUT_OF_RANGE',
+  'PAYLOAD_TOO_LARGE',
+  'SMS_UNAVAILABLE',
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);

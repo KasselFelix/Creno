@@ -12,14 +12,35 @@ const base = {
 const stripeKey = (mode: 'test' | 'live') => ['sk', mode, 'x'.repeat(24)].join('_');
 const webhookSecret = ['whsec', 'x'.repeat(24)].join('_');
 const resendKey = ['re', 'x'.repeat(24)].join('_');
-const prodBase = { ...base, NODE_ENV: 'production', JWT_ACCESS_SECRET: 'x'.repeat(48) };
+const twilio = {
+  TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
+  TWILIO_AUTH_TOKEN: 'b'.repeat(32),
+  TWILIO_FROM: '+33600000000',
+};
+const prodBase = {
+  ...base,
+  NODE_ENV: 'production',
+  JWT_ACCESS_SECRET: 'x'.repeat(48),
+  TRUST_PROXY: '1',
+  CLIENT_IP_SECRET: 'c'.repeat(40),
+};
 const prod = {
   ...prodBase,
+  ...twilio,
   STRIPE_SECRET_KEY: stripeKey('live'),
   STRIPE_WEBHOOK_SECRET: webhookSecret,
+  STRIPE_CONNECT_WEBHOOK_SECRET: webhookSecret,
   RESEND_API_KEY: resendKey,
   EMAIL_FROM: 'Creno <bonjour@creno.test>',
 };
+// Démo publique : clé de test, sans Twilio.
+const {
+  TWILIO_ACCOUNT_SID: _sid,
+  TWILIO_AUTH_TOKEN: _token,
+  TWILIO_FROM: _from,
+  ...prodNoTwilio
+} = prod;
+const demo = { ...prodNoTwilio, DEMO_MODE: 'true', STRIPE_SECRET_KEY: stripeKey('test') };
 
 describe('loadConfig : recherche en langage naturel', () => {
   // Fausse clé construite à l'exécution, comme les autres.
@@ -100,9 +121,12 @@ describe('loadConfig', () => {
       );
     });
 
-    it('exige la clé et le secret de webhook en production', () => {
-      expect(() => loadConfig(prodBase)).toThrow(/STRIPE_SECRET_KEY.*STRIPE_WEBHOOK_SECRET/);
-      expect(loadConfig(prod).STRIPE_CONNECT_WEBHOOK_SECRET).toBeUndefined();
+    it('exige la clé et les deux secrets de webhook en production', () => {
+      expect(() => loadConfig(prodBase)).toThrow(
+        /STRIPE_SECRET_KEY.*STRIPE_WEBHOOK_SECRET.*STRIPE_CONNECT_WEBHOOK_SECRET/,
+      );
+      const { STRIPE_CONNECT_WEBHOOK_SECRET: _omit, ...withoutConnect } = prod;
+      expect(() => loadConfig(withoutConnect)).toThrow(/STRIPE_CONNECT_WEBHOOK_SECRET/);
     });
 
     it('borne la commission entre 0 et 50 %', () => {
@@ -133,17 +157,10 @@ describe('loadConfig', () => {
     });
 
     it('exige les trois variables Twilio ensemble, sans afficher leur valeur', () => {
-      const sid = `AC${'a'.repeat(32)}`;
-      const token = 'b'.repeat(32);
+      const sid = twilio.TWILIO_ACCOUNT_SID;
       expect(() => loadConfig({ ...base, TWILIO_ACCOUNT_SID: sid })).toThrow(/TWILIO/);
       expect(() => loadConfig({ ...base, TWILIO_ACCOUNT_SID: sid })).not.toThrow(new RegExp(sid));
-      const config = loadConfig({
-        ...base,
-        TWILIO_ACCOUNT_SID: sid,
-        TWILIO_AUTH_TOKEN: token,
-        TWILIO_FROM: '+33600000000',
-      });
-      expect(config.TWILIO_FROM).toBe('+33600000000');
+      expect(loadConfig({ ...base, ...twilio }).TWILIO_FROM).toBe('+33600000000');
     });
 
     it('refuse l’expéditeur de démonstration de Resend en production', () => {
@@ -165,6 +182,54 @@ describe('loadConfig', () => {
     it('valide l’expéditeur des emails', () => {
       expect(loadConfig(base).EMAIL_FROM).toBe('Creno <onboarding@resend.dev>');
       expect(() => loadConfig({ ...base, EMAIL_FROM: 'pas une adresse' })).toThrow(/EMAIL_FROM/);
+    });
+  });
+
+  describe('production et démo', () => {
+    it('accepte la vraie production (clé live, Twilio) et la démo (clé test, sans Twilio)', () => {
+      expect(loadConfig(prod).DEMO_MODE).toBe(false);
+      const config = loadConfig(demo);
+      expect(config.DEMO_MODE).toBe(true);
+      expect(config.TWILIO_ACCOUNT_SID).toBeUndefined();
+    });
+
+    it.each([
+      [
+        'TRUST_PROXY=false (IP du proxy pour tout le monde)',
+        { TRUST_PROXY: 'false' },
+        /TRUST_PROXY/,
+      ],
+      ['sans secret d’IP partagé avec le front', { CLIENT_IP_SECRET: '' }, /CLIENT_IP_SECRET/],
+      ['secret d’IP trop court', { CLIENT_IP_SECRET: 'court' }, /CLIENT_IP_SECRET/],
+      ['géocodeur en http', { GEOCODER_URL: 'http://geo.test/geocodage' }, /GEOCODER_URL/],
+      ['clé de test hors démo', { STRIPE_SECRET_KEY: stripeKey('test') }, /STRIPE_SECRET_KEY/],
+    ])('refuse la production : %s', (_label, change, error) => {
+      expect(() => loadConfig({ ...prod, ...change })).toThrow(error);
+    });
+
+    it('exige Twilio hors démo', () => {
+      expect(() => loadConfig(prodNoTwilio)).toThrow(/TWILIO_ACCOUNT_SID/);
+    });
+
+    it('refuse une clé live en mode démo, sans afficher sa valeur', () => {
+      const live = stripeKey('live');
+      expect(() => loadConfig({ ...demo, STRIPE_SECRET_KEY: live })).toThrow(/STRIPE_SECRET_KEY/);
+      expect(() => loadConfig({ ...demo, STRIPE_SECRET_KEY: live })).not.toThrow(new RegExp(live));
+    });
+
+    it('n’affiche jamais le secret d’IP refusé', () => {
+      const bad = 'secret avec espaces '.repeat(3);
+      expect(() => loadConfig({ ...prod, CLIENT_IP_SECRET: bad })).not.toThrow(new RegExp(bad));
+    });
+
+    it('Sentry : facultatif, DSN en https, release « dev » par défaut', () => {
+      const config = loadConfig({ ...base, SENTRY_DSN: '' });
+      expect(config.SENTRY_DSN).toBeUndefined();
+      expect(config.SENTRY_RELEASE).toBe('dev');
+      expect(() => loadConfig({ ...base, SENTRY_DSN: 'http://k@sentry.test/1' })).toThrow(
+        /SENTRY_DSN/,
+      );
+      expect(loadConfig({ ...base, SENTRY_RELEASE: 'abc123' }).SENTRY_RELEASE).toBe('abc123');
     });
   });
 

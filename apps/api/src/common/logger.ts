@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Global, Module } from '@nestjs/common';
+import type { Request } from 'express';
 import type { Params } from 'nestjs-pino';
-import type { DestinationStream } from 'pino';
+import * as Sentry from '@sentry/nestjs';
+import { type DestinationStream, multistream } from 'pino';
 import type { AppConfig } from '../config/env.js';
+import { sentryErrorStream } from './sentry.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
 const REQUEST_ID_FORMAT = /^[A-Za-z0-9._-]{8,128}$/;
@@ -29,6 +32,9 @@ export const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
   'req.headers["x-api-key"]',
+  // Relais du front : le secret partagé, et l'IP du visiteur (donnée personnelle).
+  'req.headers["x-creno-proxy-secret"]',
+  'req.headers["x-creno-client-ip"]',
   'res.headers["set-cookie"]',
   ...SENSITIVE_KEYS.flatMap((key) => [key, `*.${key}`, `*.*.${key}`]),
   // Erreurs Drizzle/pg : paramètres de la requête et ligne fautive.
@@ -96,12 +102,25 @@ export function loggerParams(config: AppConfig, stream: DestinationStream | null
       res.setHeader(REQUEST_ID_HEADER, id);
       return id;
     },
-    // `requestId` au premier niveau de chaque log de la requête (accès et logs métier).
-    customProps: (req) => ({ requestId: req.id }),
+    // `requestId` au premier niveau de chaque log de la requête (accès et logs métier). `ipSource`
+    // dit si l'IP du visiteur vient du front (secret valide) ou de la connexion, sans l'écrire.
+    customProps: (req) => ({ requestId: req.id, ipSource: (req as Request).ipSource }),
     // Les sondes de santé sont appelées toutes les quelques secondes : pas de log d'accès.
     autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
     redact: { paths: REDACT_PATHS, censor: '[redacted]' },
     serializers: { req: loggableRequest },
   } satisfies Params['pinoHttp'];
-  return { pinoHttp: stream ? [options, stream] : options };
+  return { pinoHttp: [options, stream ?? defaultDestination()] };
+}
+
+/**
+ * stdout, plus Sentry pour les logs `error` quand il est initialisé (instrument.ts) : chaque erreur
+ * qui demande une action arrive dans Sentry, après la redaction de pino.
+ */
+function defaultDestination(): DestinationStream {
+  if (!Sentry.isInitialized()) return process.stdout;
+  return multistream([
+    { level: 'trace', stream: process.stdout },
+    { level: 'error', stream: sentryErrorStream() },
+  ]);
 }

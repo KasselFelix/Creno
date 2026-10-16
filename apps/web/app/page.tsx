@@ -27,9 +27,12 @@ export default function HomePage() {
             Voir tous les prestataires
           </Link>
         </div>
-        <Suspense fallback={<ApiStatusCardSkeleton />}>
-          <ApiStatusCard />
-        </Suspense>
+        {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API. */}
+        {process.env.NODE_ENV === 'development' && (
+          <Suspense fallback={<ApiStatusCardSkeleton />}>
+            <ApiStatusCard />
+          </Suspense>
+        )}
       </main>
     </>
   );

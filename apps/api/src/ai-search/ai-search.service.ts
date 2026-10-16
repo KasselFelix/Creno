@@ -32,7 +32,7 @@ import {
   snapRadiusKm,
   truncateIgnored,
 } from './interpretation.js';
-import { fold, parseKeywords } from './keyword-parser.js';
+import { checkWeekday, fold, parseKeywords } from './keyword-parser.js';
 import {
   MAX_ATTEMPTS,
   MIN_ATTEMPT_MS,
@@ -134,7 +134,9 @@ export class AiSearchService implements OnModuleInit {
 
     const call = await this.callModel({ query, today });
     const source: Source = call.extraction ? 'ai' : 'keywords';
-    const extraction = call.extraction ?? parseKeywords(query, today);
+    const extraction = call.extraction
+      ? checkWeekday(call.extraction, query, today)
+      : parseKeywords(query, today);
     const { filters, notices } = await this.toFilters(extraction, source, today);
 
     const cost = call.model && call.usage ? this.costOf(call.usage) : null;

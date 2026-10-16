@@ -12,11 +12,20 @@ const publicEnvSchema = z.object({
     .string()
     .regex(/^pk\./, { error: 'token public attendu (pk.…), jamais un token secret' })
     .optional(),
+  // Démo publique (paiements Stripe en mode test) : bandeau en haut de chaque page.
+  NEXT_PUBLIC_DEMO_MODE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  // DSN Sentry du front : public par nature (il ne permet que d'envoyer des erreurs).
+  NEXT_PUBLIC_SENTRY_DSN: z.url({ protocol: /^https$/ }).optional(),
 });
 
 export function parsePublicEnv(env: Record<string, string | undefined>) {
   const result = publicEnvSchema.safeParse({
     NEXT_PUBLIC_MAPBOX_TOKEN: env.NEXT_PUBLIC_MAPBOX_TOKEN || undefined,
+    NEXT_PUBLIC_DEMO_MODE: env.NEXT_PUBLIC_DEMO_MODE || undefined,
+    NEXT_PUBLIC_SENTRY_DSN: env.NEXT_PUBLIC_SENTRY_DSN || undefined,
   });
   if (!result.success) {
     // On n'affiche que le nom de la variable et la règle, jamais la valeur.
@@ -28,4 +37,6 @@ export function parsePublicEnv(env: Record<string, string | undefined>) {
 
 export const publicEnv = parsePublicEnv({
   NEXT_PUBLIC_MAPBOX_TOKEN: process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
+  NEXT_PUBLIC_DEMO_MODE: process.env.NEXT_PUBLIC_DEMO_MODE,
+  NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
 });

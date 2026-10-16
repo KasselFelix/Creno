@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { trackByIp, trackByUserOrIp } from '../common/client-ip.js';
 import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import { NotificationsModule } from '../notifications/notifications.module.js';
@@ -31,17 +32,32 @@ import { TokensService } from './tokens.service.js';
       }),
     }),
     // Stockage en mémoire : suffisant pour une instance ; à déplacer (Redis) si l'API passe à plusieurs réplicas.
+    // Compteurs par IP réelle du visiteur (`clientIp`), sauf `public` et `bookings` : par compte
+    // quand la requête est authentifiée (voir client-ip.ts).
     ThrottlerModule.forRootAsync({
       inject: [APP_CONFIG],
-      useFactory: (config: AppConfig) => [
-        { name: 'credentials', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE },
-        { name: 'refresh', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE * 3 },
-        { name: 'registration', ttl: 3_600_000, limit: config.REGISTRATION_RATE_LIMIT_PER_HOUR },
-        { name: 'public', ttl: 60_000, limit: config.PUBLIC_RATE_LIMIT_PER_MINUTE },
-        { name: 'bookings', ttl: 60_000, limit: config.BOOKING_RATE_LIMIT_PER_MINUTE },
-        { name: 'phone', ttl: 3_600_000, limit: config.PHONE_CODE_RATE_LIMIT_PER_HOUR },
-        { name: 'ai', ttl: 60_000, limit: config.AI_RATE_LIMIT_PER_MINUTE },
-      ],
+      useFactory: (config: AppConfig) => ({
+        throttlers: [
+          { name: 'credentials', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE },
+          { name: 'refresh', ttl: 60_000, limit: config.AUTH_RATE_LIMIT_PER_MINUTE * 3 },
+          { name: 'registration', ttl: 3_600_000, limit: config.REGISTRATION_RATE_LIMIT_PER_HOUR },
+          {
+            name: 'public',
+            ttl: 60_000,
+            limit: config.PUBLIC_RATE_LIMIT_PER_MINUTE,
+            getTracker: trackByUserOrIp,
+          },
+          {
+            name: 'bookings',
+            ttl: 60_000,
+            limit: config.BOOKING_RATE_LIMIT_PER_MINUTE,
+            getTracker: trackByUserOrIp,
+          },
+          { name: 'phone', ttl: 3_600_000, limit: config.PHONE_CODE_RATE_LIMIT_PER_HOUR },
+          { name: 'ai', ttl: 60_000, limit: config.AI_RATE_LIMIT_PER_MINUTE },
+        ],
+        getTracker: trackByIp,
+      }),
     }),
   ],
   controllers: [AuthController],

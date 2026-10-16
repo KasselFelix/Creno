@@ -16,6 +16,7 @@
     "@creno/shared": "workspace:*",
     "@fullcalendar/react": "^7.1.0",
     "@hookform/resolvers": "^5.9.1",
+    "@sentry/nextjs": "^11.5.0",
     "@tanstack/react-query": "^5.104.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",

@@ -1,6 +1,6 @@
 import { aiSearchExtractionSchema } from '@creno/shared';
 import { describe, expect, it } from 'vitest';
-import { parseKeywords } from './keyword-parser.js';
+import { checkWeekday, parseKeywords } from './keyword-parser.js';
 
 // Dimanche 4 octobre 2026 ; le samedi suivant est le 10.
 const SUNDAY = '2026-10-04';
@@ -124,5 +124,29 @@ describe('parseKeywords', () => {
     for (const query of queries) {
       expect(aiSearchExtractionSchema.safeParse(parseKeywords(query, SUNDAY)).success).toBe(true);
     }
+  });
+});
+
+describe('checkWeekday (date du modèle recoupée avec le jour cité)', () => {
+  // Vendredi 16 octobre 2026 : lundi = 19, mardi = 20, vendredi suivant = 23.
+  const FRIDAY = '2026-10-16';
+  const model = (date: string | null) => ({ ...NOTHING, category: 'hairdresser' as const, date });
+
+  it('jour cité, mauvaise date du modèle → la date calculée', () => {
+    const fixed = checkWeekday(model('2026-10-20'), 'un coiffeur pour lundi après-midi', FRIDAY);
+    expect(fixed).toEqual(model('2026-10-19'));
+  });
+
+  it('date du modèle qui tombe le jour cité → gardée, même plus loin (« vendredi 23 »)', () => {
+    expect(checkWeekday(model('2026-10-23'), 'coiffeur vendredi 23', FRIDAY)).toEqual(
+      model('2026-10-23'),
+    );
+  });
+
+  it('aucun jour cité, ou aucune date → sortie du modèle inchangée', () => {
+    expect(checkWeekday(model('2026-10-19'), 'coiffeur dans trois jours', FRIDAY)).toEqual(
+      model('2026-10-19'),
+    );
+    expect(checkWeekday(model(null), 'coiffeur lundi', FRIDAY)).toEqual(model(null));
   });
 });

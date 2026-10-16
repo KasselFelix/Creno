@@ -1,11 +1,14 @@
 import 'server-only';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { cache } from 'react';
 import type { z } from 'zod';
 import { AUTH_COOKIES, type PublicUser, publicUserSchema } from '@creno/shared';
+import { API_TIMEOUT_MS, apiInternalUrl, clientIpHeaders } from './upstream';
 
-/** URL interne de l'API : jamais exposée au navigateur. */
-export const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? 'http://localhost:4000';
+/** En-têtes communs des appels serveur : l'IP du visiteur, pour ses limites de débit à l'API. */
+async function upstreamHeaders(): Promise<Record<string, string>> {
+  return clientIpHeaders(await headers());
+}
 
 /**
  * Utilisateur connecté, pour les Server Components. `cache` : un seul appel par requête, même si
@@ -15,10 +18,10 @@ export const getCurrentUser = cache(async (): Promise<PublicUser | null> => {
   const accessToken = (await cookies()).get(AUTH_COOKIES.access)?.value;
   if (!accessToken) return null;
   try {
-    const res = await fetch(`${API_INTERNAL_URL}/v1/users/me`, {
-      headers: { cookie: `${AUTH_COOKIES.access}=${accessToken}` },
+    const res = await fetch(`${apiInternalUrl()}/v1/users/me`, {
+      headers: { cookie: `${AUTH_COOKIES.access}=${accessToken}`, ...(await upstreamHeaders()) },
       cache: 'no-store',
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const parsed = publicUserSchema.safeParse(await res.json());
@@ -36,9 +39,10 @@ export async function serverFetch<T extends z.ZodType>(
   path: string,
   schema: T,
 ): Promise<z.output<T> | null> {
-  const res = await fetch(`${API_INTERNAL_URL}${path}`, {
+  const res = await fetch(`${apiInternalUrl()}${path}`, {
+    headers: await upstreamHeaders(),
     cache: 'no-store',
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`API ${res.status} sur ${path}`);

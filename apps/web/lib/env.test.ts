@@ -24,3 +24,17 @@ describe('parsePublicEnv', () => {
     );
   });
 });
+
+describe('parsePublicEnv : démo et Sentry', () => {
+  it('mode démo désactivé par défaut, DSN facultatif', () => {
+    expect(parsePublicEnv({})).toMatchObject({ NEXT_PUBLIC_DEMO_MODE: false });
+    expect(parsePublicEnv({ NEXT_PUBLIC_DEMO_MODE: 'true' }).NEXT_PUBLIC_DEMO_MODE).toBe(true);
+    expect(parsePublicEnv({ NEXT_PUBLIC_SENTRY_DSN: '' }).NEXT_PUBLIC_SENTRY_DSN).toBeUndefined();
+  });
+
+  it('refuse un DSN Sentry qui n’est pas en https', () => {
+    expect(() => parsePublicEnv({ NEXT_PUBLIC_SENTRY_DSN: 'http://k@sentry.test/1' })).toThrow(
+      /NEXT_PUBLIC_SENTRY_DSN/,
+    );
+  });
+});

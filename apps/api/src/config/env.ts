@@ -32,6 +32,23 @@ export const envSchema = z
       .default('info'),
     WEB_ORIGIN: z.url().transform((url) => new URL(url).origin),
     TRUST_PROXY: trustProxySchema,
+    // Secret partagé avec le front : l'API ne croit l'IP du visiteur transmise par le serveur Next
+    // (en-têtes `CLIENT_IP_HEADERS`) que s'il l'accompagne. Obligatoire en production.
+    CLIENT_IP_SECRET: optionalSecret(/^\S{32,}$/, '32 caractères minimum, sans espace'),
+    // Démo publique : paiements en mode test Stripe, Twilio facultatif, seed de démo sur base vide.
+    DEMO_MODE: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
+    // Sentry : sans DSN, rien n'est envoyé. La release (SHA du commit) est posée dans l'image par la CI.
+    SENTRY_DSN: z.preprocess(
+      (value) => (value === '' ? undefined : value),
+      z.url({ protocol: /^https$/ }).optional(),
+    ),
+    SENTRY_RELEASE: z
+      .string()
+      .regex(/^[\w.-]{1,64}$/, { error: 'identifiant de release attendu' })
+      .default('dev'),
     JWT_ACCESS_SECRET: z.string().min(32, { error: '32 caractères minimum' }),
     ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(15),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
@@ -42,7 +59,8 @@ export const envSchema = z
     BOOKING_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(20),
     // Demandes de code SMS par heure et par IP (en plus des plafonds par compte et par numéro).
     PHONE_CODE_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(1).default(10),
-    // Géocodeur d'adresses (Géoplateforme de l'IGN) : pas de clé, donc rien de secret ici.
+    // Géocodeur d'adresses (Géoplateforme de l'IGN) : pas de clé, donc rien de secret ici. En
+    // production, https obligatoire (l'adresse tapée par le visiteur y transite).
     GEOCODER_URL: z.url({ protocol: /^https?$/ }).default('https://data.geopf.fr/geocodage'),
     // Stripe. Sans clé (clone frais), l'API démarre et les routes de paiement répondent 503.
     STRIPE_SECRET_KEY: optionalSecret(/^(sk|rk)_(test|live)_\w+$/, 'clé secrète Stripe attendue'),
@@ -139,7 +157,14 @@ export const envSchema = z
         message: 'expéditeur sur un domaine vérifié obligatoire en production',
       });
     }
-    for (const name of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'RESEND_API_KEY'] as const) {
+    for (const name of [
+      'STRIPE_SECRET_KEY',
+      'STRIPE_WEBHOOK_SECRET',
+      // `account.updated` (onboarding des prestataires) n'arrive que sur l'endpoint « Connect ».
+      'STRIPE_CONNECT_WEBHOOK_SECRET',
+      'RESEND_API_KEY',
+      'CLIENT_IP_SECRET',
+    ] as const) {
       if (!env[name]) {
         ctx.addIssue({ code: 'custom', path: [name], message: 'obligatoire en production' });
       }
@@ -158,6 +183,42 @@ export const envSchema = z
         code: 'custom',
         path: ['TRUST_PROXY'],
         message: 'indiquer le nombre de proxys (ou leurs adresses), pas "true"',
+      });
+    }
+    // `false` derrière l'ingress de Container Apps : toutes les requêtes auraient l'IP du proxy, et
+    // 20 demandes d'un seul visiteur bloqueraient l'inscription de tout le monde pendant une heure.
+    if (env.TRUST_PROXY === false) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRUST_PROXY'],
+        message: 'indiquer le nombre de proxys devant l’API (1 derrière Container Apps)',
+      });
+    }
+    if (new URL(env.GEOCODER_URL).protocol !== 'https:') {
+      ctx.addIssue({ code: 'custom', path: ['GEOCODER_URL'], message: 'https obligatoire' });
+    }
+    // La démo publique n'encaisse jamais de vrais paiements ; la vraie production, toujours.
+    const stripeMode = /^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY ?? '') ? 'live' : 'test';
+    if (env.STRIPE_SECRET_KEY && env.DEMO_MODE && stripeMode === 'live') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STRIPE_SECRET_KEY'],
+        message: 'clé de test (sk_test_…) obligatoire en mode démo',
+      });
+    }
+    if (env.STRIPE_SECRET_KEY && !env.DEMO_MODE && stripeMode === 'test') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STRIPE_SECRET_KEY'],
+        message: 'clé live obligatoire en production (DEMO_MODE=true pour une démo)',
+      });
+    }
+    // Hors démo, les codes de vérification du téléphone doivent pouvoir partir.
+    if (!env.DEMO_MODE && !env.TWILIO_ACCOUNT_SID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TWILIO_ACCOUNT_SID'],
+        message: 'Twilio obligatoire en production (facultatif avec DEMO_MODE=true)',
       });
     }
   });
