@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { BOOKING_HORIZON_DAYS, localDateSchema } from './availability.js';
+import {
+  BOOKING_HORIZON_DAYS,
+  endTimeSchema,
+  localDateSchema,
+  startTimeSchema,
+} from './availability.js';
 import { providerCategorySchema } from './providers.js';
 import { PRICE_CENTS_MAX } from './resources.js';
 
@@ -15,6 +20,51 @@ export const SEARCH_RADIUS_OPTIONS_KM = [1, 2, 5, 10, 25, 50] as const;
 export const SEARCH_TIMEZONE = 'Europe/Paris';
 /** Avec une date, prestataires examinés (les plus proches d'abord) avant le filtre de disponibilité. */
 export const SEARCH_DATE_CANDIDATES_MAX = 200;
+
+/**
+ * Plage horaire de la recherche : heures de début des créneaux, à l'heure locale de chaque ressource.
+ * `timeFrom` est inclus, `timeTo` exclu (`24:00` permis) ; une borne absente ne limite pas. Format
+ * `HH:mm` à largeur fixe : l'ordre des chaînes est l'ordre des heures.
+ */
+export interface TimeRange {
+  timeFrom?: string;
+  timeTo?: string;
+}
+
+export const timesOfDay = ['morning', 'afternoon', 'evening'] as const;
+export const timeOfDaySchema = z.enum(timesOfDay);
+export type TimeOfDay = z.infer<typeof timeOfDaySchema>;
+
+/** Périodes de la journée : de simples préréglages de bornes, l'URL et l'API ne connaissent que celles-ci. */
+export const TIME_OF_DAY_RANGES = {
+  morning: { timeTo: '12:00' },
+  afternoon: { timeFrom: '12:00', timeTo: '18:00' },
+  evening: { timeFrom: '18:00' },
+} as const satisfies Record<TimeOfDay, TimeRange>;
+
+/** Bornes qui ne filtrent rien : début et fin de journée. */
+const DAY_START = '00:00';
+const DAY_END = '24:00';
+
+/**
+ * Écriture unique d'une plage : bornes neutres retirées (« jusqu'à minuit » = sans borne haute),
+ * pour qu'une même plage donne une même URL. `null` si la plage est vide (début ≥ fin).
+ */
+export function normalizeTimeRange({ timeFrom, timeTo }: TimeRange): TimeRange | null {
+  if (timeFrom !== undefined && timeTo !== undefined && timeFrom >= timeTo) return null;
+  return {
+    ...(timeFrom !== undefined && timeFrom !== DAY_START && { timeFrom }),
+    ...(timeTo !== undefined && timeTo !== DAY_END && { timeTo }),
+  };
+}
+
+/** Période dont la plage est exactement celle-ci, s'il y en a une (pour l'afficher « Après-midi »). */
+export function timeOfDayOf(range: TimeRange): TimeOfDay | undefined {
+  return timesOfDay.find((period) => {
+    const preset: TimeRange = TIME_OF_DAY_RANGES[period];
+    return preset.timeFrom === range.timeFrom && preset.timeTo === range.timeTo;
+  });
+}
 
 /** Décale une date `YYYY-MM-DD` de `days` jours calendaires (calcul en UTC : pas d'heure en jeu). */
 function addCalendarDays(date: string, days: number): string {
@@ -94,6 +144,10 @@ export const searchProvidersQuerySchema = z
     priceMax: searchPriceMaxSchema.optional(),
     /** Jour où le prestataire doit avoir au moins un créneau libre (date locale `YYYY-MM-DD`). */
     date: localDateSchema.optional(),
+    /** Heure de début au plus tôt (incluse), à l'heure locale de la ressource. Ignorée sans `date`. */
+    timeFrom: startTimeSchema.optional(),
+    /** Heure de début au plus tard (exclue), `24:00` permis. Ignorée sans `date`. */
+    timeTo: endTimeSchema.optional(),
     limit: queryNumber
       .pipe(z.number().int().min(1).max(SEARCH_RESULTS_MAX))
       .default(SEARCH_RESULTS_MAX),
@@ -101,6 +155,10 @@ export const searchProvidersQuerySchema = z
   .refine((q) => (q.lat === undefined) === (q.lng === undefined), {
     error: 'Latitude et longitude vont ensemble',
     path: ['lng'],
+  })
+  .refine((q) => q.timeFrom === undefined || q.timeTo === undefined || q.timeFrom < q.timeTo, {
+    error: "L'heure de fin doit être après l'heure de début",
+    path: ['timeTo'],
   });
 /** Filtres après validation (nombres convertis, valeurs par défaut posées). */
 export type SearchProvidersQuery = z.output<typeof searchProvidersQuerySchema>;

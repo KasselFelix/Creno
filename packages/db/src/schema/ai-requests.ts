@@ -35,6 +35,9 @@ export interface AiRequestFilters {
   /** Prix maximum en centimes. */
   priceMax: number | null;
   date: string | null;
+  /** Plage horaire (heures de début `HH:mm`), `null` si non citée. */
+  timeFrom: string | null;
+  timeTo: string | null;
   hasPlace: boolean;
   nearMe: boolean;
 }

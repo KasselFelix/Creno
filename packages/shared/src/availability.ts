@@ -9,10 +9,10 @@ export const MAX_RULES = 28;
 export const MAX_UPCOMING_EXCEPTIONS = 200;
 
 /** Heure locale `HH:mm`. `24:00` (fin de journée) n'est accepté que comme heure de fin. */
-const startTimeSchema = z
+export const startTimeSchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, { error: 'Heure au format HH:mm' });
-const endTimeSchema = z
+export const endTimeSchema = z
   .string()
   .regex(/^(([01]\d|2[0-3]):[0-5]\d|24:00)$/, { error: 'Heure au format HH:mm' });
 

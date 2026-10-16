@@ -155,6 +155,8 @@ export class AiSearchService implements OnModuleInit {
         radiusKm: filters.radiusKm ?? null,
         priceMax: filters.priceMax ?? null,
         date: filters.date ?? null,
+        timeFrom: filters.timeFrom ?? null,
+        timeTo: filters.timeTo ?? null,
         hasPlace: filters.place !== undefined,
         nearMe: filters.nearMe === true,
       },

@@ -16,6 +16,9 @@ export function parseKeywords(query: string, today: string): AiSearchExtraction 
     radiusKm: findRadius(folded),
     priceMaxEuros: findPrice(folded),
     date: findDate(folded, today),
+    timeOfDay: null,
+    startAfter: null,
+    startBefore: null,
     ignored: findIgnored(text, folded),
   };
 }

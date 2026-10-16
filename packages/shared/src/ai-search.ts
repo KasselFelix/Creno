@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { localDateSchema } from './availability.js';
+import { endTimeSchema, localDateSchema, startTimeSchema } from './availability.js';
 import { providerCategorySchema } from './providers.js';
 import { PRICE_CENTS_MAX } from './resources.js';
-import { SEARCH_RADIUS_KM_MAX, SEARCH_RADIUS_OPTIONS_KM } from './search.js';
+import { SEARCH_RADIUS_KM_MAX, SEARCH_RADIUS_OPTIONS_KM, timeOfDaySchema } from './search.js';
 
 /** Longueur de la phrase de recherche, espaces autour retirés. */
 export const AI_QUERY_MIN = 3;
@@ -11,7 +11,7 @@ export const AI_QUERY_MAX = 200;
 export const AI_PLACE_MAX = 100;
 export const AI_PRICE_MAX_EUROS = 10_000;
 /**
- * Morceaux de phrase non pris en charge (heure, nombre de personnes…) : l'API les tronque à ces
+ * Morceaux de phrase non pris en charge (durée, nombre de personnes…) : l'API les tronque à ces
  * limites au lieu de rejeter la sortie, pour qu'un détail ne fasse pas perdre toute l'interprétation.
  */
 export const AI_IGNORED_TERMS_MAX = 5;
@@ -47,6 +47,14 @@ export const aiSearchExtractionSchema = z.object({
   /** En euros, décimales acceptées (« 29,90 € ») : l'API arrondit en centimes. */
   priceMaxEuros: z.number().min(0).max(AI_PRICE_MAX_EUROS).nullable(),
   date: localDateSchema.nullable(),
+  /** « Le matin », « l'après-midi », « en soirée ». */
+  timeOfDay: timeOfDaySchema.nullable(),
+  /**
+   * Heures citées, `HH:mm` : début au plus tôt (« après 18 h ») et au plus tard, exclu (« avant 10 h »).
+   * Pas de contrôle d'ordre ici : des heures inversées sont ignorées par l'API, le reste est gardé.
+   */
+  startAfter: startTimeSchema.nullable(),
+  startBefore: endTimeSchema.nullable(),
   ignored: z.array(z.string()),
 });
 export type AiSearchExtraction = z.infer<typeof aiSearchExtractionSchema>;
@@ -63,7 +71,7 @@ export const interpretNoticeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('place_not_found'), place: z.string() }),
   /** Date passée ou au-delà de l'horizon de réservation : pas de filtre de date. */
   z.object({ type: z.literal('date_out_of_range'), date: localDateSchema }),
-  /** Morceaux de phrase non pris en charge (« après 18 h »). */
+  /** Morceaux de phrase non pris en charge (« pour 10 personnes »). */
   z.object({ type: z.literal('ignored_terms'), terms: z.array(z.string()).min(1) }),
 ]);
 export type InterpretNotice = z.infer<typeof interpretNoticeSchema>;
@@ -82,6 +90,9 @@ export const interpretResponseSchema = z.object({
     /** Prix maximum en centimes. */
     priceMax: z.number().int().min(0).max(PRICE_CENTS_MAX).optional(),
     date: localDateSchema.optional(),
+    /** Plage horaire (heures de début), toujours avec `date`. */
+    timeFrom: startTimeSchema.optional(),
+    timeTo: endTimeSchema.optional(),
   }),
   notices: z.array(interpretNoticeSchema),
 });

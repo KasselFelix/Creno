@@ -50,6 +50,9 @@ const OUTPUT: AiSearchExtraction = {
   radiusKm: null,
   priceMaxEuros: 30,
   date: null,
+  timeOfDay: null,
+  startAfter: null,
+  startBefore: null,
   ignored: ['après 18 h', 'pour 3 personnes', 'Zéphyrine'],
 };
 const answer = (output: unknown): ExtractionResult => ({

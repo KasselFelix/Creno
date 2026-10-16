@@ -20,6 +20,9 @@ const OUTPUT: AiSearchExtraction = {
   radiusKm: null,
   priceMaxEuros: null,
   date: null,
+  timeOfDay: null,
+  startAfter: null,
+  startBefore: null,
   ignored: [],
 };
 const answer = (output: unknown = OUTPUT): ExtractionResult => ({
