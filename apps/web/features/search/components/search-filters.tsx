@@ -189,7 +189,7 @@ export function SearchFilterFields({
           </SelectTrigger>
           <SelectContent>
             {categoryItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
+              <SelectItem key={item.value} value={item.value} className="min-h-11 md:min-h-0">
                 {item.label}
               </SelectItem>
             ))}
@@ -213,7 +213,7 @@ export function SearchFilterFields({
           </SelectTrigger>
           <SelectContent>
             {radiusItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
+              <SelectItem key={item.value} value={item.value} className="min-h-11 md:min-h-0">
                 {item.label}
               </SelectItem>
             ))}
@@ -268,7 +268,7 @@ export function SearchFilterFields({
           </SelectTrigger>
           <SelectContent>
             {timeItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
+              <SelectItem key={item.value} value={item.value} className="min-h-11 md:min-h-0">
                 {item.label}
               </SelectItem>
             ))}
