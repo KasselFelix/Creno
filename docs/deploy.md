@@ -134,7 +134,7 @@ Si l'API a démarré avant le job (rôle absent), `/health/ready` répond 503 : 
 
 ## 7. GitHub et Vercel
 
-**GitHub**, Settings → Environments → `production` : « Deployment branches » = `main` seulement. Si Vercel a déjà créé `Production` (premier déploiement), c'est le même environnement (GitHub ignore la casse) : le configurer lui ; le Bicep accepte les deux casses dans l'identifiant fédéré. Puis Settings → Secrets and variables → Actions → **Variables** (pas des secrets : rien de sensible) :
+**GitHub**, Settings → Environments → `production` : « Deployment branches » = `main` seulement. Si Vercel a déjà créé `Production` (premier déploiement), c'est le même environnement (GitHub ignore la casse) : le configurer lui ; le Bicep accepte les deux casses dans l'identifiant fédéré. Puis Settings → Secrets and variables → Actions → Variables → **Repository variables** (pas des secrets : rien de sensible ; pas des variables d'environnement non plus : la condition du job `deploy` ne voit que celles du dépôt) :
 
 | Variable                | Valeur                                       |
 | ----------------------- | -------------------------------------------- |
@@ -144,7 +144,7 @@ Si l'API a démarré avant le job (rôle absent), `/health/ready` répond 503 : 
 | `RESOURCE_GROUP`        | `rg-creno`                                   |
 | `API_URL`               | `$API_URL`                                   |
 
-Tant que `AZURE_CLIENT_ID` n'existe pas, le job `deploy` de la CI est sauté.
+Tant que `AZURE_CLIENT_ID` n'existe pas, le job `deploy` de la CI est sauté. Le workflow retire les espaces et la barre finale de `API_URL`, et refuse avant tout changement une valeur qui n'est pas `https://<hôte>`.
 
 **Vercel** : importer le dépôt, _Root Directory_ `apps/web`, Node.js 24. Les fonctions tournent à Paris (`apps/web/vercel.json`). Variables :
 
