@@ -48,6 +48,7 @@ export function HomeAiSearch() {
         examples={HOME_EXAMPLES}
         busy={locating || navigating}
         wakeApi
+        framed
         onInterpreted={onInterpreted}
       />
       <Link

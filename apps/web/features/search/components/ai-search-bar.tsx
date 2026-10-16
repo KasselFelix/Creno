@@ -115,6 +115,7 @@ export function AiSearchBar({
           onPointerDownCapture={onFirstContact}
           noValidate
           role="search"
+          className={framed ? 'rounded-lg border p-4 shadow-sm' : undefined}
         >
           <Field data-invalid={!!errors.query}>
             <FieldLabel htmlFor="ai-query">Décrivez ce que vous cherchez</FieldLabel>
