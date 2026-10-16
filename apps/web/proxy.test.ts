@@ -120,6 +120,10 @@ describe('proxy', () => {
       '/api/health/ready',
       '/api/healthx',
       '/api/health/',
+      // Normalisés dès la lecture de l'URL ici ; le proxy recontrôle aussi le chemin final.
+      '/api/v1/%2e%2e/health/ready',
+      '/api/v1/%2E%2E/docs',
+      '/api/v1/../health/ready',
     ])('ne relaie jamais vers un autre hôte ni hors de /api/v1/ : %s', async (path) => {
       vi.stubEnv('VERCEL_ENV', 'production');
       vi.stubEnv('API_INTERNAL_URL', 'https://api.creno.test');

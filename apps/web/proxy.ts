@@ -63,8 +63,11 @@ function forwardToApi(request: NextRequest): NextResponse {
   target.pathname = pathname.slice('/api'.length);
   target.search = search;
   const wake = pathname === API_WAKE_PATH && request.method === 'GET';
+  // Contrôlé aussi après coup : l'URL normalise `..` et `%2e%2e` (« /v1/%2e%2e/docs » → « /docs »).
+  const allowed = wake ? target.pathname === '/health' : target.pathname.startsWith('/v1/');
   if (
     !(wake || pathname.startsWith(API_PREFIX)) ||
+    !allowed ||
     pathname.includes('//') ||
     target.origin !== api.origin
   ) {
