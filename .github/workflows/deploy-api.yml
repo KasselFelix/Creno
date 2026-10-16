@@ -45,10 +45,14 @@ jobs:
       IMAGE: ${{ inputs.image }}
       SHA: ${{ inputs.sha }}
       RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
-      API_URL: ${{ vars.API_URL }}
     steps:
       # Seule une image de ce dépôt, désignée par son digest (immuable), peut être déployée.
-      - name: Image à déployer
+      # API_URL est une variable saisie à la main : une espace collée avec elle rendait l'URL invalide
+      # pour curl, et le smoke test échouait sur un déploiement réussi. Elle est nettoyée puis vérifiée
+      # avant toute modification ; vérifiée, elle ne peut rien injecter d'autre dans $GITHUB_ENV.
+      - name: Entrées du déploiement
+        env:
+          API_URL_VAR: ${{ vars.API_URL }}
         run: |
           if ! [[ "$IMAGE" =~ ^ghcr\.io/kasselfelix/creno-api@sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::Image refusée : ghcr.io/kasselfelix/creno-api@sha256:<digest> attendue."
@@ -58,6 +62,13 @@ jobs:
             echo "::error::SHA de commit attendu (40 caractères hexadécimaux)."
             exit 1
           fi
+          api_url="$(printf '%s' "$API_URL_VAR" | tr -d '[:space:]')"
+          api_url="${api_url%/}"
+          if ! [[ "$api_url" =~ ^https://[A-Za-z0-9.-]+$ ]]; then
+            echo "::error::Variable API_URL invalide (« $api_url ») : https://<hôte de l'API> attendu."
+            exit 1
+          fi
+          echo "API_URL=$api_url" >> "$GITHUB_ENV"
 
       # OIDC : un jeton à durée courte émis pour ce dépôt et cet environnement. Aucun secret.
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -90,17 +101,22 @@ jobs:
           az containerapp update -n ca-creno-api -g "$RESOURCE_GROUP" --image "$IMAGE" --only-show-errors > /dev/null
 
       # La première requête réveille l'API (0 réplica au repos) ; on attend que la nouvelle révision
-      # réponde avec le bon commit, puis que la base soit joignable.
+      # réponde avec le bon commit, puis que la base soit joignable. Un échec de curl est affiché avec
+      # son code et son message (hôte inconnu, TLS, 5xx du réveil…) au lieu de passer pour un silence.
       - name: Smoke test
         run: |
-          for _ in $(seq 1 36); do
-            release="$(curl -fsS --max-time 30 "$API_URL/health" | jq -r .release || true)"
-            if [ "$release" = "$SHA" ]; then
-              curl -fsS --max-time 30 "$API_URL/health/ready"
-              exit 0
+          for attempt in $(seq 1 36); do
+            if body="$(curl -fsS --max-time 30 "$API_URL/health" 2>&1)"; then
+              release="$(jq -r '.release // empty' <<< "$body")"
+              if [ "$release" = "$SHA" ]; then
+                curl -fsS --max-time 30 "$API_URL/health/ready"
+                exit 0
+              fi
+              echo "Essai $attempt : release en service ${release:-absente}, attendue $SHA"
+            else
+              echo "Essai $attempt : curl en échec (code $?) : $body"
             fi
-            echo "Release en service : ${release:-aucune réponse}, attendue : $SHA"
             sleep 5
           done
-          echo "::error::La nouvelle révision ne répond pas."
+          echo "::error::La nouvelle révision ne répond pas avec le commit $SHA."
           exit 1
