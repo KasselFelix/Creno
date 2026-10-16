@@ -17,7 +17,7 @@ export function contentSecurityPolicy(nonce: string, { dev }: { dev: boolean }):
     'style-src': ["'self'", "'unsafe-inline'"],
     'img-src': ["'self'", 'data:', 'blob:', 'https://*.mapbox.com'],
     'font-src': ["'self'"],
-    // Mapbox (tuiles, styles, télémétrie). Sentry passe par le tunnel /monitoring (même origine).
+    // Mapbox (tuiles, styles, télémétrie). Sentry passe par un tunnel sur le domaine du front (même origine).
     'connect-src': ["'self'", 'https://*.mapbox.com', ...(dev ? ['ws:'] : [])],
     // Mapbox GL dessine la carte dans des workers créés depuis un blob.
     'worker-src': ["'self'", 'blob:'],

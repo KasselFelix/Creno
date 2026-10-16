@@ -7,7 +7,7 @@ import { sentryOptions } from '@/lib/sentry-options';
 // CSP (sans `unsafe-eval`) refuse et signale une violation. Mode sans compilation : même résultat.
 z.config({ jitless: true });
 
-// Sentry dans le navigateur. Les événements passent par le tunnel /monitoring (next.config.ts).
+// Sentry dans le navigateur. Les événements passent par un tunnel sur le domaine du front (`tunnelRoute`, next.config.ts).
 Sentry.init(sentryOptions());
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
