@@ -49,6 +49,7 @@ export function AiSearchBar({
   defaultQuery = '',
   busy = false,
   wakeApi = false,
+  framed = false,
   onInterpreted,
 }: {
   examples: readonly string[];
@@ -58,6 +59,8 @@ export function AiSearchBar({
   busy?: boolean;
   /** Réveille l'API au premier contact avec la barre (accueil) ; `/search` l'a déjà réveillée. */
   wakeApi?: boolean;
+  /** Champ dans un cadre (accueil). */
+  framed?: boolean;
   onInterpreted: (response: InterpretResponse, query: string) => void | Promise<void>;
 }) {
   const interpret = useInterpretSearch();
