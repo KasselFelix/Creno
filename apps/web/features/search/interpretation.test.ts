@@ -102,6 +102,31 @@ describe('interpretationMatches : visibilité de la ligne « Compris »', () => 
   });
 });
 
+describe('applyInterpretation : plage horaire', () => {
+  it('reprend la plage citée avec son jour', () => {
+    const cited = response({ date: '2026-10-12', timeFrom: '12:00', timeTo: '18:00' });
+    expect(applyInterpretation({ radiusKm: 10 }, cited).filters).toMatchObject({
+      date: '2026-10-12',
+      timeFrom: '12:00',
+      timeTo: '18:00',
+    });
+  });
+
+  it('remet la plage à zéro quand la phrase n’en cite pas', () => {
+    const current = { ...BORDEAUX, timeFrom: '18:00' };
+    const { filters } = applyInterpretation(current, response({ date: '2026-10-12' }));
+    expect(filters.timeFrom).toBeUndefined();
+    expect(filters.timeTo).toBeUndefined();
+  });
+
+  it('la plage appliquée se relit telle quelle dans l’URL (ligne « Compris » gardée)', () => {
+    const cited = response({ date: '2026-10-12', timeFrom: '18:00' });
+    const { filters } = applyInterpretation({ radiusKm: 10 }, cited);
+    const reread = parseSearchParams(toSearchParams(filters), '2026-10-04');
+    expect(interpretationMatches(reread, filters)).toBe(true);
+  });
+});
+
 describe('understoodFilters', () => {
   it('liste les filtres compris, tels qu’appliqués', () => {
     const cited = response({
@@ -118,6 +143,19 @@ describe('understoodFilters', () => {
       '5 km',
       `${formatPrice(3000, 'EUR')} max`,
       'samedi 10 octobre',
+    ]);
+  });
+
+  it('nomme la plage horaire après le jour', () => {
+    const cited = response({ date: '2026-10-10', timeFrom: '12:00', timeTo: '18:00' });
+    expect(understoodFilters(cited, applyInterpretation({ radiusKm: 10 }, cited).filters)).toEqual([
+      'samedi 10 octobre',
+      'Après-midi',
+    ]);
+    const evening = response({ date: '2026-10-10', timeFrom: '18:30' });
+    expect(understoodFilters(evening, { radiusKm: 10 })).toEqual([
+      'samedi 10 octobre',
+      'Après 18 h 30',
     ]);
   });
 

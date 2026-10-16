@@ -13,7 +13,7 @@ import {
   Popup,
   type ViewStateChangeEvent,
 } from 'react-map-gl/mapbox';
-import { roundCoordinate, type SearchProvider } from '@creno/shared';
+import { roundCoordinate, type SearchProvider, type TimeRange } from '@creno/shared';
 import { Button } from '@/components/ui/button';
 import { categoryLabels } from '@/features/providers/labels';
 import { formatPrice } from '@/lib/format';
@@ -28,6 +28,8 @@ export interface SearchMapProps {
   items: SearchProvider[];
   /** Jour filtré : le lien ouvre la fiche sur ce jour. */
   date?: string;
+  /** Plage horaire de ce jour : les créneaux comptés sont ceux de la plage. */
+  timeRange?: TimeRange;
   center?: { lat: number; lng: number };
   activeId: string | null;
   onActiveChange: (id: string | null) => void;
@@ -40,6 +42,7 @@ export default function SearchMap({
   token,
   items,
   date,
+  timeRange,
   center,
   activeId,
   onActiveChange,
@@ -167,7 +170,7 @@ export default function SearchMap({
               <span className="font-medium">{selected.name}</span>
               <span>À partir de {formatPrice(selected.minPriceCents, selected.currency)}</span>
               {date && selected.availableSlots !== null && (
-                <span>{describeFreeSlots(selected.availableSlots, date)}</span>
+                <span>{describeFreeSlots(selected.availableSlots, date, timeRange)}</span>
               )}
               <Link
                 href={providerHref(selected, date)}

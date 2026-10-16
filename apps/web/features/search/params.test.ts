@@ -9,6 +9,8 @@ import {
   providerHref,
   searchHref,
   searchToday,
+  timeRangeLabel,
+  timeRangePhrase,
   toApiParams,
   toSearchParams,
 } from './params';
@@ -76,6 +78,51 @@ describe('parseSearchParams : date', () => {
   });
 });
 
+describe('parseSearchParams : plage horaire', () => {
+  const today = '2026-10-04';
+  const parseOn = (query: string) => parseSearchParams(new URLSearchParams(query), today);
+
+  it('lit la plage avec une date', () => {
+    expect(parseOn('date=2026-10-10&timeFrom=12:00&timeTo=18:00')).toMatchObject({
+      date: '2026-10-10',
+      timeFrom: '12:00',
+      timeTo: '18:00',
+    });
+    expect(parseOn('date=2026-10-10&timeFrom=18%3A30')).toMatchObject({ timeFrom: '18:30' });
+  });
+
+  it('ignore une plage sans date, inversée ou mal formée', () => {
+    expect(parseOn('timeFrom=18:00')).toEqual({ radiusKm: 10 });
+    // Date passée (lien ancien) : la plage part avec elle.
+    expect(parseOn('date=2026-10-03&timeFrom=18:00')).toEqual({ radiusKm: 10 });
+    expect(parseOn('date=2026-10-10&timeFrom=18:00&timeTo=12:00')).toEqual({
+      radiusKm: 10,
+      date: '2026-10-10',
+    });
+    expect(parseOn('date=2026-10-10&timeFrom=25:00').timeFrom).toBeUndefined();
+    expect(parseOn('date=2026-10-10&timeTo=18h').timeTo).toBeUndefined();
+  });
+
+  it('retire les bornes neutres, pour une seule écriture par plage', () => {
+    expect(parseOn('date=2026-10-10&timeFrom=18:00&timeTo=24:00')).toEqual({
+      radiusKm: 10,
+      date: '2026-10-10',
+      timeFrom: '18:00',
+    });
+    expect(parseOn('date=2026-10-10&timeFrom=00:00&timeTo=24:00')).toEqual({
+      radiusKm: 10,
+      date: '2026-10-10',
+    });
+  });
+
+  it('écrit la plage dans l’URL et pour l’API seulement avec une date, et la relit', () => {
+    const filters = { radiusKm: 10, date: '2026-10-10', timeFrom: '12:00', timeTo: '18:00' };
+    expect(toApiParams(filters).toString()).toBe('date=2026-10-10&timeFrom=12%3A00&timeTo=18%3A00');
+    expect(parseSearchParams(toSearchParams(filters), today)).toEqual(filters);
+    expect(toApiParams({ radiusKm: 10, timeFrom: '12:00' }).toString()).toBe('');
+  });
+});
+
 describe('toSearchParams / toApiParams', () => {
   const filters = {
     center: { lat: 45.764, lng: 4.836 },
@@ -118,6 +165,9 @@ describe('affichage', () => {
     expect(describeResults(3, { ...saturday, center: { lat: 1, lng: 2 }, place: 'Lyon' })).toBe(
       '3 prestataires disponibles le samedi 10 octobre dans un rayon de 10 km autour de Lyon',
     );
+    expect(describeResults(4, { ...saturday, timeFrom: '12:00', timeTo: '18:00' })).toBe(
+      "4 prestataires disponibles le samedi 10 octobre l'après-midi",
+    );
     // Seuls les 200 plus proches ont été examinés : le total n'est qu'un minimum.
     expect(describeResults(180, saturday, true)).toBe(
       'Au moins 180 prestataires disponibles le samedi 10 octobre',
@@ -127,6 +177,25 @@ describe('affichage', () => {
   it('décrit les créneaux libres d’un résultat', () => {
     expect(describeFreeSlots(1, '2026-10-10')).toBe('1 créneau libre le samedi 10 octobre');
     expect(describeFreeSlots(3, '2026-10-10')).toBe('3 créneaux libres le samedi 10 octobre');
+    expect(describeFreeSlots(2, '2026-10-10', { timeFrom: '12:00', timeTo: '18:00' })).toBe(
+      "2 créneaux libres le samedi 10 octobre l'après-midi",
+    );
+    expect(describeFreeSlots(1, '2026-10-10', { timeFrom: '18:30' })).toBe(
+      '1 créneau libre le samedi 10 octobre après 18 h 30',
+    );
+  });
+
+  it('nomme les plages : périodes, puis bornes', () => {
+    expect(timeRangeLabel({ timeTo: '12:00' })).toBe('Matin');
+    expect(timeRangeLabel({ timeFrom: '12:00', timeTo: '18:00' })).toBe('Après-midi');
+    expect(timeRangeLabel({ timeFrom: '18:00' })).toBe('Soir');
+    expect(timeRangeLabel({ timeFrom: '18:30' })).toBe('Après 18 h 30');
+    expect(timeRangeLabel({ timeTo: '10:00' })).toBe('Avant 10 h');
+    expect(timeRangeLabel({ timeFrom: '09:00', timeTo: '16:00' })).toBe('Entre 9 h et 16 h');
+    expect(timeRangeLabel({})).toBeUndefined();
+    expect(timeRangePhrase({ timeTo: '12:00' })).toBe('le matin');
+    expect(timeRangePhrase({ timeFrom: '18:00' })).toBe('le soir');
+    expect(timeRangePhrase({ timeFrom: '14:00', timeTo: '16:00' })).toBe('entre 14 h et 16 h');
   });
 
   it('ouvre la fiche sur le jour et la ressource libre', () => {
@@ -166,5 +235,9 @@ describe('affichage', () => {
       }),
     ).toBe(3);
     expect(countActiveFilters({ radiusKm: 10, date: '2026-10-10' })).toBe(1);
+    // La plage compte une fois, même avec ses deux bornes.
+    expect(
+      countActiveFilters({ radiusKm: 10, date: '2026-10-10', timeFrom: '12:00', timeTo: '18:00' }),
+    ).toBe(2);
   });
 });

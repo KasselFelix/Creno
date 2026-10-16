@@ -9,6 +9,9 @@ import {
   type ProviderCategory,
   SEARCH_RADIUS_OPTIONS_KM,
   searchDateRange,
+  TIME_OF_DAY_RANGES,
+  timeOfDayOf,
+  type TimeOfDay,
 } from '@creno/shared';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -26,12 +29,21 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { categoryLabels } from '@/features/providers/labels';
-import { type SearchFilters, searchToday } from '../params';
+import { hasTimeRange, type SearchFilters, searchToday, timeRangeLabel } from '../params';
 
 const ALL = 'all';
 const categoryItems = [
   { value: ALL, label: 'Toutes' },
   ...providerCategories.map((value) => ({ value, label: categoryLabels[value] })),
+];
+
+const WHOLE_DAY = 'all';
+const OTHER_RANGE = 'other';
+const timeOfDayItems = [
+  { value: WHOLE_DAY, label: 'Toute la journée' },
+  { value: 'morning', label: 'Matin (avant 12 h)' },
+  { value: 'afternoon', label: 'Après-midi (12 h – 18 h)' },
+  { value: 'evening', label: 'Soir (après 18 h)' },
 ];
 
 /** « 30 » ou « 29,90 » (euros) → centimes ; vide ou invalide → pas de filtre. */
@@ -149,6 +161,14 @@ export function SearchFilterFields({
     (a, b) => a - b,
   );
   const radiusItems = radiusOptions.map((km) => ({ value: String(km), label: `${km} km` }));
+  // Une plage venue de la phrase ou de l'URL (« après 18 h 30 ») s'ajoute aux trois périodes.
+  const period = timeOfDayOf(filters);
+  const otherRange = hasTimeRange(filters) && !period ? timeRangeLabel(filters) : undefined;
+  const timeItems = otherRange
+    ? [...timeOfDayItems, { value: OTHER_RANGE, label: otherRange }]
+    : timeOfDayItems;
+  const timeValue = period ?? (otherRange ? OTHER_RANGE : WHOLE_DAY);
+  const noTime = { timeFrom: undefined, timeTo: undefined };
 
   return (
     <>
@@ -220,8 +240,45 @@ export function SearchFilterFields({
         <DateInput
           id={`${idPrefix}-date`}
           date={filters.date}
-          onCommit={(date) => onChange({ ...filters, date })}
+          // Sans jour, la plage horaire ne veut plus rien dire : elle part avec lui.
+          onCommit={(date) => onChange({ ...filters, date, ...(date ? {} : noTime) })}
         />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-time`}>Horaire</FieldLabel>
+        <Select
+          items={timeItems}
+          value={timeValue}
+          disabled={!filters.date}
+          onValueChange={(value) => {
+            if (value === OTHER_RANGE || value === timeValue) return;
+            onChange({
+              ...filters,
+              ...noTime,
+              ...(value === WHOLE_DAY ? {} : TIME_OF_DAY_RANGES[value as TimeOfDay]),
+            });
+          }}
+        >
+          <SelectTrigger
+            id={`${idPrefix}-time`}
+            className="h-11! w-full md:h-9!"
+            aria-describedby={filters.date ? undefined : `${idPrefix}-time-help`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {timeItems.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {!filters.date && (
+          <FieldDescription id={`${idPrefix}-time-help`} className="lg:sr-only">
+            Choisissez d&apos;abord un jour.
+          </FieldDescription>
+        )}
       </Field>
     </>
   );

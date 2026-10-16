@@ -35,6 +35,7 @@ import { applyInterpretation, interpretationMatches } from '../interpretation';
 import {
   countActiveFilters,
   describeResults,
+  hasTimeRange,
   parseSearchParams,
   PLACE_MAP_POINT,
   PLACE_MY_POSITION,
@@ -104,6 +105,10 @@ export function SearchView() {
   // Pendant le chargement d'un nouveau filtre, la liste affichée est l'ancienne : ses créneaux ne
   // sont pas ceux de la date demandée.
   const resultsDate = results.isPlaceholderData ? undefined : filters.date;
+  const resultsTime = useMemo(
+    () => ({ timeFrom: filters.timeFrom, timeTo: filters.timeTo }),
+    [filters.timeFrom, filters.timeTo],
+  );
 
   // Dernière phrase interprétée et filtres qu'elle a produits : la ligne « Compris » n'est affichée
   // que tant que la page montre ces filtres.
@@ -124,7 +129,9 @@ export function SearchView() {
   // Sur mobile, la carte n'est chargée qu'à la première ouverture de l'onglet, puis reste montée.
   const showMap = isDesktop || mapOpened;
   const activeFilters = countActiveFilters(filters);
-  const hasFilters = filters.category !== undefined || filters.priceMax !== undefined;
+  const hasFilters =
+    filters.category !== undefined || filters.priceMax !== undefined || hasTimeRange(filters);
+  const noTime = { timeFrom: undefined, timeTo: undefined };
 
   /** Les filtres `base` centrés sur la position du visiteur ; `null` si elle reste inconnue. */
   async function aroundMe(base: SearchFilters): Promise<SearchFilters | null> {
@@ -218,7 +225,7 @@ export function SearchView() {
             </Sheet>
           </div>
         </div>
-        <div className="hidden gap-3 lg:grid lg:grid-cols-4">
+        <div className="hidden gap-3 lg:grid lg:grid-cols-5">
           <SearchFilterFields idPrefix="bar" filters={filters} onChange={setFilters} />
         </div>
       </div>
@@ -260,17 +267,28 @@ export function SearchView() {
             ) : items.length === 0 ? (
               <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-6 text-center">
                 <p>
-                  {filters.date
-                    ? 'Aucun prestataire disponible ce jour-là.'
-                    : filters.center
-                      ? 'Aucun prestataire dans ce rayon.'
-                      : 'Aucun prestataire ne correspond à ces filtres.'}
+                  {filters.date && hasTimeRange(filters)
+                    ? 'Aucun prestataire disponible sur cette plage.'
+                    : filters.date
+                      ? 'Aucun prestataire disponible ce jour-là.'
+                      : filters.center
+                        ? 'Aucun prestataire dans ce rayon.'
+                        : 'Aucun prestataire ne correspond à ces filtres.'}
                 </p>
                 <div className="flex flex-wrap justify-center gap-3">
-                  {filters.date && (
+                  {filters.date && hasTimeRange(filters) && (
                     <Button
                       className="h-11 md:h-9"
-                      onClick={() => setFilters({ ...filters, date: undefined })}
+                      onClick={() => setFilters({ ...filters, ...noTime })}
+                    >
+                      Toute la journée
+                    </Button>
+                  )}
+                  {filters.date && (
+                    <Button
+                      variant={hasTimeRange(filters) ? 'outline' : 'default'}
+                      className="h-11 md:h-9"
+                      onClick={() => setFilters({ ...filters, date: undefined, ...noTime })}
                     >
                       Retirer la date
                     </Button>
@@ -294,6 +312,7 @@ export function SearchView() {
                           category: undefined,
                           priceMax: undefined,
                           date: undefined,
+                          ...noTime,
                         })
                       }
                     >
@@ -309,6 +328,7 @@ export function SearchView() {
                 <ResultList
                   items={items}
                   date={resultsDate}
+                  timeRange={resultsTime}
                   activeId={activeId}
                   onActiveChange={setActiveId}
                 />
@@ -343,6 +363,7 @@ export function SearchView() {
                 token={publicEnv.NEXT_PUBLIC_MAPBOX_TOKEN}
                 items={items}
                 date={resultsDate}
+                timeRange={resultsTime}
                 center={filters.center}
                 activeId={activeId}
                 onActiveChange={setActiveId}
