@@ -68,6 +68,8 @@ Crée : Log Analytics, Key Vault, identités (API, GitHub), PostgreSQL B1ms, env
 - endpoint « Your account » : `$API_URL/v1/payments/webhook`, événements `checkout.session.completed`, `checkout.session.expired`, `charge.refunded` → son secret `whsec_…` ;
 - endpoint « Connected accounts » : même URL, événement `account.updated` → son secret.
 
+> Créer ces endpoints dans le **même** compte (ou sandbox) que la clé `sk_test_`, au format de payload « snapshot ». Un secret d'endpoint du Dashboard fait 38 caractères (`whsec_` + 32) ; un secret de 70 caractères vient de `stripe listen` (docker compose) et ne vérifiera aucun événement de production.
+
 **Resend** : ajouter le domaine, poser les enregistrements DNS (SPF, DKIM, DMARC), **désactiver le suivi des clics et des ouvertures** (il réécrirait le lien d'inscription et verrait son jeton), créer une clé « Sending access ».
 
 **Sentry** (facultatif) : créer l'organisation en **région UE**, activer _Prevent Storing of IP Addresses_, deux projets (`creno-api` Node.js, `creno-web` Next.js).
@@ -184,7 +186,7 @@ ContainerAppConsoleLogs_CL
 | order by TimeGenerated desc
 ```
 
-**Changer un secret** : `secret <nom> <valeur>`, puis une nouvelle révision pour qu'elle le relise (`az containerapp update -n ca-creno-api -g rg-creno --revision-suffix "s$(date +%s)"`).
+**Changer un secret** : le mettre **dans le coffre** (`secret <nom> <valeur>`), puis redémarrer la révision pour qu'elle le relise (`az containerapp revision restart`, voir étape 6). Jamais `az containerapp secret set` : il remplace la référence Key Vault par une valeur en dur, que la prochaine relance du Bicep écraserait avec l'ancienne valeur du coffre.
 
 **psql** : la base n'accepte que les IP d'Azure. Ajouter temporairement la sienne, puis la retirer :
 
