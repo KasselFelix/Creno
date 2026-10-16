@@ -8,7 +8,7 @@ Projet terminé, livré en neuf étapes (une PR chacune) : socle technique, auth
 
 ## Démo en ligne
 
-**https://creno.kassel-f.pro** — démo en mode test : aucun vrai paiement, carte `4242 4242 4242 4242` (date future, n'importe quel code). L'API se met en veille après 5 minutes sans visite : le premier chargement peut prendre une vingtaine de secondes.
+**https://creno.kassel-f.pro** — démo en mode test : aucun vrai paiement, carte `4242 4242 4242 4242` (date future, n'importe quel code). L'API se met en veille après 5 minutes sans visite : le premier chargement peut prendre une trentaine de secondes.
 
 Mot de passe des comptes de démo : `creno-demo-2026`.
 

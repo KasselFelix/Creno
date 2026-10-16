@@ -3,10 +3,11 @@ import { CLIENT_IP_HEADERS } from '@creno/shared';
 
 /**
  * Délai des appels du serveur Next vers l'API. En production, l'API se met en veille après 5 min
- * sans requête et met 10 à 20 s à se réveiller : un délai plus court ferait croire à une panne au
+ * sans requête et met 20 à 30 s à se réveiller (25 s mesurées : planification, téléchargement de
+ * l'image, démarrage de Nest) : un délai plus court ferait croire à une panne au
  * premier visiteur (page en erreur, session perdue).
  */
-export const API_TIMEOUT_MS = 25_000;
+export const API_TIMEOUT_MS = 45_000;
 
 const DEV_API_URL = 'http://localhost:4000';
 
