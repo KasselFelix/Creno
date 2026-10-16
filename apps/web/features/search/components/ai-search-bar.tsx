@@ -173,15 +173,22 @@ export function AiSearchBar({
 
       {/* Masqués (pas retirés) dès que le champ n'est plus vide : leur place reste réservée, rien
           ne bouge en dessous. `invisible` les retire aussi du clavier et des lecteurs d'écran. */}
-      <div className={cn('flex flex-wrap items-center gap-2', query !== '' && 'invisible')}>
-        <span className="text-muted-foreground text-sm">Par exemple :</span>
+      {/* Mobile : une seule ligne qui défile (la place réservée reste d'une ligne) ; desktop : retour
+          à la ligne. `p-1 -m-1` laisse la place à l'anneau de focus, que le défilement couperait. */}
+      <div
+        className={cn(
+          '-m-1 flex items-center gap-2 overflow-x-auto p-1 sm:flex-wrap sm:overflow-visible',
+          query !== '' && 'invisible',
+        )}
+      >
+        <span className="text-muted-foreground shrink-0 text-sm">Par exemple :</span>
         {examples.map((example) => (
           <Button
             key={example}
             type="button"
             variant="outline"
             size="sm"
-            className="h-11 md:h-8"
+            className="h-11 shrink-0 md:h-8"
             disabled={pending}
             onClick={() => runExample(example)}
           >
