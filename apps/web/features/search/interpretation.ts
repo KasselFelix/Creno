@@ -5,7 +5,7 @@ import {
 } from '@creno/shared';
 import { categoryLabels } from '@/features/providers/labels';
 import { formatPrice } from '@/lib/format';
-import { formatSearchDay, type SearchFilters, toSearchParams } from './params';
+import { formatSearchDay, type SearchFilters, timeRangeLabel, toSearchParams } from './params';
 
 export interface AppliedInterpretation {
   /** Filtres à pousser dans l'URL (sans la position du visiteur, que seul le navigateur connaît). */
@@ -16,8 +16,9 @@ export interface AppliedInterpretation {
 
 /**
  * Filtres après une phrase interprétée. Une phrase décrit une nouvelle recherche : ce qu'elle ne cite
- * pas repart de zéro (catégorie, prix, date, rayon par défaut), sauf le lieu, gardé si elle n'en cite
- * pas (« coiffeur samedi » cherche autour du lieu déjà choisi). Un rayon sans centre est ignoré.
+ * pas repart de zéro (catégorie, prix, date et plage horaire, rayon par défaut), sauf le lieu, gardé
+ * si elle n'en cite pas (« coiffeur samedi » cherche autour du lieu déjà choisi). Un rayon sans
+ * centre est ignoré.
  */
 export function applyInterpretation(
   current: SearchFilters,
@@ -37,6 +38,9 @@ export function applyInterpretation(
       category: cited.category,
       priceMax: cited.priceMax,
       date: cited.date,
+      // L'API n'envoie une plage qu'avec son jour.
+      timeFrom: cited.date ? cited.timeFrom : undefined,
+      timeTo: cited.date ? cited.timeTo : undefined,
     },
     nearMe,
   };
@@ -63,6 +67,8 @@ export function understoodFilters(response: InterpretResponse, applied: SearchFi
   }
   if (cited.priceMax !== undefined) labels.push(`${formatPrice(cited.priceMax, 'EUR')} max`);
   if (cited.date) labels.push(formatSearchDay(cited.date));
+  const time = cited.date && timeRangeLabel(cited);
+  if (time) labels.push(time);
   return labels;
 }
 

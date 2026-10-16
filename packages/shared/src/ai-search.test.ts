@@ -14,6 +14,9 @@ const EMPTY_EXTRACTION = {
   radiusKm: null,
   priceMaxEuros: null,
   date: null,
+  timeOfDay: null,
+  startAfter: null,
+  startBefore: null,
   ignored: [],
 };
 
@@ -49,13 +52,26 @@ describe('aiSearchExtractionSchema', () => {
       radiusKm: 5,
       priceMaxEuros: 29.9,
       date: '2026-10-10',
-      ignored: ['après 18 h'],
+      timeOfDay: 'evening',
+      startAfter: '18:30',
+      startBefore: '24:00',
+      ignored: ['pour 10 personnes'],
     };
     expect(aiSearchExtractionSchema.parse(output)).toEqual(output);
   });
 
   it('accepte une sortie sans aucun filtre', () => {
     expect(aiSearchExtractionSchema.safeParse(EMPTY_EXTRACTION).success).toBe(true);
+  });
+
+  it("accepte des heures inversées : l'API les ignore et garde le reste de l'interprétation", () => {
+    expect(
+      aiSearchExtractionSchema.safeParse({
+        ...EMPTY_EXTRACTION,
+        startAfter: '18:00',
+        startBefore: '12:00',
+      }).success,
+    ).toBe(true);
   });
 
   it("ne rejette jamais une sortie pour la longueur de `ignored` (l'API la tronque)", () => {
@@ -76,6 +92,11 @@ describe('aiSearchExtractionSchema', () => {
     ['date au format français', { date: '10/10/2026' }],
     ['date impossible', { date: '2026-02-31' }],
     ['nearMe absent', { nearMe: undefined }],
+    ['période inconnue', { timeOfDay: 'night' }],
+    ['période absente', { timeOfDay: undefined }],
+    ['heure en texte libre', { startAfter: '18 h' }],
+    ['heure de début à 24:00', { startAfter: '24:00' }],
+    ['heure de fin hors bornes', { startBefore: '25:00' }],
   ])('refuse : %s', (_label, change) => {
     expect(aiSearchExtractionSchema.safeParse({ ...EMPTY_EXTRACTION, ...change }).success).toBe(
       false,
@@ -87,7 +108,18 @@ describe('aiSearchExtractionSchema', () => {
     expect(schema).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['category', 'place', 'nearMe', 'radiusKm', 'priceMaxEuros', 'date', 'ignored'],
+      required: [
+        'category',
+        'place',
+        'nearMe',
+        'radiusKm',
+        'priceMaxEuros',
+        'date',
+        'timeOfDay',
+        'startAfter',
+        'startBefore',
+        'ignored',
+      ],
     });
   });
 });
@@ -102,8 +134,9 @@ describe('interpretResponseSchema', () => {
         radiusKm: 5,
         priceMax: 3000,
         date: '2026-10-10',
+        timeFrom: '18:00',
       },
-      notices: [{ type: 'ignored_terms', terms: ['après 18 h'] }],
+      notices: [{ type: 'ignored_terms', terms: ['pour 10 personnes'] }],
     };
     expect(interpretResponseSchema.parse(response)).toEqual(response);
   });

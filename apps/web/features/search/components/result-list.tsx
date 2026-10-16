@@ -2,7 +2,7 @@
 
 import { CalendarCheck, MapPin } from 'lucide-react';
 import Link from 'next/link';
-import type { SearchProvider } from '@creno/shared';
+import type { SearchProvider, TimeRange } from '@creno/shared';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,12 +13,15 @@ import { describeFreeSlots, formatDistance, providerHref } from '../params';
 export function ResultList({
   items,
   date,
+  timeRange,
   activeId,
   onActiveChange,
 }: {
   items: SearchProvider[];
   /** Jour filtré : chaque carte dit combien de créneaux sont libres ce jour-là. */
   date?: string;
+  /** Plage horaire de ce jour : les créneaux comptés sont ceux de la plage. */
+  timeRange?: TimeRange;
   activeId: string | null;
   onActiveChange: (id: string | null) => void;
 }) {
@@ -59,7 +62,7 @@ export function ResultList({
               {date && provider.availableSlots !== null && (
                 <p className="text-primary flex items-center gap-1.5 text-sm font-medium">
                   <CalendarCheck aria-hidden className="size-4 shrink-0" />
-                  {describeFreeSlots(provider.availableSlots, date)}
+                  {describeFreeSlots(provider.availableSlots, date, timeRange)}
                 </p>
               )}
             </CardHeader>

@@ -10,6 +10,7 @@ import {
   type RulesResponse,
   type SlotsQuery,
   type SlotsResponse,
+  type TimeRange,
 } from '@creno/shared';
 import type { AuthUser } from '../auth/auth.types.js';
 import { DomainError } from '../common/domain-error.js';
@@ -26,6 +27,7 @@ import {
   isOfferedSlot,
   isoWeekday,
   localDateOf,
+  wallTimeOf,
   wallTimeToInstant,
 } from './slots.engine.js';
 
@@ -52,6 +54,16 @@ function byResource<T extends { resourceId: string }>(rows: T[]): Map<string, T[
     else groups.set(row.resourceId, [row]);
   }
   return groups;
+}
+
+/**
+ * Heure murale `HH:mm` dans `[timeFrom, timeTo)` : largeur fixe, l'ordre des chaînes est l'ordre
+ * des heures.
+ */
+function startsIn({ timeFrom, timeTo }: TimeRange, wallTime: string): boolean {
+  return (
+    (timeFrom === undefined || wallTime >= timeFrom) && (timeTo === undefined || wallTime < timeTo)
+  );
 }
 
 /**
@@ -217,12 +229,14 @@ export class AvailabilityService {
    * filtre « disponible le » de la recherche. Même calcul que `getSlots`, par le moteur, mais chargé
    * par lot : une requête pour les ressources, puis trois pour toutes à la fois (règles, fermetures,
    * réservations), quel que soit leur nombre. Avec `priceMaxCents`, seules les ressources à ce prix
-   * ou moins comptent. Seuls les prestataires qui ont au moins un créneau libre sont renvoyés.
+   * ou moins comptent. Avec `timeRange`, seuls les créneaux dont l'heure de début, à l'heure murale
+   * de leur ressource, est dans la plage. Seuls les prestataires qui ont au moins un créneau libre
+   * sont renvoyés.
    */
   async freeSlotsOn(
     providerIds: string[],
     date: string,
-    { priceMaxCents }: { priceMaxCents?: number },
+    { priceMaxCents, timeRange = {} }: { priceMaxCents?: number; timeRange?: TimeRange },
     now = new Date(),
   ): Promise<Map<string, DayAvailability>> {
     const result = new Map<string, DayAvailability>();
@@ -255,7 +269,11 @@ export class AvailabilityService {
         now,
         horizonDays: BOOKING_HORIZON_DAYS,
       });
-      const free = day?.slots.filter((slot) => slot.available).length ?? 0;
+      const free =
+        day?.slots.filter(
+          (slot) =>
+            slot.available && startsIn(timeRange, wallTimeOf(slot.start, resource.timezone)),
+        ).length ?? 0;
       if (free === 0) continue;
       const current = result.get(resource.providerId);
       // Les ressources arrivent par prix croissant : la première qui a un créneau libre sert au lien.

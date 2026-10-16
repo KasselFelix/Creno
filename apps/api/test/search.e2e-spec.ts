@@ -22,7 +22,7 @@ import {
   slotsResponseSchema,
 } from '@creno/shared';
 import { AvailabilityService } from '../src/availability/availability.service.js';
-import { wallTimeToInstant } from '../src/availability/slots.engine.js';
+import { wallTimeOf, wallTimeToInstant } from '../src/availability/slots.engine.js';
 import { SearchService } from '../src/search/search.service.js';
 import { createTestApp, dbOf, everyDay, instantIn, localDateIn, resetDatabase } from './app.js';
 
@@ -524,6 +524,82 @@ describe('search', () => {
       expect(await search(onDay())).toMatchObject({ total: 197, totalIsCapped: false });
     });
 
+    describe('plage horaire (heure de début, heure locale de la ressource)', () => {
+      it('ne compte que les créneaux qui commencent dans la plage', async () => {
+        await insertProviders(app, [
+          { name: '9 h - 18 h', ...PARIS, hours: ['09:00', '18:00'] },
+          { name: '10 h - 19 h', ...PARIS, hours: ['10:00', '19:00'] },
+        ]);
+
+        // Le créneau de 17 h du premier finit à 18 h mais commence avant : hors plage.
+        const evening = await search(`${around(PARIS, 5)}&${onDay()}&timeFrom=18:00`);
+        expect(names(evening)).toEqual(['10 h - 19 h']);
+        expect(evening.items[0]!.availableSlots).toBe(1);
+
+        const morning = byName(await search(`${around(PARIS, 5)}&${onDay()}&timeTo=12:00`));
+        expect(morning.get('9 h - 18 h')!.availableSlots).toBe(3);
+        expect(morning.get('10 h - 19 h')!.availableSlots).toBe(2);
+
+        const afternoon = byName(
+          await search(`${around(PARIS, 5)}&${onDay()}&timeFrom=12:00&timeTo=18:00`),
+        );
+        expect(afternoon.get('9 h - 18 h')!.availableSlots).toBe(6);
+        expect(afternoon.get('10 h - 19 h')!.availableSlots).toBe(6);
+      });
+
+      it('une réservation sur le seul créneau de la plage exclut le prestataire', async () => {
+        const [provider] = await insertProviders(app, [
+          { name: '10 h - 19 h', ...PARIS, hours: ['10:00', '19:00'] },
+        ]);
+        await book(provider!.resources[0]!.id, instantIn(DAY, '18:00'));
+
+        expect(names(await search(`${around(PARIS, 5)}&${onDay()}&timeFrom=18:00`))).toEqual([]);
+        expect(names(await search(`${around(PARIS, 5)}&${onDay()}`))).toEqual(['10 h - 19 h']);
+      });
+
+      it('le lien vise la ressource la moins chère qui est libre dans la plage', async () => {
+        const [provider] = await insertProviders(app, [
+          { name: 'Deux prix', ...PARIS, prices: [2000, 6000], hours: ['09:00', '12:00'] },
+        ]);
+        await book(resourceAt(provider!, 2000), instantIn(DAY, '11:00'));
+
+        const body = await search(`${around(PARIS, 5)}&${onDay()}&timeFrom=11:00`);
+        expect(body.items[0]).toMatchObject({
+          availableSlots: 1,
+          availableResourceId: resourceAt(provider!, 6000),
+        });
+        // Toute la journée, la moins chère a encore 9 h et 10 h : c'est elle que vise le lien.
+        expect((await search(`${around(PARIS, 5)}&${onDay()}`)).items[0]).toMatchObject({
+          availableSlots: 5,
+          availableResourceId: resourceAt(provider!, 2000),
+        });
+      });
+
+      it('sans date, ou avec les bornes de la journée, la plage ne filtre rien', async () => {
+        await insertProviders(app, [{ name: '9 h - 12 h', ...PARIS, hours: ['09:00', '12:00'] }]);
+
+        const withoutDate = await search(`${around(PARIS, 5)}&timeFrom=18:00`);
+        expect(names(withoutDate)).toEqual(['9 h - 12 h']);
+        expect(withoutDate.items[0]!.availableSlots).toBeNull();
+
+        const wholeDay = await search(`${around(PARIS, 5)}&${onDay()}&timeFrom=00:00&timeTo=24:00`);
+        expect(wholeDay.items[0]!.availableSlots).toBe(3);
+      });
+
+      it('400 VALIDATION_FAILED pour une plage inversée ou une heure invalide', async () => {
+        for (const range of [
+          'timeFrom=18:00&timeTo=12:00',
+          'timeFrom=12:00&timeTo=12:00',
+          'timeFrom=25:00',
+        ]) {
+          const res = await request(app.getHttpServer())
+            .get(`/v1/search/providers?${onDay()}&${range}`)
+            .expect(400);
+          expect(apiErrorSchema.parse(res.body).code).toBe('VALIDATION_FAILED');
+        }
+      });
+    });
+
     describe('avec un instant fixé', () => {
       const query = (date: string) => searchProvidersQuerySchema.parse({ date });
       const countFree = (slots: { available: boolean }[]) =>
@@ -569,6 +645,33 @@ describe('search', () => {
         expect(countFree(after.days[0]!.slots)).toBe(hours - 1);
         expect(result.items[0]!.availableSlots).toBe(hours - 1);
       });
+
+      it.each([
+        // Hiver : 2 h se répète (2 h d'été, puis 2 h d'hiver), 0 h, 1 h, 2 h, 2 h, 3 h, 4 h, 5 h.
+        ["passage à l'heure d'hiver", '2026-10-25', '2026-10-20T10:00:00Z', 7],
+        // Été : 2 h n'existe pas, 0 h, 1 h, 3 h, 4 h, 5 h.
+        ["passage à l'heure d'été", '2027-03-28', '2027-03-20T10:00:00Z', 5],
+      ])(
+        "un jour de %s, la plage se lit à l'heure murale, comme getSlots",
+        async (_label, day, instant, expected) => {
+          const [provider] = await insertProviders(app, [
+            { name: 'Ouvert jour et nuit', ...PARIS, hours: ['00:00', '24:00'] },
+          ]);
+          const now = new Date(instant);
+          const slots = await app
+            .get(AvailabilityService)
+            .getSlots(provider!.resources[0]!.id, { from: day, to: day }, now);
+          const before6 = slots.days[0]!.slots.filter(
+            (slot) => slot.available && wallTimeOf(new Date(slot.start), 'Europe/Paris') < '06:00',
+          );
+
+          const result = await app
+            .get(SearchService)
+            .searchProviders(searchProvidersQuerySchema.parse({ date: day, timeTo: '06:00' }), now);
+          expect(before6).toHaveLength(expected);
+          expect(result.items[0]!.availableSlots).toBe(expected);
+        },
+      );
     });
   });
 

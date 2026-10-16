@@ -42,6 +42,11 @@ function withRefreshedCookies(request: NextRequest, setCookies: string[]): Heade
 
 /** Seules les routes versionnées de l'API sont relayées (le navigateur n'appelle rien d'autre). */
 const API_PREFIX = '/api/v1/';
+/**
+ * Seul chemin relayé hors de `/api/v1/` : la liveness de l'API (`GET /health`, ne touche pas la
+ * base). L'accueil l'appelle pour réveiller l'API en veille pendant que le visiteur tape sa phrase.
+ */
+const API_WAKE_PATH = '/api/health';
 
 /**
  * Appel du navigateur à l'API (`/api/v1/*` sur le domaine du front, cookies first-party) : relayé
@@ -57,7 +62,15 @@ function forwardToApi(request: NextRequest): NextResponse {
   const target = new URL(api);
   target.pathname = pathname.slice('/api'.length);
   target.search = search;
-  if (!pathname.startsWith(API_PREFIX) || pathname.includes('//') || target.origin !== api.origin) {
+  const wake = pathname === API_WAKE_PATH && request.method === 'GET';
+  // Contrôlé aussi après coup : l'URL normalise `..` et `%2e%2e` (« /v1/%2e%2e/docs » → « /docs »).
+  const allowed = wake ? target.pathname === '/health' : target.pathname.startsWith('/v1/');
+  if (
+    !(wake || pathname.startsWith(API_PREFIX)) ||
+    !allowed ||
+    pathname.includes('//') ||
+    target.origin !== api.origin
+  ) {
     return NextResponse.json(
       { statusCode: 404, code: 'NOT_FOUND', message: 'Élément introuvable.' },
       { status: 404 },
@@ -75,7 +88,7 @@ function forwardToApi(request: NextRequest): NextResponse {
 
 /**
  * S'exécute avant chaque requête (c'est le « middleware » de Next 16) :
- * 1. relaie `/api/v1/*` vers l'API ;
+ * 1. relaie `/api/v1/*` (et `GET /api/health`) vers l'API ;
  * 2. pose la Content Security Policy des pages, avec un nonce neuf ;
  * 3. renouvelle la session côté serveur quand l'access token a expiré ;
  * 4. redirige les pages protégées vers /login quand il n'y a aucun cookie de session.

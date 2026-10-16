@@ -8,7 +8,7 @@ import {
   roundCoordinate,
   SEARCH_TIMEZONE,
 } from '@creno/shared';
-import { localDateOf } from '../availability/slots.engine.js';
+import { localDateOf, wallTimeOf } from '../availability/slots.engine.js';
 import { describeError } from '../common/all-exceptions.filter.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { APP_CONFIG } from '../config/config.module.js';
@@ -27,12 +27,14 @@ import {
 } from './filter-extractor.js';
 import {
   costUsdMicros,
+  dayForTimeRange,
   eurosToCents,
   hasKnownPrice,
+  resolveTimeRange,
   snapRadiusKm,
   truncateIgnored,
 } from './interpretation.js';
-import { checkWeekday, fold, parseKeywords } from './keyword-parser.js';
+import { checkWeekday, fold, keywordDate, parseKeywords } from './keyword-parser.js';
 import {
   MAX_ATTEMPTS,
   MIN_ATTEMPT_MS,
@@ -131,13 +133,18 @@ export class AiSearchService implements OnModuleInit {
   async interpret(query: string, requestId: string): Promise<InterpretResponse> {
     const startedAt = this.clock.now();
     const today = localDateOf(new Date(startedAt), SEARCH_TIMEZONE);
+    const nowTime = wallTimeOf(new Date(startedAt), SEARCH_TIMEZONE);
 
     const call = await this.callModel({ query, today });
     const source: Source = call.extraction ? 'ai' : 'keywords';
     const extraction = call.extraction
       ? checkWeekday(call.extraction, query, today)
       : parseKeywords(query, today);
-    const { filters, notices } = await this.toFilters(extraction, source, today);
+    const { filters, notices } = await this.toFilters(extraction, source, {
+      query,
+      today,
+      nowTime,
+    });
 
     const cost = call.model && call.usage ? this.costOf(call.usage) : null;
     await this.record({
@@ -155,6 +162,8 @@ export class AiSearchService implements OnModuleInit {
         radiusKm: filters.radiusKm ?? null,
         priceMax: filters.priceMax ?? null,
         date: filters.date ?? null,
+        timeFrom: filters.timeFrom ?? null,
+        timeTo: filters.timeTo ?? null,
         hasPlace: filters.place !== undefined,
         nearMe: filters.nearMe === true,
       },
@@ -315,7 +324,7 @@ export class AiSearchService implements OnModuleInit {
   private async toFilters(
     extraction: AiSearchExtraction,
     source: Source,
-    today: string,
+    { query, today, nowTime }: { query: string; today: string; nowTime: string },
   ): Promise<Pick<InterpretResponse, 'filters' | 'notices'>> {
     const filters: InterpretResponse['filters'] = {};
     const notices: InterpretNotice[] = [];
@@ -333,9 +342,17 @@ export class AiSearchService implements OnModuleInit {
     if (extraction.priceMaxEuros !== null) {
       filters.priceMax = eurosToCents(extraction.priceMaxEuros);
     }
-    if (extraction.date !== null) {
-      if (isSearchDateInRange(extraction.date, today)) filters.date = extraction.date;
-      else notices.push({ type: 'date_out_of_range', date: extraction.date });
+    // Une plage horaire a toujours un jour : celui de la phrase, même si le modèle l'a manqué
+    // (« lundi »), sinon aujourd'hui, ou demain si la plage est déjà finie.
+    const timeRange = resolveTimeRange(extraction);
+    const hasTime = Object.keys(timeRange).length > 0;
+    const date =
+      extraction.date ??
+      (hasTime ? (keywordDate(query, today) ?? dayForTimeRange(timeRange, today, nowTime)) : null);
+    if (date !== null) {
+      if (isSearchDateInRange(date, today)) Object.assign(filters, { date }, timeRange);
+      // Jour hors horizon : ni jour, ni plage (pas de repli sur aujourd'hui).
+      else notices.push({ type: 'date_out_of_range', date });
     }
     const ignored = truncateIgnored(extraction.ignored);
     if (ignored.length > 0) notices.push({ type: 'ignored_terms', terms: ignored });

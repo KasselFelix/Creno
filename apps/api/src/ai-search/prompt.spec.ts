@@ -33,4 +33,16 @@ describe('prompt', () => {
     expect(SYSTEM_PROMPT).toContain('"sports_field"');
     expect(SYSTEM_PROMPT).not.toContain('"other"');
   });
+
+  it('décrit la plage horaire : périodes, heures au format HH:MM, durées laissées de côté', () => {
+    for (const field of ['timeOfDay', 'startAfter', 'startBefore']) {
+      expect(SYSTEM_PROMPT).toContain(`- ${field} :`);
+    }
+    for (const period of ['"morning"', '"afternoon"', '"evening"']) {
+      expect(SYSTEM_PROMPT).toContain(period);
+    }
+    expect(SYSTEM_PROMPT).toContain("Une durée n'est pas une heure");
+    // L'heure n'est plus un morceau ignoré.
+    expect(SYSTEM_PROMPT).not.toMatch(/ignored :[^\n]*\(heure/);
+  });
 });

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   isSearchDateInRange,
+  normalizeTimeRange,
   SEARCH_RADIUS_KM_DEFAULT,
   SEARCH_RESULTS_MAX,
   searchDateRange,
   searchProvidersQuerySchema,
   searchProvidersResponseSchema,
+  TIME_OF_DAY_RANGES,
+  timeOfDayOf,
 } from './search.js';
 
 describe('searchProvidersQuerySchema', () => {
@@ -52,6 +55,13 @@ describe('searchProvidersQuerySchema', () => {
     ['date au format français', { date: '10/10/2026' }],
     ['date impossible', { date: '2026-02-31' }],
     ['date vide', { date: '' }],
+    ['heure de début hors bornes', { timeFrom: '25:00' }],
+    ['heure de début à 24:00', { timeFrom: '24:00' }],
+    ['heure sans minutes', { timeFrom: '18' }],
+    ['heure de fin hors bornes', { timeTo: '24:30' }],
+    ['plage inversée', { timeFrom: '18:00', timeTo: '12:00' }],
+    ['plage vide', { timeFrom: '12:00', timeTo: '12:00' }],
+    ['avant minuit', { timeTo: '00:00' }],
   ])('refuse : %s', (_label, input) => {
     expect(searchProvidersQuerySchema.safeParse(input).success).toBe(false);
   });
@@ -60,6 +70,50 @@ describe('searchProvidersQuerySchema', () => {
     expect(searchProvidersQuerySchema.parse({ date: '2026-10-10' })).toMatchObject({
       date: '2026-10-10',
     });
+  });
+
+  it('accepte une plage horaire, fin de journée comprise', () => {
+    expect(
+      searchProvidersQuerySchema.parse({ date: '2026-10-10', timeFrom: '12:00', timeTo: '18:00' }),
+    ).toMatchObject({ timeFrom: '12:00', timeTo: '18:00' });
+    expect(searchProvidersQuerySchema.parse({ timeFrom: '00:00', timeTo: '24:00' })).toMatchObject({
+      timeFrom: '00:00',
+      timeTo: '24:00',
+    });
+  });
+});
+
+describe('normalizeTimeRange', () => {
+  it.each([
+    [
+      'plage complète',
+      { timeFrom: '12:00', timeTo: '18:00' },
+      { timeFrom: '12:00', timeTo: '18:00' },
+    ],
+    ['début de journée retiré', { timeFrom: '00:00', timeTo: '10:00' }, { timeTo: '10:00' }],
+    ['fin de journée retirée', { timeFrom: '18:00', timeTo: '24:00' }, { timeFrom: '18:00' }],
+    ['journée entière', { timeFrom: '00:00', timeTo: '24:00' }, {}],
+    ['aucune borne', {}, {}],
+  ])('%s', (_label, range, expected) => {
+    expect(normalizeTimeRange(range)).toEqual(expected);
+  });
+
+  it('renvoie null pour une plage vide ou inversée', () => {
+    expect(normalizeTimeRange({ timeFrom: '18:00', timeTo: '12:00' })).toBeNull();
+    expect(normalizeTimeRange({ timeFrom: '12:00', timeTo: '12:00' })).toBeNull();
+    // Aucun créneau ne commence avant minuit.
+    expect(normalizeTimeRange({ timeTo: '00:00' })).toBeNull();
+  });
+});
+
+describe('timeOfDayOf', () => {
+  it('reconnaît les trois périodes et rien d’autre', () => {
+    expect(timeOfDayOf(TIME_OF_DAY_RANGES.morning)).toBe('morning');
+    expect(timeOfDayOf({ timeFrom: '12:00', timeTo: '18:00' })).toBe('afternoon');
+    expect(timeOfDayOf({ timeFrom: '18:00' })).toBe('evening');
+    expect(timeOfDayOf({ timeFrom: '18:30' })).toBeUndefined();
+    expect(timeOfDayOf({ timeFrom: '12:00' })).toBeUndefined();
+    expect(timeOfDayOf({})).toBeUndefined();
   });
 });
 

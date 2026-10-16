@@ -1,6 +1,8 @@
 import {
+  endTimeSchema,
   isSearchDateInRange,
   localDateSchema,
+  normalizeTimeRange,
   type ProviderCategory,
   providerCategorySchema,
   roundCoordinate,
@@ -11,6 +13,9 @@ import {
   searchPriceMaxSchema,
   searchRadiusKmSchema,
   type SearchProvider,
+  startTimeSchema,
+  timeOfDayOf,
+  type TimeRange,
 } from '@creno/shared';
 import { formatLocalDate, todayInZone } from '@/lib/format';
 
@@ -26,6 +31,9 @@ export interface SearchFilters {
   priceMax?: number;
   /** Jour où le prestataire doit avoir un créneau libre (`YYYY-MM-DD`). */
   date?: string;
+  /** Plage horaire de ce jour (heures de début `HH:mm`, `timeTo` exclu) ; jamais sans `date`. */
+  timeFrom?: string;
+  timeTo?: string;
 }
 
 const PLACE_MAX_LENGTH = 100;
@@ -67,6 +75,14 @@ export function parseSearchParams(params: RawParams, today = searchToday()): Sea
   const center = lat !== undefined && lng !== undefined ? { lat, lng } : undefined;
   const place = params.get('place')?.trim().slice(0, PLACE_MAX_LENGTH);
   const date = read('date', localDateSchema);
+  const dateInRange = date !== undefined && isSearchDateInRange(date, today) ? date : undefined;
+  // Une plage n'a de sens qu'avec un jour ; inversée, elle est ignorée.
+  const timeRange = dateInRange
+    ? normalizeTimeRange({
+        timeFrom: read('timeFrom', startTimeSchema),
+        timeTo: read('timeTo', endTimeSchema),
+      })
+    : null;
 
   return {
     center,
@@ -75,7 +91,8 @@ export function parseSearchParams(params: RawParams, today = searchToday()): Sea
     radiusKm: read('radiusKm', searchRadiusKmSchema) ?? SEARCH_RADIUS_KM_DEFAULT,
     category: read('category', providerCategorySchema),
     priceMax: read('priceMax', searchPriceMaxSchema),
-    date: date !== undefined && isSearchDateInRange(date, today) ? date : undefined,
+    date: dateInRange,
+    ...timeRange,
   };
 }
 
@@ -89,7 +106,11 @@ export function toApiParams(filters: SearchFilters): URLSearchParams {
   }
   if (filters.category) params.set('category', filters.category);
   if (filters.priceMax !== undefined) params.set('priceMax', String(filters.priceMax));
-  if (filters.date) params.set('date', filters.date);
+  if (filters.date) {
+    params.set('date', filters.date);
+    if (filters.timeFrom) params.set('timeFrom', filters.timeFrom);
+    if (filters.timeTo) params.set('timeTo', filters.timeTo);
+  }
   return params;
 }
 
@@ -112,6 +133,7 @@ export function countActiveFilters(filters: SearchFilters): number {
     filters.category !== undefined,
     filters.priceMax !== undefined,
     filters.date !== undefined,
+    filters.date !== undefined && hasTimeRange(filters),
     filters.center !== undefined && filters.radiusKm !== SEARCH_RADIUS_KM_DEFAULT,
   ].filter(Boolean).length;
 }
@@ -121,10 +143,45 @@ export function formatSearchDay(date: string): string {
   return formatLocalDate(date, { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
-/** « 3 créneaux libres le samedi 10 octobre ». */
-export function describeFreeSlots(count: number, date: string): string {
+export const hasTimeRange = (range: TimeRange) =>
+  range.timeFrom !== undefined || range.timeTo !== undefined;
+
+/** « 9:00 » → « 9 h », « 18:30 » → « 18 h 30 ». */
+function formatHour(time: string): string {
+  const [hours, minutes] = time.split(':') as [string, string];
+  return `${Number(hours)} h${minutes === '00' ? '' : ` ${minutes}`}`;
+}
+
+const TIME_OF_DAY_LABELS = {
+  morning: { label: 'Matin', phrase: 'le matin' },
+  afternoon: { label: 'Après-midi', phrase: "l'après-midi" },
+  evening: { label: 'Soir', phrase: 'le soir' },
+};
+
+/** Plage horaire en fin de phrase : « l'après-midi », « après 18 h 30 », « entre 14 h et 16 h ». */
+export function timeRangePhrase(range: TimeRange): string | undefined {
+  const period = timeOfDayOf(range);
+  if (period) return TIME_OF_DAY_LABELS[period].phrase;
+  const { timeFrom, timeTo } = range;
+  if (timeFrom && timeTo) return `entre ${formatHour(timeFrom)} et ${formatHour(timeTo)}`;
+  if (timeFrom) return `après ${formatHour(timeFrom)}`;
+  if (timeTo) return `avant ${formatHour(timeTo)}`;
+  return undefined;
+}
+
+/** Plage horaire seule (badge, option du sélecteur) : « Après-midi », « Après 18 h 30 ». */
+export function timeRangeLabel(range: TimeRange): string | undefined {
+  const period = timeOfDayOf(range);
+  if (period) return TIME_OF_DAY_LABELS[period].label;
+  const phrase = timeRangePhrase(range);
+  return phrase && phrase.charAt(0).toUpperCase() + phrase.slice(1);
+}
+
+/** « 3 créneaux libres le samedi 10 octobre », « … l'après-midi ». */
+export function describeFreeSlots(count: number, date: string, range: TimeRange = {}): string {
   const slots = count === 1 ? '1 créneau libre' : `${count} créneaux libres`;
-  return `${slots} le ${formatSearchDay(date)}`;
+  const time = timeRangePhrase(range);
+  return `${slots} le ${formatSearchDay(date)}${time ? ` ${time}` : ''}`;
 }
 
 /** Lien vers la fiche ; avec une date, la fiche s'ouvre sur ce jour et sur la ressource libre. */
@@ -150,7 +207,9 @@ export function describeResults(total: number, filters: SearchFilters, capped = 
     total === 0 ? 'Aucun prestataire' : total === 1 ? '1 prestataire' : `${total} prestataires`;
   if (capped) count = `Au moins ${total} prestataires`;
   if (filters.date) {
+    const time = timeRangePhrase(filters);
     count += `${total > 1 || capped ? ' disponibles' : ' disponible'} le ${formatSearchDay(filters.date)}`;
+    if (time) count += ` ${time}`;
   }
   if (!filters.center) return count;
   const around = filters.place ? ` autour de ${filters.place}` : '';

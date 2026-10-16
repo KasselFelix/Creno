@@ -167,6 +167,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Déplacement d'une réservation par un `UPDATE` sous la même contrainte d'exclusion, client prévenu sans devoir accepter** : la base refuse un créneau pris, le client a 24 h pour annuler, trois déplacements au plus, et les notifications portent une révision (une ligne neuve par déplacement, jamais recyclée). → [ADR 0015](docs/adr/0015-provider-reschedule.md)
 - **Hébergement : Azure Container Apps mis en veille, Postgres B1ms, Vercel** : l'API descend à zéro réplica sans trafic (quota gratuit), la base reste dans l'offre gratuite de 12 mois, sans VNet (+22 €/mois) ni registre Azure (images sur GHCR) ; deux rôles Postgres (l'API n'a aucun droit de DDL), secrets dans Key Vault, déploiement par OIDC sans secret. → [ADR 0016](docs/adr/0016-deploiement-azure-container-apps.md)
 - **Filtre « disponible le » calculé par le moteur de créneaux, pas en SQL** : 200 candidats de la recherche, chargement par lot (5 requêtes), même résultat que la fiche du prestataire, changements d'heure compris. → [ADR 0014](docs/adr/0014-date-filter-slot-engine.md)
+- **Plage horaire = deux bornes sur l'heure de début des créneaux, à l'heure de la ressource** : « matin », « après-midi », « soir » ne sont que des bornes préréglées, le modèle renvoie la période et les heures citées et l'API les combine ; une heure sans jour vaut aujourd'hui, ou demain si la plage est passée. → [ADR 0017](docs/adr/0017-time-of-day-filter.md)
 
 ## Recherche géographique
 
@@ -183,16 +184,18 @@ ORDER BY ST_Distance(p.location, $point), p.id
 LIMIT 50;
 ```
 
-- `GET /v1/search/providers?lat=&lng=&radiusKm=&category=&priceMax=&date=` : prestataires dans le rayon, triés par distance, avec leur prix minimum. Avec `date`, seuls ceux qui ont un créneau libre ce jour-là, avec leur nombre de créneaux libres ([ADR 0014](docs/adr/0014-date-filter-slot-engine.md)). `ST_DWithin` s'appuie sur l'index GiST : 27 lignes lues sur 50 000 pour un rayon de 10 km (plan dans [docs/schema.md](docs/schema.md)).
+- `GET /v1/search/providers?lat=&lng=&radiusKm=&category=&priceMax=&date=&timeFrom=&timeTo=` : prestataires dans le rayon, triés par distance, avec leur prix minimum. Avec `date`, seuls ceux qui ont un créneau libre ce jour-là, avec leur nombre de créneaux libres ([ADR 0014](docs/adr/0014-date-filter-slot-engine.md)). Avec `timeFrom` / `timeTo` (`HH:mm`, fin exclue), seuls les créneaux qui **commencent** dans la plage, à l'heure de la ressource : un créneau de 17 h à 19 h ne compte pas pour « après 18 h » ([ADR 0017](docs/adr/0017-time-of-day-filter.md)). `ST_DWithin` s'appuie sur l'index GiST : 27 lignes lues sur 50 000 pour un rayon de 10 km (plan dans [docs/schema.md](docs/schema.md)).
 - `/search` : champ « Ville ou adresse » à suggestions, « Autour de moi », filtres, liste et carte côte à côte (onglets sur mobile). Les filtres sont dans l'URL : la recherche se partage et le bouton retour fonctionne.
 - `GET /v1/geocoding/search?q=` : suggestions d'adresses. Si le service de l'État ne répond pas, la route renvoie 503 et l'écran reste utilisable (géolocalisation, carte, saisie manuelle des coordonnées côté prestataire).
 - La position du visiteur est arrondie à environ 100 m, jamais enregistrée et absente des logs (query string et en-tête `Referer` compris). La carte, elle, est servie par Mapbox, qui reçoit la zone affichée.
 
 ## Recherche en langage naturel
 
-En haut de `/search`, on tape « un terrain de foot à Bordeaux samedi pour moins de 40 € » : la page applique les filtres compris (affichés sous le champ, corrigeables à la main) et dit ce qu'elle n'a pas pris en compte (« “après 18 h” n'est pas pris en compte »).
+Sur l'accueil (et en haut de `/search`), on tape « un coiffeur sur Paris pour lundi après-midi » ou « un terrain de foot à Bordeaux samedi pour moins de 40 € » : `/search` s'ouvre sur les filtres compris (affichés sous le champ, corrigeables à la main), plage horaire comprise, et dit ce qu'elle n'a pas pris en compte (« “pour 10 personnes” n'est pas pris en compte »).
 
 - `POST /v1/search/interpret` : la phrase part en `POST` (jamais dans une URL), le modèle renvoie des filtres validés par Zod, le géocodeur place le lieu. « Près de moi » fait demander sa position au navigateur.
+- **Plage horaire** : « le matin » (avant 12 h), « l'après-midi » (12 h – 18 h), « le soir » (après 18 h), « après 18 h 30 », « entre 14 h et 16 h », « à 10 h »… Sans jour cité, aujourd'hui, ou demain si la plage est déjà passée ; une durée (« pendant 2 h ») reste ignorée ([ADR 0017](docs/adr/0017-time-of-day-filter.md)).
+- **Réveil de l'API** : en démo, l'API se met en veille. Au premier contact avec la barre de l'accueil, la page appelle `GET /api/health` (seul chemin relayé hors de `/api/v1/`, liveness sans base) pour la réveiller pendant que le visiteur tape ; au-delà de 3 s d'attente, un message prévient que cela peut prendre jusqu'à 30 s.
 - **Repli** : clé absente, circuit ouvert, plafond du jour atteint, timeout, erreur ou sortie invalide → analyse par mots-clés, réponse `200` avec `source: "keywords"` et le message « Recherche simplifiée par mots-clés ».
 - **Limites** : `AI_RATE_LIMIT_PER_MINUTE` phrases par minute et par IP, `AI_DAILY_REQUEST_CAP` appels au modèle par jour (toutes IP confondues), timeout `AI_TIMEOUT_MS` par appel.
 - **Vie privée** : la phrase n'est ni journalisée ni enregistrée (seulement sa longueur) ; `ai_requests` ne garde ni lieu ni coordonnées, et ses lignes sont purgées après 90 jours. La phrase est envoyée à Mistral AI (hébergé dans l'UE).

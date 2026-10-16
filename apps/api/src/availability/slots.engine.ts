@@ -62,6 +62,14 @@ export function localDateOf(instant: Date, timezone: string): string {
   return format(new TZDate(instant, timezone), 'yyyy-MM-dd');
 }
 
+/**
+ * Heure murale (`HH:mm`) d'un instant, vue depuis le fuseau. Une heure répétée (passage à l'heure
+ * d'hiver) donne la même heure murale pour ses deux occurrences.
+ */
+export function wallTimeOf(instant: Date, timezone: string): string {
+  return format(new TZDate(instant, timezone), 'HH:mm');
+}
+
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
