@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   costUsdMicros,
+  dayForTimeRange,
   eurosToCents,
   hasKnownPrice,
+  resolveTimeRange,
   snapRadiusKm,
   truncateIgnored,
 } from './interpretation.js';
@@ -54,5 +56,61 @@ describe('costUsdMicros', () => {
     expect(hasKnownPrice('mistral-large-2411')).toBe(false);
     expect(costUsdMicros('mistral-large-2411', { inputTokens: 500, outputTokens: 80 })).toBeNull();
     expect(costUsdMicros('mistral-small-2603', { inputTokens: null, outputTokens: 80 })).toBeNull();
+  });
+});
+
+describe('resolveTimeRange', () => {
+  const time = (
+    timeOfDay: 'morning' | 'afternoon' | 'evening' | null,
+    startAfter: string | null = null,
+    startBefore: string | null = null,
+  ) => ({ timeOfDay, startAfter, startBefore });
+
+  it.each([
+    ['rien de cité', time(null), {}],
+    ['matin', time('morning'), { timeTo: '12:00' }],
+    ['après-midi', time('afternoon'), { timeFrom: '12:00', timeTo: '18:00' }],
+    ['soir', time('evening'), { timeFrom: '18:00' }],
+    ['après 18 h', time(null, '18:00'), { timeFrom: '18:00' }],
+    ['avant 10 h', time(null, null, '10:00'), { timeTo: '10:00' }],
+    ['entre 14 h et 16 h', time(null, '14:00', '16:00'), { timeFrom: '14:00', timeTo: '16:00' }],
+    ["l'après-midi après 15 h", time('afternoon', '15:00'), { timeFrom: '15:00', timeTo: '18:00' }],
+    ['le soir avant 20 h', time('evening', null, '20:00'), { timeFrom: '18:00', timeTo: '20:00' }],
+    [
+      'le matin après 14 h : les heures citées l’emportent',
+      time('morning', '14:00'),
+      { timeFrom: '14:00' },
+    ],
+    ['heures inversées : ignorées', time(null, '18:00', '12:00'), {}],
+    ['heures égales : ignorées', time(null, '12:00', '12:00'), {}],
+    ['heures inversées, période gardée', time('evening', '20:00', '19:00'), { timeFrom: '18:00' }],
+    [
+      'le soir jusqu’à minuit : bornes neutres retirées',
+      time('evening', null, '24:00'),
+      { timeFrom: '18:00' },
+    ],
+    ['dès minuit', time(null, '00:00'), {}],
+  ])('%s', (_label, extraction, expected) => {
+    expect(resolveTimeRange(extraction)).toEqual(expected);
+  });
+});
+
+describe('dayForTimeRange (aucun jour cité)', () => {
+  // Vendredi 16 octobre 2026.
+  const TODAY = '2026-10-16';
+
+  it("aujourd'hui tant que la plage n'est pas finie", () => {
+    expect(dayForTimeRange({ timeFrom: '18:00' }, TODAY, '23:30')).toBe(TODAY);
+    expect(dayForTimeRange({ timeTo: '10:00' }, TODAY, '09:30')).toBe(TODAY);
+    expect(dayForTimeRange({ timeFrom: '12:00', timeTo: '18:00' }, TODAY, '17:59')).toBe(TODAY);
+  });
+
+  it('demain quand la plage est finie', () => {
+    expect(dayForTimeRange({ timeTo: '12:00' }, TODAY, '15:00')).toBe('2026-10-17');
+    expect(dayForTimeRange({ timeFrom: '12:00', timeTo: '18:00' }, TODAY, '18:00')).toBe(
+      '2026-10-17',
+    );
+    // Fin de mois.
+    expect(dayForTimeRange({ timeTo: '12:00' }, '2026-10-31', '15:00')).toBe('2026-11-01');
   });
 });

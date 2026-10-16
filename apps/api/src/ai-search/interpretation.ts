@@ -1,9 +1,14 @@
 import {
   AI_IGNORED_TERM_MAX_LENGTH,
   AI_IGNORED_TERMS_MAX,
+  type AiSearchExtraction,
+  normalizeTimeRange,
   PRICE_CENTS_MAX,
   SEARCH_RADIUS_OPTIONS_KM,
+  TIME_OF_DAY_RANGES,
+  type TimeRange,
 } from '@creno/shared';
+import { addLocalDays } from '../availability/slots.engine.js';
 
 /**
  * Règles qui transforment une extraction (modèle ou mots-clés) en filtres de recherche. Fonctions
@@ -30,6 +35,41 @@ export function truncateIgnored(terms: string[]): string[] {
     .map((term) => term.trim().slice(0, AI_IGNORED_TERM_MAX_LENGTH).trim())
     .filter((term) => term.length > 0)
     .slice(0, AI_IGNORED_TERMS_MAX);
+}
+
+// Heures `HH:mm` à largeur fixe : l'ordre des chaînes est l'ordre des heures.
+const later = (a?: string, b?: string) => (a === undefined || (b !== undefined && b > a) ? b : a);
+const earlier = (a?: string, b?: string) => (a === undefined || (b !== undefined && b < a) ? b : a);
+
+/**
+ * Plage horaire d'une extraction : bornes de la période (« l'après-midi »), resserrées par les
+ * heures citées (« après 15 h »). Si les deux ne se recoupent pas (« le matin après 14 h »), les
+ * heures citées l'emportent. Des heures inversées sont ignorées, sans faire perdre le reste de
+ * l'interprétation. Bornes neutres retirées : `{}` veut dire toute la journée.
+ */
+export function resolveTimeRange({
+  timeOfDay,
+  startAfter,
+  startBefore,
+}: Pick<AiSearchExtraction, 'timeOfDay' | 'startAfter' | 'startBefore'>): TimeRange {
+  const cited =
+    normalizeTimeRange({ timeFrom: startAfter ?? undefined, timeTo: startBefore ?? undefined }) ??
+    {};
+  const period: TimeRange = timeOfDay === null ? {} : TIME_OF_DAY_RANGES[timeOfDay];
+  const both = normalizeTimeRange({
+    timeFrom: later(period.timeFrom, cited.timeFrom),
+    timeTo: earlier(period.timeTo, cited.timeTo),
+  });
+  return both ?? cited;
+}
+
+/**
+ * Jour d'une plage horaire quand la phrase n'en cite aucun (« coiffeur après 18 h ») : aujourd'hui
+ * si la plage n'est pas encore finie à l'heure `nowTime` (`HH:mm`, heure de Paris), sinon demain
+ * (« le matin », tapé à 15 h).
+ */
+export function dayForTimeRange(range: TimeRange, today: string, nowTime: string): string {
+  return range.timeTo !== undefined && range.timeTo <= nowTime ? addLocalDays(today, 1) : today;
 }
 
 /**

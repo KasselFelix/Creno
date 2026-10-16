@@ -20,7 +20,11 @@ Règles :
 - radiusKm : le rayon en kilomètres s'il est cité (« dans un rayon de 5 km »), nombre entier ; sinon null.
 - priceMaxEuros : le prix maximum en euros s'il est cité (« moins de 30 € », « max 50 euros »), décimales permises ; sinon null.
 - date : le jour demandé, au format AAAA-MM-JJ, lu dans le calendrier fourni. Un nom de jour désigne sa prochaine occurrence, aujourd'hui compris ; « ce week-end » désigne le samedi. null si aucun jour n'est cité.
-- ignored : les morceaux de la phrase que ces filtres ne couvrent pas (heure, durée, nombre de personnes, équipement…), recopiés tels quels, 5 au plus ; sinon une liste vide.`;
+- timeOfDay : "morning" pour le matin ou la matinée, "afternoon" pour l'après-midi, "evening" pour le soir ou « en soirée » ; null sinon. « Une soirée » (un événement, « salle pour une soirée d'anniversaire ») n'est pas une période.
+- startAfter : l'heure de début au plus tôt, au format HH:MM sur 24 h, si une heure est citée : « après 18 h » et « à partir de 18 h » → "18:00", « dès 9 h 30 » → "09:30", « entre 14 h et 16 h » → "14:00", « à 10 h » → "10:00" ; sinon null.
+- startBefore : l'heure de début au plus tard, au format HH:MM : « avant 10 h » et « jusqu'à 10 h » → "10:00", « entre 14 h et 16 h » → "16:00", « à 10 h » → "11:00", minuit → "24:00" ; sinon null.
+- Une durée n'est pas une heure : « pendant 2 h », « pour 2 h », « 2 heures de terrain » vont dans ignored, et startAfter et startBefore restent null.
+- ignored : les morceaux de la phrase que ces filtres ne couvrent pas (durée, nombre de personnes, équipement…), recopiés tels quels, 5 au plus ; sinon une liste vide.`;
 
 const WEEKDAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 

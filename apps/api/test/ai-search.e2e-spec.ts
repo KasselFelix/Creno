@@ -284,8 +284,14 @@ describe('POST /v1/search/interpret (sans clé Mistral)', () => {
     const { body } = await interpret(app, 'barbier à Lyon après 18 h');
     expect(body).toEqual({
       source: 'keywords',
-      filters: { category: 'hairdresser', place: { label: 'Lyon', lat: 45.758, lng: 4.832 } },
-      notices: [{ type: 'ignored_terms', terms: ['après 18 h'] }],
+      filters: {
+        category: 'hairdresser',
+        place: { label: 'Lyon', lat: 45.758, lng: 4.832 },
+        // « Après 18 h » sans jour : aujourd'hui (une plage sans fin n'est jamais finie).
+        date: localDateOf(new Date(), SEARCH_TIMEZONE),
+        timeFrom: '18:00',
+      },
+      notices: [],
     });
     expect(await lastRow(app)).toMatchObject({
       outcome: 'not_configured',

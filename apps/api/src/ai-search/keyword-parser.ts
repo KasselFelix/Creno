@@ -9,18 +9,24 @@ import { addLocalDays } from '../availability/slots.engine.js';
 export function parseKeywords(query: string, today: string): AiSearchExtraction {
   const text = query.replace(/\s+/g, ' ').trim();
   const folded = fold(text);
+  const time = findTime(folded);
   return {
     category: findCategory(folded),
-    place: findPlace(text, folded),
+    place: findPlace(text, folded, time.spans),
     nearMe: NEAR_ME.test(folded),
     radiusKm: findRadius(folded),
     priceMaxEuros: findPrice(folded),
     date: findDate(folded, today),
-    timeOfDay: null,
-    startAfter: null,
-    startBefore: null,
-    ignored: findIgnored(text, folded),
+    timeOfDay: time.timeOfDay,
+    startAfter: time.startAfter,
+    startBefore: time.startBefore,
+    ignored: findIgnored(text, folded, time.spans),
   };
+}
+
+/** Date citée dans la phrase, s'il y en a une (le service la reprend quand le modèle l'a manquée). */
+export function keywordDate(query: string, today: string): string | null {
+  return findDate(fold(query.replace(/\s+/g, ' ').trim()), today);
 }
 
 const SPECIAL_CHARS: Record<string, string> = { '’': "'", '‘': "'", ʼ: "'", ' ': ' ' };
@@ -164,7 +170,9 @@ function findDate(folded: string, today: string): string | null {
   // « après-demain » avant « demain », qui en fait partie.
   if (/\bapres[- ]demain\b/.test(folded)) return addLocalDays(today, 2);
   if (/\bdemain\b/.test(folded)) return addLocalDays(today, 1);
-  if (/\b(aujourd'?\s?hui|ce soir|ce midi|ce matin|cet apres-midi)\b/.test(folded)) return today;
+  if (/\b(aujourd'?\s?hui|ce soir|ce midi|ce matin|cet apres[- ]midi|cet aprem)\b/.test(folded)) {
+    return today;
+  }
   if (/\bce (week-?end|we)\b/.test(folded)) return nextWeekday(today, 6);
   const weekday = WEEKDAY_WORD.exec(folded);
   return weekday ? nextWeekday(today, WEEKDAYS.indexOf(weekday[1]!)) : null;
@@ -243,7 +251,7 @@ const isCategoryWord = (word: string) => CATEGORY_WORDS.some(([, pattern]) => pa
  * Le géocodeur dira ensuite s'il existe ; le service ne garde un lieu des mots-clés que si c'est une
  * commune, ou un libellé qui contient ce texte.
  */
-function findPlace(text: string, folded: string): string | null {
+function findPlace(text: string, folded: string, timeSpans: Span[]): string | null {
   const tokens = [...folded.matchAll(/\S+/g)].map((match) => ({
     word: match[0].replace(/[,.;:!?]+$/, ''),
     start: match.index,
@@ -261,6 +269,7 @@ function findPlace(text: string, folded: string): string | null {
     // « à domicile », « à moins de 5 km », « à samedi » : la préposition n'ouvre pas un lieu. Un
     // article ouvre un lieu (« à la Défense ») mais ne le termine pas seul.
     if (!head || NOT_A_PLACE.has(head.word) || isCategoryWord(head.word)) continue;
+    if (startsIn(timeSpans, head.start)) continue;
     if (PLACE_STOP_WORDS.has(head.word) && !['le', 'la', 'les'].includes(head.word)) continue;
     // Un nombre ouvre un lieu seulement s'il s'agit d'un numéro de rue (« près du 12 rue Oberkampf »).
     if (/^\d/.test(head.word) && !STREET_WORDS.test(tokens[first + 1]?.word ?? '')) continue;
@@ -269,6 +278,8 @@ function findPlace(text: string, folded: string): string | null {
     for (let j = first; j < tokens.length; j++) {
       const token = tokens[j]!;
       if (j > first && (PLACE_STOP_WORDS.has(token.word) || isCategoryWord(token.word))) break;
+      // « à Lyon l'après-midi », « à Lyon en soirée » : le lieu s'arrête où commence l'horaire.
+      if (j > first && startsIn(timeSpans, token.start)) break;
       // Un nombre après le début du lieu est un prix, une heure ou un code postal : le lieu s'arrête.
       if (j > first && /^\d/.test(token.word)) break;
       if (text.slice(tokens[first]!.start, token.end).length > AI_PLACE_MAX) break;
@@ -284,15 +295,18 @@ function findPlace(text: string, folded: string): string | null {
   return null;
 }
 
-// Morceaux que les filtres ne couvrent pas, signalés au visiteur : heures, durées, nombre de personnes.
+// Morceaux que les filtres ne couvrent pas, signalés au visiteur : durées, nombre de personnes, et
+// heures qui ne font pas une plage (heure seule, heure impossible, plage inversée).
 const IGNORED_PATTERNS = [
-  /\b((apres|avant|vers|a|des|entre|de)\s+)?\d{1,2}\s*h(\s*\d{2})?\b(\s+(et|a)\s+\d{1,2}\s*h(\s*\d{2})?\b)?/g,
+  /\b(pendant|pour|durant)\s+\d{1,2}\s*h(\s*\d{2})?\b/g,
+  /\b((apres|avant|vers|a|des|entre|de|jusqu'?a)\s+)?\d{1,2}\s*h(\s*\d{2})?\b(\s*(et|a|-)\s*\d{1,2}\s*h(\s*\d{2})?\b)?/g,
   /\b(pour\s+)?\d+\s*(personnes|personne|pers|joueurs|joueur|invites|invite|participants|participant)\b/g,
   /\b(pendant\s+)?\d+\s*(heures|heure|minutes|minute|min)\b/g,
 ];
 
-function findIgnored(text: string, folded: string): string[] {
-  const spans: { start: number; end: number }[] = [];
+function findIgnored(text: string, folded: string, timeSpans: Span[]): string[] {
+  // Les expressions horaires comprises sont réservées : elles ne sont pas « ignorées ».
+  const spans: Span[] = [...timeSpans];
   for (const pattern of IGNORED_PATTERNS) {
     for (const match of folded.matchAll(pattern)) {
       const span = { start: match.index, end: match.index + match[0].length };
@@ -301,6 +315,116 @@ function findIgnored(text: string, folded: string): string[] {
     }
   }
   return spans
+    .filter((span) => !timeSpans.includes(span))
     .sort((a, b) => a.start - b.start)
     .map((span) => text.slice(span.start, span.end).trim());
+}
+
+interface Span {
+  start: number;
+  end: number;
+}
+
+const startsIn = (spans: Span[], index: number) =>
+  spans.some((span) => index >= span.start && index < span.end);
+
+// Périodes ; « une soirée » (un événement) n'en est pas une, « en soirée » si.
+const TIME_OF_DAY_WORDS: [NonNullable<AiSearchExtraction['timeOfDay']>, RegExp][] = [
+  ['afternoon', /\b(l'|d')?(apres[- ]midi|aprem)\b/],
+  ['morning', /\b((en|dans la)\s+)?matinee\b|\bmatin\b/],
+  ['evening', /\b(en|dans la)\s+soiree\b|\bsoir\b/],
+];
+
+// Une heure : « 18 h », « 18h30 », « 18 h 30 », « 18 heures », « 18:30 ».
+const HOUR = String.raw`\d{1,2}\s*(?:h(?:eures?)?(?:\s*\d{2})?|:\d{2})\b`;
+const HOUR_PARTS = /(\d{1,2})\s*(?:h(?:eures?)?(?:\s*(\d{2}))?|:(\d{2}))/g;
+
+/**
+ * Expressions horaires, introduites par un mot : une heure seule (« samedi 18h ») ou une durée
+ * (« pendant 2h ») n'est pas une plage. Les plus longues d'abord ; une expression qui en chevauche
+ * une autre déjà trouvée est écartée. `around` : la plage entoure l'heure citée.
+ */
+const HOUR_EXPRESSIONS: [kind: 'range' | 'after' | 'before' | 'around' | 'at', RegExp][] = [
+  ['range', new RegExp(String.raw`\bentre\s+${HOUR}\s+et\s+${HOUR}`, 'g')],
+  ['range', new RegExp(String.raw`\bde\s+${HOUR}\s+(?:a|jusqu'?a)\s+${HOUR}`, 'g')],
+  ['range', new RegExp(String.raw`\b${HOUR}\s*(?:-|a)\s*${HOUR}`, 'g')],
+  ['after', new RegExp(String.raw`\b(?:apres|a partir de|des)\s+${HOUR}`, 'g')],
+  ['before', new RegExp(String.raw`\b(?:avant|jusqu'?a)\s+${HOUR}`, 'g')],
+  ['around', new RegExp(String.raw`\bvers\s+${HOUR}`, 'g')],
+  ['at', new RegExp(String.raw`\ba\s+${HOUR}`, 'g')],
+];
+
+const DAY_MINUTES = 24 * 60;
+const hhmm = (minutes: number) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+/** Minutes depuis minuit des heures d'une expression ; `null` si l'une est impossible (25 h, 18h75). */
+function hoursOf(expression: string): number[] | null {
+  const minutes = [...expression.matchAll(HOUR_PARTS)].map((match) => {
+    const hours = Number(match[1]);
+    const mins = Number(match[2] ?? match[3] ?? 0);
+    return hours <= 24 && mins < 60 ? hours * 60 + mins : Number.NaN;
+  });
+  return minutes.some((value) => Number.isNaN(value) || value > DAY_MINUTES) ? null : minutes;
+}
+
+/** Bornes `[après, avant)` en minutes d'une expression, ou `null` si elle ne fait pas une plage. */
+function boundsOf(kind: (typeof HOUR_EXPRESSIONS)[number][0], expression: string) {
+  const hours = hoursOf(expression);
+  if (!hours) return null;
+  const [first, second] = hours as [number, number?];
+  const bounds = {
+    range: { after: first, before: second },
+    after: { after: first, before: undefined },
+    before: { after: undefined, before: first },
+    around: { after: Math.max(first - 60, 0), before: Math.min(first + 60, DAY_MINUTES) },
+    at: { after: first, before: Math.min(first + 60, DAY_MINUTES) },
+  }[kind];
+  // Une heure de début est avant minuit ; « avant 24 h » est permis ; une plage va dans l'ordre.
+  if (bounds.after !== undefined && bounds.after >= DAY_MINUTES) return null;
+  if (bounds.after !== undefined && bounds.before !== undefined && bounds.after >= bounds.before) {
+    return null;
+  }
+  return bounds;
+}
+
+function findTime(
+  folded: string,
+): Pick<AiSearchExtraction, 'timeOfDay' | 'startAfter' | 'startBefore'> & { spans: Span[] } {
+  const spans: Span[] = [];
+  let timeOfDay: AiSearchExtraction['timeOfDay'] = null;
+  let periodIndex = Infinity;
+  for (const [period, pattern] of TIME_OF_DAY_WORDS) {
+    const match = pattern.exec(folded);
+    if (!match) continue;
+    spans.push({ start: match.index, end: match.index + match[0].length });
+    // Plusieurs périodes : la première citée l'emporte.
+    if (match.index < periodIndex) {
+      timeOfDay = period;
+      periodIndex = match.index;
+    }
+  }
+
+  const found: { start: number; after?: number; before?: number }[] = [];
+  for (const [kind, pattern] of HOUR_EXPRESSIONS) {
+    for (const match of folded.matchAll(pattern)) {
+      const span = { start: match.index, end: match.index + match[0].length };
+      if (spans.some((other) => span.start < other.end && other.start < span.end)) continue;
+      const bounds = boundsOf(kind, match[0]);
+      // Impossible ou inversée : pas réservée, elle sera signalée comme ignorée.
+      if (!bounds) continue;
+      spans.push(span);
+      found.push({ start: span.start, ...bounds });
+    }
+  }
+  // Dans l'ordre de la phrase, chaque borne prend la première valeur citée.
+  found.sort((a, b) => a.start - b.start);
+  const after = found.find((bounds) => bounds.after !== undefined)?.after;
+  const before = found.find((bounds) => bounds.before !== undefined)?.before;
+  return {
+    timeOfDay,
+    startAfter: after === undefined ? null : hhmm(after),
+    startBefore: before === undefined ? null : hhmm(before),
+    spans,
+  };
 }

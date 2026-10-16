@@ -85,12 +85,12 @@ describe('parseKeywords', () => {
     [
       'barbier à Lyon après 18 h',
       SUNDAY,
-      { category: 'hairdresser', place: 'Lyon', ignored: ['après 18 h'], priceMaxEuros: null },
+      { category: 'hairdresser', place: 'Lyon', startAfter: '18:00', priceMaxEuros: null },
     ],
     [
       'tennis à Marseille ce soir',
       SUNDAY,
-      { category: 'sports_field', place: 'Marseille', date: SUNDAY },
+      { category: 'sports_field', place: 'Marseille', date: SUNDAY, timeOfDay: 'evening' },
     ],
     [
       'photographe le 1er novembre à Toulouse',
@@ -109,12 +109,100 @@ describe('parseKeywords', () => {
     [
       'terrain entre 14h et 16h pendant 2 heures',
       SUNDAY,
-      { category: 'sports_field', ignored: ['entre 14h et 16h', 'pendant 2 heures'] },
+      {
+        category: 'sports_field',
+        startAfter: '14:00',
+        startBefore: '16:00',
+        ignored: ['pendant 2 heures'],
+      },
     ],
     ['max 10 personnes', SUNDAY, { priceMaxEuros: null, ignored: ['10 personnes'] }],
     ['je cherche quelque chose', SUNDAY, NOTHING],
   ])('« %s »', (query, today, expected) => {
     expect(parseKeywords(query, today)).toEqual({ ...NOTHING, ...expected });
+  });
+
+  // Lundi 5 octobre 2026, jeudi 8.
+  const MONDAY = '2026-10-05';
+  it.each([
+    // La phrase de l'étape 9 qui a montré le manque : « après midi » était ignoré.
+    [
+      'un coiffeur sur paris pour lundi après midi',
+      { category: 'hairdresser', place: 'paris', date: MONDAY, timeOfDay: 'afternoon' },
+    ],
+    [
+      'coiffeur lundi après-midi',
+      { category: 'hairdresser', date: MONDAY, timeOfDay: 'afternoon' },
+    ],
+    [
+      'coiffeur à Lyon l’après-midi',
+      { category: 'hairdresser', place: 'Lyon', timeOfDay: 'afternoon' },
+    ],
+    ['coiffeur à Lyon en soirée', { category: 'hairdresser', place: 'Lyon', timeOfDay: 'evening' }],
+    ['salle à Lyon dans la matinée', { category: 'room', place: 'Lyon', timeOfDay: 'morning' }],
+    [
+      'coiffeur à Paris après-midi',
+      { category: 'hairdresser', place: 'Paris', timeOfDay: 'afternoon' },
+    ],
+    [
+      'terrain jeudi aprem',
+      { category: 'sports_field', date: '2026-10-08', timeOfDay: 'afternoon' },
+    ],
+    [
+      'terrain jeudi aprèm',
+      { category: 'sports_field', date: '2026-10-08', timeOfDay: 'afternoon' },
+    ],
+    ['salle demain matin', { category: 'room', date: MONDAY, timeOfDay: 'morning' }],
+    ['salle en matinée', { category: 'room', timeOfDay: 'morning' }],
+    ['coiffeur ce matin', { category: 'hairdresser', date: SUNDAY, timeOfDay: 'morning' }],
+    ['coiffeur cet après-midi', { category: 'hairdresser', date: SUNDAY, timeOfDay: 'afternoon' }],
+    ['coiffeur lundi soir', { category: 'hairdresser', date: MONDAY, timeOfDay: 'evening' }],
+    // « Une soirée » est un événement, pas une heure.
+    ["salle pour une soirée d'anniversaire", { category: 'room' }],
+    // « Midi » seul n'est pas une plage : « ce midi » reste aujourd'hui.
+    ['coiffeur ce midi', { category: 'hairdresser', date: SUNDAY }],
+    ['coiffeur avant 10 h', { category: 'hairdresser', startBefore: '10:00' }],
+    [
+      'coiffeur jusqu’à 20 h',
+      { category: 'hairdresser', startBefore: '20:00', priceMaxEuros: null },
+    ],
+    [
+      'coiffeur à 10 h',
+      { category: 'hairdresser', place: null, startAfter: '10:00', startBefore: '11:00' },
+    ],
+    [
+      'coiffeur vers 18h30',
+      { category: 'hairdresser', place: null, startAfter: '17:30', startBefore: '19:30' },
+    ],
+    ['coiffeur vers 0 h', { category: 'hairdresser', startBefore: '01:00', startAfter: '00:00' }],
+    ['coiffeur à 23 h', { category: 'hairdresser', startAfter: '23:00', startBefore: '24:00' }],
+    ['coiffeur dès 9h', { category: 'hairdresser', startAfter: '09:00' }],
+    ['coiffeur à partir de 18:30', { category: 'hairdresser', place: null, startAfter: '18:30' }],
+    ['coiffeur après 18 heures', { category: 'hairdresser', startAfter: '18:00' }],
+    [
+      'terrain samedi 18h-20h',
+      { category: 'sports_field', date: SATURDAY, startAfter: '18:00', startBefore: '20:00' },
+    ],
+    [
+      'terrain de 9 h à 12 h 30',
+      { category: 'sports_field', startAfter: '09:00', startBefore: '12:30' },
+    ],
+    [
+      'terrain le soir après 20h',
+      { category: 'sports_field', timeOfDay: 'evening', startAfter: '20:00' },
+    ],
+    // Durées et heures seules : pas des plages.
+    [
+      'terrain samedi pendant 2h',
+      { category: 'sports_field', date: SATURDAY, ignored: ['pendant 2h'] },
+    ],
+    ['terrain pour 2 h', { category: 'sports_field', ignored: ['pour 2 h'] }],
+    ['terrain samedi 18h', { category: 'sports_field', date: SATURDAY, ignored: ['18h'] }],
+    // Plage impossible : laissée dans les morceaux ignorés.
+    ['terrain entre 16 h et 14 h', { category: 'sports_field', ignored: ['entre 16 h et 14 h'] }],
+    ['terrain après 25 h', { category: 'sports_field', ignored: ['après 25 h'] }],
+  ])('plage horaire : « %s »', (query, expected) => {
+    expect(parseKeywords(query, SUNDAY)).toEqual({ ...NOTHING, ...expected });
   });
 
   it("produit toujours une sortie valide pour le schéma de l'extraction", () => {
@@ -123,6 +211,9 @@ describe('parseKeywords', () => {
       `salle à ${'Saint-Rémy-de-Provence '.repeat(8)}`,
       '???',
       'terrain le 29/02',
+      'terrain entre 16 h et 14 h',
+      'coiffeur à 23 h',
+      'coiffeur vers 0 h le soir',
     ];
     for (const query of queries) {
       expect(aiSearchExtractionSchema.safeParse(parseKeywords(query, SUNDAY)).success).toBe(true);
