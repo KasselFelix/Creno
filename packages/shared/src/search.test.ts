@@ -61,6 +61,7 @@ describe('searchProvidersQuerySchema', () => {
     ['heure de fin hors bornes', { timeTo: '24:30' }],
     ['plage inversée', { timeFrom: '18:00', timeTo: '12:00' }],
     ['plage vide', { timeFrom: '12:00', timeTo: '12:00' }],
+    ['avant minuit', { timeTo: '00:00' }],
   ])('refuse : %s', (_label, input) => {
     expect(searchProvidersQuerySchema.safeParse(input).success).toBe(false);
   });
@@ -100,6 +101,8 @@ describe('normalizeTimeRange', () => {
   it('renvoie null pour une plage vide ou inversée', () => {
     expect(normalizeTimeRange({ timeFrom: '18:00', timeTo: '12:00' })).toBeNull();
     expect(normalizeTimeRange({ timeFrom: '12:00', timeTo: '12:00' })).toBeNull();
+    // Aucun créneau ne commence avant minuit.
+    expect(normalizeTimeRange({ timeTo: '00:00' })).toBeNull();
   });
 });
 

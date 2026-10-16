@@ -204,6 +204,19 @@ describe('parseKeywords', () => {
       'terrain le soir après 20h',
       { category: 'sports_field', timeOfDay: 'evening', startAfter: '20:00' },
     ],
+    [
+      "coiffeur à Lyon en fin d'après-midi",
+      { category: 'hairdresser', place: 'Lyon', timeOfDay: 'afternoon' },
+    ],
+    ['salle à Lyon en début de soirée', { category: 'room', place: 'Lyon', timeOfDay: 'evening' }],
+    ['salle en fin de matinée', { category: 'room', timeOfDay: 'morning' }],
+    [
+      'coiffeur à Lyon pendant 2h après 18h',
+      { category: 'hairdresser', place: 'Lyon', startAfter: '18:00', ignored: ['pendant 2h'] },
+    ],
+    // Une distance, pas une heure.
+    ['terrain à 2 heures de Paris', { category: 'sports_field', ignored: ['2 heures'] }],
+    ['coiffeur avant 0 h', { category: 'hairdresser', ignored: ['avant 0 h'] }],
     // Durées et heures seules : pas des plages.
     [
       'terrain samedi pendant 2h',

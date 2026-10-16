@@ -57,16 +57,19 @@ function byResource<T extends { resourceId: string }>(rows: T[]): Map<string, T[
 }
 
 /**
- * Fenêtre qui couvre le jour local `date` dans chacun des fuseaux : ses bornes changent d'un fuseau
- * à l'autre. Le moteur ne garde ensuite que ce qui chevauche les créneaux de chaque ressource.
+ * Heure murale `HH:mm` dans `[timeFrom, timeTo)` : largeur fixe, l'ordre des chaînes est l'ordre
+ * des heures.
  */
-/** Heure murale `HH:mm` dans `[timeFrom, timeTo)` : largeur fixe, l'ordre des chaînes est celui des heures. */
 function startsIn({ timeFrom, timeTo }: TimeRange, wallTime: string): boolean {
   return (
     (timeFrom === undefined || wallTime >= timeFrom) && (timeTo === undefined || wallTime < timeTo)
   );
 }
 
+/**
+ * Fenêtre qui couvre le jour local `date` dans chacun des fuseaux : ses bornes changent d'un fuseau
+ * à l'autre. Le moteur ne garde ensuite que ce qui chevauche les créneaux de chaque ressource.
+ */
 function dayWindow(date: string, timezones: string[]): Interval {
   const days = [...new Set(timezones)].map((timezone) => ({
     start: wallTimeToInstant(date, '00:00', timezone).getTime(),

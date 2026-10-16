@@ -48,10 +48,12 @@ const DAY_END = '24:00';
 
 /**
  * Écriture unique d'une plage : bornes neutres retirées (« jusqu'à minuit » = sans borne haute),
- * pour qu'une même plage donne une même URL. `null` si la plage est vide (début ≥ fin).
+ * pour qu'une même plage donne une même URL. `null` si la plage est vide (début ≥ fin, fin à minuit).
  */
 export function normalizeTimeRange({ timeFrom, timeTo }: TimeRange): TimeRange | null {
   if (timeFrom !== undefined && timeTo !== undefined && timeFrom >= timeTo) return null;
+  // Aucun créneau ne commence avant minuit.
+  if (timeTo === DAY_START) return null;
   return {
     ...(timeFrom !== undefined && timeFrom !== DAY_START && { timeFrom }),
     ...(timeTo !== undefined && timeTo !== DAY_END && { timeTo }),
@@ -156,7 +158,7 @@ export const searchProvidersQuerySchema = z
     error: 'Latitude et longitude vont ensemble',
     path: ['lng'],
   })
-  .refine((q) => q.timeFrom === undefined || q.timeTo === undefined || q.timeFrom < q.timeTo, {
+  .refine((q) => normalizeTimeRange(q) !== null, {
     error: "L'heure de fin doit être après l'heure de début",
     path: ['timeTo'],
   });

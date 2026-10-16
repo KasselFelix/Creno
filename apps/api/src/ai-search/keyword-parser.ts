@@ -196,6 +196,8 @@ const PLACE_STOP_WORDS = new Set([
   'pres',
   'autour',
   'pour',
+  'pendant',
+  'durant',
   'avec',
   'sans',
   'entre',
@@ -328,15 +330,18 @@ interface Span {
 const startsIn = (spans: Span[], index: number) =>
   spans.some((span) => index >= span.start && index < span.end);
 
-// Périodes ; « une soirée » (un événement) n'en est pas une, « en soirée » si.
+// Périodes ; « une soirée » (un événement) n'en est pas une, « en soirée » si. « En fin de »,
+// « en début d' » font partie de l'expression (le lieu s'arrête avant : « à Lyon en fin d'après-midi »).
+const EDGE = String.raw`(?:(?:en\s+)?(?:fin|debut)\s+(?:de\s+|d'))`;
 const TIME_OF_DAY_WORDS: [NonNullable<AiSearchExtraction['timeOfDay']>, RegExp][] = [
-  ['afternoon', /\b(l'|d')?(apres[- ]midi|aprem)\b/],
-  ['morning', /\b((en|dans la)\s+)?matinee\b|\bmatin\b/],
-  ['evening', /\b(en|dans la)\s+soiree\b|\bsoir\b/],
+  ['afternoon', new RegExp(String.raw`\b(${EDGE}|l'|d')?(apres[- ]midi|aprem)\b`)],
+  ['morning', new RegExp(String.raw`\b(${EDGE}|(en|dans la)\s+)?matinee\b|\bmatin\b`)],
+  ['evening', new RegExp(String.raw`\b(${EDGE}|(en|dans la)\s+)soiree\b|\bsoir\b`)],
 ];
 
 // Une heure : « 18 h », « 18h30 », « 18 h 30 », « 18 heures », « 18:30 ».
-const HOUR = String.raw`\d{1,2}\s*(?:h(?:eures?)?(?:\s*\d{2})?|:\d{2})\b`;
+// « à 2 heures de Paris » est une distance : « heures » suivi de « de » n'est pas une heure.
+const HOUR = String.raw`\d{1,2}\s*(?:h(?:eures?(?!\s+de\b))?(?:\s*\d{2})?|:\d{2})\b`;
 const HOUR_PARTS = /(\d{1,2})\s*(?:h(?:eures?)?(?:\s*(\d{2}))?|:(\d{2}))/g;
 
 /**
@@ -382,6 +387,8 @@ function boundsOf(kind: (typeof HOUR_EXPRESSIONS)[number][0], expression: string
   }[kind];
   // Une heure de début est avant minuit ; « avant 24 h » est permis ; une plage va dans l'ordre.
   if (bounds.after !== undefined && bounds.after >= DAY_MINUTES) return null;
+  // « Avant 0 h » : aucun créneau ne commence avant minuit.
+  if (bounds.before !== undefined && bounds.before <= 0) return null;
   if (bounds.after !== undefined && bounds.before !== undefined && bounds.after >= bounds.before) {
     return null;
   }
