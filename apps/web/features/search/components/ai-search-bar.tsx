@@ -2,6 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CircleAlert, LoaderCircle, Search, Sparkles } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import {
@@ -66,6 +67,7 @@ export function AiSearchBar({
   });
   const pending = interpret.isPending || busy;
 
+  const [noticeShown, setNoticeShown] = useState(false);
   const woken = useRef(false);
   function onFirstContact() {
     if (!wakeApi || woken.current) return;
@@ -94,6 +96,8 @@ export function AiSearchBar({
   );
 
   function runExample(example: string) {
+    // La phrase part à Mistral sans passer par le champ : la mention s'affiche aussi.
+    setNoticeShown(true);
     form.setValue('query', example);
     void submit();
   }
@@ -125,6 +129,7 @@ export function AiSearchBar({
                   aria-invalid={!!errors.query}
                   aria-busy={pending}
                   aria-describedby="ai-query-help"
+                  onFocus={() => setNoticeShown(true)}
                   {...form.register('query')}
                 />
               </InputGroup>
@@ -137,9 +142,13 @@ export function AiSearchBar({
                 Rechercher
               </Button>
             </div>
-            <FieldDescription id="ai-query-help">
-              Votre phrase est analysée par Mistral AI (hébergé dans l&apos;UE) : n&apos;y mettez
-              pas d&apos;informations personnelles.
+            {/* Visible dès que le champ a été sélectionné, puis gardée (un clic sur le lien ne la
+                masque pas) ; toujours lue par les lecteurs d'écran. */}
+            <FieldDescription id="ai-query-help" className={noticeShown ? undefined : 'sr-only'}>
+              Phrase analysée par Mistral AI (UE) ·{' '}
+              <Link href="/confidentialite" className="underline underline-offset-4">
+                Confidentialité
+              </Link>
             </FieldDescription>
             <FieldError errors={[errors.query]} />
           </Field>
