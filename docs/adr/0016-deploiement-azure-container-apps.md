@@ -37,7 +37,7 @@ Creno doit être en ligne comme démo publique de portfolio : API NestJS, Postgr
 
 **Démo en mode test** (`DEMO_MODE=true`) : Stripe en clé `sk_test_` obligatoire (une clé live est refusée), Twilio facultatif (la vérification par SMS répond alors `503 SMS_UNAVAILABLE`), seed de démo sans compte admin, aucun email vers les adresses de démo (`@example.com`). Sans `DEMO_MODE`, la production exige une clé live et Twilio.
 
-**Erreurs dans Sentry**, sans donnée personnelle : chaque log `error` devient un événement à partir de la ligne JSON déjà masquée par pino ; ni cookie, ni en-tête, ni corps, ni query string, ni IP. Le navigateur passe par un tunnel (`/monitoring`) : aucun domaine tiers dans la CSP.
+**Erreurs dans Sentry**, sans donnée personnelle : chaque log `error` devient un événement à partir de la ligne JSON déjà masquée par pino ; ni cookie, ni en-tête, ni corps, ni query string, ni IP. Le navigateur passe par un tunnel sur le domaine du front (`/t-x9k2`, chemin neutre : les bloqueurs de publicité filtrent `/monitoring`) : aucun domaine tiers dans la CSP.
 
 ## Alternatives écartées
 

@@ -31,9 +31,10 @@ export default withSentryConfig(nextConfig, {
   project: process.env.SENTRY_PROJECT,
   // Sourcemaps envoyées seulement si le jeton est là (build Vercel) ; sinon, build normal.
   authToken: process.env.SENTRY_AUTH_TOKEN,
-  // Les événements du navigateur passent par le front (/monitoring) : pas de domaine Sentry dans la
-  // CSP, et les bloqueurs de publicité ne les arrêtent pas.
-  tunnelRoute: '/monitoring',
+  // Les événements du navigateur passent par le front : pas de domaine Sentry dans la CSP. Chemin
+  // neutre : les bloqueurs de publicité filtrent `/monitoring?o=…&p=…` (envois bloqués en production,
+  // aucun événement reçu). Pas de route aléatoire (`true`) : proxy.ts doit pouvoir l'exclure.
+  tunnelRoute: '/t-x9k2',
   silent: !process.env.CI,
   telemetry: false,
 });

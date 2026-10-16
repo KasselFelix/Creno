@@ -121,6 +121,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Toutes les requêtes, sauf les fichiers statiques, les images et le tunnel Sentry (/monitoring).
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|monitoring|.*\\.[a-z0-9]+$).*)'],
+  // Toutes les requêtes, sauf les fichiers statiques, les images et le tunnel Sentry (/t-x9k2,
+  // tunnelRoute de next.config.ts).
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|t-x9k2(?:/|$)|.*\\.[a-z0-9]+$).*)'],
 };
