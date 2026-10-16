@@ -125,6 +125,25 @@ function calendarDate(day: number, month: number, year: number | undefined, toda
   return date >= today ? date : build(thisYear + 1);
 }
 
+const WEEKDAY_WORD = new RegExp(String.raw`\b(${WEEKDAYS.join('|')})\b`);
+
+/**
+ * Recoupe la date du modèle avec le jour cité : malgré le calendrier fourni et une température
+ * nulle, il se trompe parfois de ligne (« lundi » lu comme le mardi). Si la phrase nomme un jour et
+ * que la date n'y tombe pas, la date calculée ici l'emporte.
+ */
+export function checkWeekday(
+  extraction: AiSearchExtraction,
+  query: string,
+  today: string,
+): AiSearchExtraction {
+  if (extraction.date === null) return extraction;
+  const folded = fold(query.replace(/\s+/g, ' ').trim());
+  const named = WEEKDAY_WORD.exec(folded);
+  if (!named || weekdayOf(extraction.date) === WEEKDAYS.indexOf(named[1]!)) return extraction;
+  return { ...extraction, date: findDate(folded, today) };
+}
+
 function findDate(folded: string, today: string): string | null {
   // Une date écrite l'emporte sur un jour relatif (« samedi 12/10 »).
   const numeric = /\b(\d{1,2})\/(\d{1,2})(\/(\d{4}))?\b/.exec(folded);
@@ -144,7 +163,7 @@ function findDate(folded: string, today: string): string | null {
   if (/\bdemain\b/.test(folded)) return addLocalDays(today, 1);
   if (/\b(aujourd'?\s?hui|ce soir|ce midi|ce matin|cet apres-midi)\b/.test(folded)) return today;
   if (/\bce (week-?end|we)\b/.test(folded)) return nextWeekday(today, 6);
-  const weekday = new RegExp(String.raw`\b(${WEEKDAYS.join('|')})\b`).exec(folded);
+  const weekday = WEEKDAY_WORD.exec(folded);
   return weekday ? nextWeekday(today, WEEKDAYS.indexOf(weekday[1]!)) : null;
 }
 
