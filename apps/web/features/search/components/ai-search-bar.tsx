@@ -2,6 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CircleAlert, LoaderCircle, Search, Sparkles } from 'lucide-react';
+import { cn } from 'cn';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
@@ -170,24 +171,24 @@ export function AiSearchBar({
         </div>
       </div>
 
-      {query === '' && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground text-sm">Par exemple :</span>
-          {examples.map((example) => (
-            <Button
-              key={example}
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-11 md:h-8"
-              disabled={pending}
-              onClick={() => runExample(example)}
-            >
-              {example}
-            </Button>
-          ))}
-        </div>
-      )}
+      {/* Masqués (pas retirés) dès que le champ n'est plus vide : leur place reste réservée, rien
+          ne bouge en dessous. `invisible` les retire aussi du clavier et des lecteurs d'écran. */}
+      <div className={cn('flex flex-wrap items-center gap-2', query !== '' && 'invisible')}>
+        <span className="text-muted-foreground text-sm">Par exemple :</span>
+        {examples.map((example) => (
+          <Button
+            key={example}
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-11 md:h-8"
+            disabled={pending}
+            onClick={() => runExample(example)}
+          >
+            {example}
+          </Button>
+        ))}
+      </div>
 
       {rateLimited ? (
         <Alert variant="destructive">
