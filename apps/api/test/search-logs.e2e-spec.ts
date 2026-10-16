@@ -48,10 +48,22 @@ describe('recherche et géocodage : logs', () => {
     await request(app.getHttpServer())
       .get(`/v1/search/providers?date=${localDateOf(new Date(), SEARCH_TIMEZONE)}`)
       .expect(200);
+    // Plage horaire : seulement le fait qu'elle soit là, et seulement avec une date.
+    await request(app.getHttpServer())
+      .get(`/v1/search/providers?date=${localDateOf(new Date(), SEARCH_TIMEZONE)}&timeFrom=18:00`)
+      .expect(200);
+    await request(app.getHttpServer()).get('/v1/search/providers?timeFrom=18:00').expect(200);
 
     const lines = logs.map((line) => JSON.parse(line) as LogLine);
     const performed = lines.filter((l) => l.event === 'search.performed');
-    expect(performed.at(-1)).toMatchObject({ level: 30, hasCenter: false, hasDate: true });
+    expect(performed.at(-3)).toMatchObject({
+      level: 30,
+      hasCenter: false,
+      hasDate: true,
+      hasTime: false,
+    });
+    expect(performed.at(-2)).toMatchObject({ hasDate: true, hasTime: true });
+    expect(performed.at(-1)).toMatchObject({ hasDate: false, hasTime: false });
     expect(lines.find((l) => l.event === 'search.performed')).toMatchObject({
       level: 30,
       hasCenter: true,

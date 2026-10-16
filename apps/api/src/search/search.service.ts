@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   BOOKING_HORIZON_DAYS,
   isSearchDateInRange,
+  normalizeTimeRange,
   SEARCH_DATE_CANDIDATES_MAX,
   SEARCH_TIMEZONE,
   type SearchProvidersQuery,
@@ -29,6 +30,8 @@ export class SearchService {
   ): Promise<SearchProvidersResponse> {
     const startedAt = Date.now();
     const { date } = query;
+    // Une plage horaire n'a de sens qu'avec un jour ; le schéma garantit déjà début < fin.
+    const timeRange = date === undefined ? undefined : (normalizeTimeRange(query) ?? undefined);
     // La plage se lit à l'heure de Paris ; les créneaux, eux, au fuseau de chaque ressource.
     if (date !== undefined && !isSearchDateInRange(date, localDateOf(now, SEARCH_TIMEZONE))) {
       throw new DomainError(
@@ -60,7 +63,7 @@ export class SearchService {
       const free = await this.availability.freeSlotsOn(
         rows.map((row) => row.id),
         date,
-        { priceMaxCents: query.priceMax },
+        { priceMaxCents: query.priceMax, timeRange },
         now,
       );
       // `rows` est déjà dans l'ordre voulu (distance, ou nom sans centre) : on le garde.
@@ -82,6 +85,7 @@ export class SearchService {
       category: query.category,
       hasPriceMax: query.priceMax !== undefined,
       hasDate: date !== undefined,
+      hasTime: timeRange !== undefined && Object.keys(timeRange).length > 0,
       total: response.total,
       totalIsCapped: response.totalIsCapped,
       durationMs: Date.now() - startedAt,
