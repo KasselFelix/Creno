@@ -407,7 +407,7 @@ Execution Time: 8.654 ms
 
 ## Recherche en langage naturel : `ai_requests`
 
-Chaque phrase interprétée par `POST /search/interpret` laisse une ligne dans `ai_requests`, que le modèle ait été appelé ou non. **La phrase n'y est jamais** : seulement sa longueur, et les filtres qui ne localisent personne (`filters` : catégorie, rayon, prix, date, `hasPlace`, `nearMe` ; ni lieu ni coordonnées). La table n'a aucune clé étrangère : la route est publique, et une donnée personnelle de moins vaut mieux qu'un lien vers `users`.
+Chaque phrase interprétée par `POST /search/interpret` laisse une ligne dans `ai_requests`, que le modèle ait été appelé ou non. **La phrase n'y est jamais** : seulement sa longueur, et les filtres qui ne localisent personne (`filters` : catégorie, rayon, prix, date, plage horaire `timeFrom` / `timeTo`, `hasPlace`, `nearMe` ; ni lieu ni coordonnées). La table n'a aucune clé étrangère : la route est publique, et une donnée personnelle de moins vaut mieux qu'un lien vers `users`.
 
 L'issue (`outcome`) dit ce qui s'est passé. Trois issues n'appellent pas le modèle (`circuit_open`, `budget_exceeded`, `not_configured`) ; les cinq autres l'ont appelé au moins une fois (`success`, `invalid_output`, `timeout`, `rate_limited`, `upstream_error`). Toute issue autre que `success` correspond à un repli sur l'analyse par mots-clés. Contraintes :
 
