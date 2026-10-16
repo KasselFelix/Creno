@@ -113,23 +113,39 @@ describe('proxy', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it.each(['/api//evil.test/x', '/api/v1//evil.test/x', '/api/%2F%2Fevil.test/x', '/api/health'])(
-      'ne relaie jamais vers un autre hôte ni hors de /api/v1/ : %s',
-      async (path) => {
-        vi.stubEnv('VERCEL_ENV', 'production');
-        vi.stubEnv('API_INTERNAL_URL', 'https://api.creno.test');
-        vi.stubEnv('CLIENT_IP_SECRET', 's'.repeat(40));
-        const res = await proxy(
-          new NextRequest(`http://localhost:3000${path}`, {
-            headers: { 'x-real-ip': '203.0.113.7' },
-          }),
-        );
-        const rewrite = res.headers.get('x-middleware-rewrite');
-        if (rewrite) expect(new URL(rewrite).origin).toBe('https://api.creno.test');
-        else expect(res.status).toBe(404);
-        if (!rewrite) expect(forwarded(res, CLIENT_IP_HEADERS.secret)).toBeNull();
-      },
-    );
+    it.each([
+      '/api//evil.test/x',
+      '/api/v1//evil.test/x',
+      '/api/%2F%2Fevil.test/x',
+      '/api/health/ready',
+      '/api/healthx',
+      '/api/health/',
+    ])('ne relaie jamais vers un autre hôte ni hors de /api/v1/ : %s', async (path) => {
+      vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubEnv('API_INTERNAL_URL', 'https://api.creno.test');
+      vi.stubEnv('CLIENT_IP_SECRET', 's'.repeat(40));
+      const res = await proxy(
+        new NextRequest(`http://localhost:3000${path}`, {
+          headers: { 'x-real-ip': '203.0.113.7' },
+        }),
+      );
+      const rewrite = res.headers.get('x-middleware-rewrite');
+      if (rewrite) expect(new URL(rewrite).origin).toBe('https://api.creno.test');
+      else expect(res.status).toBe(404);
+      if (!rewrite) expect(forwarded(res, CLIENT_IP_HEADERS.secret)).toBeNull();
+    });
+
+    it('relaie GET /api/health (réveil de l’API) vers la liveness, et rien d’autre', async () => {
+      vi.stubEnv('API_INTERNAL_URL', 'https://api.creno.test');
+      const res = await proxy(new NextRequest('http://localhost:3000/api/health'));
+      expect(res.headers.get('x-middleware-rewrite')).toBe('https://api.creno.test/health');
+
+      const post = await proxy(
+        new NextRequest('http://localhost:3000/api/health', { method: 'POST' }),
+      );
+      expect(post.headers.get('x-middleware-rewrite')).toBeNull();
+      expect(post.status).toBe(404);
+    });
 
     it('sur Vercel, ajoute l’IP du visiteur et le secret partagé', async () => {
       const secret = 's'.repeat(40);

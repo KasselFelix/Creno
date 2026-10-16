@@ -5,13 +5,7 @@ import { cn } from 'cn';
 import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { toast } from 'sonner';
-import {
-  type InterpretResponse,
-  roundCoordinate,
-  SEARCH_RADIUS_KM_MAX,
-  type SearchProvider,
-} from '@creno/shared';
+import { type InterpretResponse, SEARCH_RADIUS_KM_MAX, type SearchProvider } from '@creno/shared';
 import { QueryError } from '@/components/query-error';
 import { Button } from '@/components/ui/button';
 import { Field, FieldLabel } from '@/components/ui/field';
@@ -38,12 +32,13 @@ import {
   hasTimeRange,
   parseSearchParams,
   PLACE_MAP_POINT,
-  PLACE_MY_POSITION,
   placeFieldText,
   searchHref,
   type SearchFilters,
 } from '../params';
-import { AiSearchBar, InterpretationSummary } from './ai-search-bar';
+import { handoffFor, remember } from '../handoff';
+import { useAroundMe } from '../use-around-me';
+import { AiSearchBar, InterpretationSummary, SEARCH_EXAMPLES } from './ai-search-bar';
 import { ResultList, ResultListSkeleton } from './result-list';
 import { SearchFilterFields } from './search-filters';
 
@@ -55,41 +50,8 @@ const SearchMap = dynamic(() => import('./search-map'), {
 
 const NO_ITEMS: SearchProvider[] = [];
 const DESKTOP = '(min-width: 1024px)';
-const GEOLOCATION_TIMEOUT_MS = 10_000;
-const FIVE_MINUTES = 5 * 60 * 1000;
 
 type View = 'list' | 'map';
-
-/** Échec de la géolocalisation, avec le message à afficher au visiteur. */
-class GeolocationError extends Error {}
-
-/** Position du visiteur, arrondie (≈ 100 m) avant d'aller dans l'URL et à l'API. */
-function currentPosition(): Promise<{ lat: number; lng: number }> {
-  return new Promise((resolve, reject) => {
-    if (!('geolocation' in navigator) || !window.isSecureContext) {
-      reject(
-        new GeolocationError('Géolocalisation indisponible. Indiquez une ville ou une adresse.'),
-      );
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (position) =>
-        resolve({
-          lat: roundCoordinate(position.coords.latitude),
-          lng: roundCoordinate(position.coords.longitude),
-        }),
-      (error) =>
-        reject(
-          new GeolocationError(
-            error.code === error.PERMISSION_DENIED
-              ? 'Vous avez refusé la géolocalisation. Indiquez une ville ou une adresse.'
-              : 'Position introuvable. Indiquez une ville ou une adresse.',
-          ),
-        ),
-      { timeout: GEOLOCATION_TIMEOUT_MS, maximumAge: FIVE_MINUTES },
-    );
-  });
-}
 
 export function SearchView() {
   const router = useRouter();
@@ -112,10 +74,12 @@ export function SearchView() {
 
   // Dernière phrase interprétée et filtres qu'elle a produits : la ligne « Compris » n'est affichée
   // que tant que la page montre ces filtres.
+  // Phrase interprétée sur l'accueil (ou avant un aller-retour) : affichée si l'URL correspond.
+  const [handoff] = useState(() => handoffFor(filters));
   const [interpretation, setInterpretation] = useState<{
     response: InterpretResponse;
     applied: SearchFilters;
-  } | null>(null);
+  } | null>(handoff);
   const shownInterpretation =
     interpretation && interpretationMatches(filters, interpretation.applied)
       ? interpretation
@@ -124,7 +88,7 @@ export function SearchView() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [view, setView] = useState<View>('list');
   const [mapOpened, setMapOpened] = useState(false);
-  const [locating, setLocating] = useState(false);
+  const { aroundMe, locating } = useAroundMe();
   const isDesktop = useMediaQuery(DESKTOP);
   // Sur mobile, la carte n'est chargée qu'à la première ouverture de l'onglet, puis reste montée.
   const showMap = isDesktop || mapOpened;
@@ -133,39 +97,28 @@ export function SearchView() {
     filters.category !== undefined || filters.priceMax !== undefined || hasTimeRange(filters);
   const noTime = { timeFrom: undefined, timeTo: undefined };
 
-  /** Les filtres `base` centrés sur la position du visiteur ; `null` si elle reste inconnue. */
-  async function aroundMe(base: SearchFilters): Promise<SearchFilters | null> {
-    setLocating(true);
-    try {
-      return { ...base, center: await currentPosition(), place: PLACE_MY_POSITION };
-    } catch (error) {
-      toast.error(
-        error instanceof GeolocationError
-          ? error.message
-          : 'Position introuvable. Indiquez une ville ou une adresse.',
-      );
-      return null;
-    } finally {
-      setLocating(false);
-    }
-  }
-
   function locate() {
     void aroundMe(filters).then((next) => next && setFilters(next));
   }
 
-  async function onInterpreted(response: InterpretResponse) {
+  async function onInterpreted(response: InterpretResponse, query: string) {
     const { filters: next, nearMe } = applyInterpretation(filters, response);
     // « Près de moi » refusé ou impossible : les filtres s'appliquent avec le lieu actuel.
     const applied = (nearMe && (await aroundMe(next))) || next;
     setInterpretation({ response, applied });
+    remember({ query, response, applied });
     setFilters(applied);
   }
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <AiSearchBar onInterpreted={onInterpreted} />
+        <AiSearchBar
+          examples={SEARCH_EXAMPLES}
+          defaultQuery={handoff?.query}
+          busy={locating}
+          onInterpreted={onInterpreted}
+        />
         <InterpretationSummary interpretation={shownInterpretation} />
       </div>
 

@@ -134,6 +134,19 @@ describe('parseKeywords', () => {
       'coiffeur lundi après-midi',
       { category: 'hairdresser', date: MONDAY, timeOfDay: 'afternoon' },
     ],
+    // Exemples de l'accueil : ils doivent marcher aussi sans le modèle.
+    [
+      'Coiffeur à Paris lundi après-midi',
+      { category: 'hairdresser', place: 'Paris', date: MONDAY, timeOfDay: 'afternoon' },
+    ],
+    [
+      'Salle de réunion à Lyon mardi matin',
+      { category: 'room', place: 'Lyon', date: '2026-10-06', timeOfDay: 'morning' },
+    ],
+    [
+      'Coiffeur à Lyon jeudi après 18 h',
+      { category: 'hairdresser', place: 'Lyon', date: '2026-10-08', startAfter: '18:00' },
+    ],
     [
       'coiffeur à Lyon l’après-midi',
       { category: 'hairdresser', place: 'Lyon', timeOfDay: 'afternoon' },
