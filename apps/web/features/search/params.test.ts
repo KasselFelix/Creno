@@ -11,6 +11,7 @@ import {
   searchToday,
   timeRangeLabel,
   timeRangePhrase,
+  timeRangeWithHours,
   toApiParams,
   toSearchParams,
 } from './params';
@@ -210,6 +211,31 @@ describe('affichage', () => {
     expect(providerHref({ ...provider, availableResourceId: null }, '2026-10-10')).toBe(
       '/providers/padel-merignac',
     );
+  });
+
+  it('transmet la plage horaire cherchée à la fiche', () => {
+    const provider = { slug: 'salon-lyon', availableResourceId: 'r1' } as SearchProvider;
+    expect(providerHref(provider, '2026-10-26', { timeFrom: '12:00', timeTo: '18:00' })).toBe(
+      '/providers/salon-lyon?date=2026-10-26&resource=r1&timeFrom=12%3A00&timeTo=18%3A00',
+    );
+    expect(providerHref(provider, '2026-10-26', { timeFrom: '18:00' })).toBe(
+      '/providers/salon-lyon?date=2026-10-26&resource=r1&timeFrom=18%3A00',
+    );
+    // Sans jour, pas de plage (elle n'a de sens que pour ce jour-là dans la recherche).
+    expect(providerHref(provider, undefined, { timeTo: '12:00' })).toBe('/providers/salon-lyon');
+  });
+
+  it('donne la plage avec ses heures pour la fiche', () => {
+    expect(timeRangeWithHours({ timeTo: '12:00' })).toBe('le matin (avant 12 h)');
+    expect(timeRangeWithHours({ timeFrom: '12:00', timeTo: '18:00' })).toBe(
+      "l'après-midi (12 h – 18 h)",
+    );
+    expect(timeRangeWithHours({ timeFrom: '18:00' })).toBe('le soir (après 18 h)');
+    expect(timeRangeWithHours({ timeFrom: '14:00', timeTo: '16:30' })).toBe(
+      'entre 14 h et 16 h 30',
+    );
+    expect(timeRangeWithHours({ timeFrom: '18:30' })).toBe('après 18 h 30');
+    expect(timeRangeWithHours({})).toBeUndefined();
   });
 
   it('décrit le résultat', () => {

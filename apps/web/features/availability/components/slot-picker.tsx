@@ -2,7 +2,7 @@
 
 import { Info } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import type { Resource, Slot } from '@creno/shared';
+import type { Resource, Slot, TimeRange } from '@creno/shared';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { ReserveButton } from '@/features/bookings/components/reserve-button';
@@ -27,8 +27,15 @@ export function SlotPicker({
   resources,
   initialResourceId,
   initialDate,
+  timeRange,
   ...booking
-}: { resources: Resource[]; initialResourceId?: string; initialDate?: string } & BookingContext) {
+}: {
+  resources: Resource[];
+  initialResourceId?: string;
+  initialDate?: string;
+  /** Plage horaire cherchée, mise en évidence sur tous les jours et toutes les ressources. */
+  timeRange?: TimeRange;
+} & BookingContext) {
   const initial = resources.find((item) => item.id === initialResourceId) ?? resources[0]!;
   const [resourceId, setResourceId] = useState(initial.id);
   const resource = resources.find((item) => item.id === resourceId) ?? resources[0]!;
@@ -61,6 +68,7 @@ export function SlotPicker({
         resource={resource}
         booking={booking}
         initialDate={resource.id === initial.id ? initialDate : undefined}
+        timeRange={timeRange}
       />
     </div>
   );
@@ -70,10 +78,12 @@ function ResourceSlots({
   resource,
   booking,
   initialDate,
+  timeRange,
 }: {
   resource: Resource;
   booking: BookingContext;
   initialDate?: string;
+  timeRange?: TimeRange;
 }) {
   const [selected, setSelected] = useState<{ slot: Slot; date: string } | null>(null);
   const select = useCallback(
@@ -86,6 +96,7 @@ function ResourceSlots({
       <SlotChooser
         resource={resource}
         initialDate={initialDate}
+        timeRange={timeRange}
         titleId="slots-title"
         title="Choisissez un créneau"
         selectedStart={selected?.slot.start ?? null}

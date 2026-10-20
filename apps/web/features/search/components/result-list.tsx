@@ -44,7 +44,7 @@ export function ResultList({
               <Badge variant="secondary">{categoryLabels[provider.category]}</Badge>
               <CardTitle>
                 <Link
-                  href={providerHref(provider, date)}
+                  href={providerHref(provider, date, timeRange)}
                   className="outline-none after:absolute after:inset-0"
                 >
                   {provider.name}
