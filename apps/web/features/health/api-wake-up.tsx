@@ -22,10 +22,11 @@ const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'tou
  */
 export function ApiWakeUp() {
   useEffect(() => {
-    pingApi();
+    // Un onglet ouvert en arrière-plan attend d'être affiché (`visibilitychange`) pour réveiller l'API.
     const onActivity = () => {
       if (document.visibilityState === 'visible') pingApi();
     };
+    onActivity();
     for (const name of ACTIVITY_EVENTS) {
       window.addEventListener(name, onActivity, { passive: true, capture: true });
     }

@@ -183,7 +183,7 @@ type GridProps = {
  * Créneaux du jour ; avec une plage horaire, deux groupes titrés : « Votre plage » (ce que le
  * visiteur a cherché) puis « Autres horaires ».
  */
-function DaySlots({ timeRange, ...grid }: GridProps & { timeRange?: TimeRange }) {
+export function DaySlots({ timeRange, ...grid }: GridProps & { timeRange?: TimeRange }) {
   const rangeId = useId();
   const othersId = useId();
   if (!timeRange) return <SlotGrid {...grid} />;

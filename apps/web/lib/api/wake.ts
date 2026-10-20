@@ -121,10 +121,10 @@ export function pingApi() {
   );
 }
 
+export function getApiWakeState(): WakeState {
+  return state;
+}
+
 export function useApiWake(): WakeState {
-  return useSyncExternalStore(
-    subscribe,
-    () => state,
-    () => initialWakeState,
-  );
+  return useSyncExternalStore(subscribe, getApiWakeState, () => initialWakeState);
 }
