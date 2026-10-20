@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Logo de Creno : une page de calendrier cochée. Même dessin que components/creno-logo.tsx.
+       Découpes transparentes (anneaux, coche) : l'icône prend la couleur de l'onglet. -->
+  <style>
+    .ink { fill: #0a0a0a; }
+    @media (prefers-color-scheme: dark) { .ink { fill: #fafafa; } }
+  </style>
+  <mask id="cut" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+    <rect width="32" height="32" fill="#fff" />
+    <rect x="6.5" y="0.5" width="7" height="11" rx="3.5" />
+    <rect x="18.5" y="0.5" width="7" height="11" rx="3.5" />
+    <path d="M10 20 14.5 24.5 22.5 16" fill="none" stroke="#000" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round" />
+  </mask>
+  <g class="ink">
+    <rect x="2" y="7" width="28" height="23" rx="6" mask="url(#cut)" />
+    <rect x="8" y="2" width="4" height="8" rx="2" />
+    <rect x="20" y="2" width="4" height="8" rx="2" />
+  </g>
+</svg>

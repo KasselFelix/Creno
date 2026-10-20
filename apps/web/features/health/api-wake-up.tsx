@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { CrenoLogo } from '@/components/creno-logo';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import {
   isWaking,
@@ -11,7 +12,6 @@ import {
   wakeProgress,
 } from '@/lib/api/wake';
 
-const TOAST_ID = 'api-waking';
 /** Activités qui montrent un visiteur présent : de quoi garder l'API éveillée pour lui. */
 const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart'] as const;
 
@@ -68,13 +68,17 @@ export function ServerWaitNotice() {
   return null;
 }
 
-/** Ouvre l'avis tant que `since` (début du réveil) est connu, le ferme sinon. */
+/**
+ * Ouvre l'avis tant que `since` (début du réveil) est connu, le ferme sinon. Un identifiant neuf à
+ * chaque ouverture : sonner laisse invisible un toast rouvert sous l'identifiant qu'on vient de
+ * fermer (double montage des effets en dev, nouveau réveil juste après le précédent).
+ */
 function useWakingToast(since: number | null) {
   useEffect(() => {
     if (since === null) return;
-    toast.custom(() => <WakingNotice since={since} />, { id: TOAST_ID, duration: Infinity });
+    const id = toast.custom(() => <WakingNotice since={since} />, { duration: Infinity });
     return () => {
-      toast.dismiss(TOAST_ID);
+      toast.dismiss(id);
     };
   }, [since]);
 }
@@ -88,13 +92,8 @@ function WakingNotice({ since }: { since: number }) {
 
   return (
     <div className="bg-popover text-popover-foreground flex w-full flex-col gap-3 rounded-lg border p-4 shadow-lg">
-      <div className="flex items-baseline gap-3">
-        <span
-          aria-hidden
-          className="text-lg font-semibold tracking-tight motion-safe:animate-pulse"
-        >
-          Creno
-        </span>
+      <div className="flex items-center gap-3">
+        <CrenoLogo className="size-6 shrink-0 motion-safe:animate-pulse" />
         <p className="text-sm font-medium">Le serveur de démo se réveille</p>
       </div>
       <p className="text-muted-foreground text-sm">
