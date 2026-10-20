@@ -8,7 +8,7 @@ Projet terminé, livré en neuf étapes (une PR chacune) : socle technique, auth
 
 ## Démo en ligne
 
-**https://creno.kassel-f.pro** — démo en mode test : aucun vrai paiement, carte `4242 4242 4242 4242` (date future, n'importe quel code). L'API se met en veille après 5 minutes sans visite : le premier chargement peut prendre une trentaine de secondes.
+**https://creno.kassel-f.pro** — démo en mode test : aucun vrai paiement, carte `4242 4242 4242 4242` (date future, n'importe quel code). L'API se met en veille après environ 6 minutes sans requête : la première recherche peut prendre une vingtaine de secondes (un avis l'explique, la page continue toute seule).
 
 Mot de passe des comptes de démo : `creno-demo-2026`.
 
@@ -166,6 +166,7 @@ C'est la base, et non le code applicatif, qui garantit qu'un créneau n'est jama
 - **Timeout, une seule reprise, circuit breaker, plafond journalier, repli par mots-clés** : la recherche marche toujours, l'IA en panne, lente ou hors budget ne donne jamais d'erreur 5xx, et chaque appel est mesuré (latence, tokens, coût) dans `ai_requests`. → [ADR 0013](docs/adr/0013-ai-search-mistral.md)
 - **Déplacement d'une réservation par un `UPDATE` sous la même contrainte d'exclusion, client prévenu sans devoir accepter** : la base refuse un créneau pris, le client a 24 h pour annuler, trois déplacements au plus, et les notifications portent une révision (une ligne neuve par déplacement, jamais recyclée). → [ADR 0015](docs/adr/0015-provider-reschedule.md)
 - **Hébergement : Azure Container Apps mis en veille, Postgres B1ms, Vercel** : l'API descend à zéro réplica sans trafic (quota gratuit), la base reste dans l'offre gratuite de 12 mois, sans VNet (+22 €/mois) ni registre Azure (images sur GHCR) ; deux rôles Postgres (l'API n'a aucun droit de DDL), secrets dans Key Vault, déploiement par OIDC sans secret. → [ADR 0016](docs/adr/0016-deploiement-azure-container-apps.md)
+- **Réveil à froid : garder la mise en veille plutôt que payer un réplica allumé** (4 à 14 $/mois) : sur les ~25 s du réveil, 18 s dépendent de la plateforme ; l'app réveille donc l'API dès l'arrivée du visiteur, la garde éveillée tant qu'il est actif et explique l'attente. → [ADR 0018](docs/adr/0018-reveil-a-froid.md)
 - **Filtre « disponible le » calculé par le moteur de créneaux, pas en SQL** : 200 candidats de la recherche, chargement par lot (5 requêtes), même résultat que la fiche du prestataire, changements d'heure compris. → [ADR 0014](docs/adr/0014-date-filter-slot-engine.md)
 - **Plage horaire = deux bornes sur l'heure de début des créneaux, à l'heure de la ressource** : « matin », « après-midi », « soir » ne sont que des bornes préréglées, le modèle renvoie la période et les heures citées et l'API les combine ; une heure sans jour vaut aujourd'hui, ou demain si la plage est passée. → [ADR 0017](docs/adr/0017-time-of-day-filter.md)
 
@@ -195,7 +196,7 @@ Sur l'accueil (et en haut de `/search`), on tape « un coiffeur sur Paris pour l
 
 - `POST /v1/search/interpret` : la phrase part en `POST` (jamais dans une URL), le modèle renvoie des filtres validés par Zod, le géocodeur place le lieu. « Près de moi » fait demander sa position au navigateur.
 - **Plage horaire** : « le matin » (avant 12 h), « l'après-midi » (12 h – 18 h), « le soir » (après 18 h), « après 18 h 30 », « entre 14 h et 16 h », « à 10 h »… Sans jour cité, aujourd'hui, ou demain si la plage est déjà passée ; une durée (« pendant 2 h ») reste ignorée ([ADR 0017](docs/adr/0017-time-of-day-filter.md)).
-- **Réveil de l'API** : en démo, l'API se met en veille. Au premier contact avec la barre de l'accueil, la page appelle `GET /api/health` (seul chemin relayé hors de `/api/v1/`, liveness sans base) pour la réveiller pendant que le visiteur tape ; au-delà de 3 s d'attente, un message prévient que cela peut prendre jusqu'à 30 s.
+- **Réveil de l'API** : en démo, l'API se met en veille (0 réplica sans trafic). Chaque page appelle `GET /api/health` (seul chemin relayé hors de `/api/v1/`, liveness sans base) au chargement, puis à chaque activité du visiteur si l'API n'a pas répondu depuis 4 min : elle se réveille pendant qu'on lit et tape, et ne se rendort pas tant qu'on est actif. Si le visiteur attend quand même une réponse pendant un réveil, un toast l'explique (progression depuis le début du réveil) ; une API éveillée mais lente n'affiche que « Recherche en cours… » ([ADR 0018](docs/adr/0018-reveil-a-froid.md)).
 - **Repli** : clé absente, circuit ouvert, plafond du jour atteint, timeout, erreur ou sortie invalide → analyse par mots-clés, réponse `200` avec `source: "keywords"` et le message « Recherche simplifiée par mots-clés ».
 - **Limites** : `AI_RATE_LIMIT_PER_MINUTE` phrases par minute et par IP, `AI_DAILY_REQUEST_CAP` appels au modèle par jour (toutes IP confondues), timeout `AI_TIMEOUT_MS` par appel.
 - **Vie privée** : la phrase n'est ni journalisée ni enregistrée (seulement sa longueur) ; `ai_requests` ne garde ni lieu ni coordonnées, et ses lignes sont purgées après 90 jours. La phrase est envoyée à Mistral AI (hébergé dans l'UE).

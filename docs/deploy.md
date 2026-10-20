@@ -171,7 +171,7 @@ Domaine : ajouter `creno.<votre-domaine>` (CNAME vers Vercel). Les previews appe
 - IP réelle : 11 phrases de recherche IA en une minute depuis le Wi-Fi → 429 ; aussitôt depuis un téléphone en 4G → 200. Dans les logs (§ Exploitation), les requêtes ont `ipSource: "header"`.
 - Sentry API (après avoir réveillé l'API) : `az containerapp exec -n ca-creno-api -g rg-creno --command "node --import ./dist/instrument.js dist/cli/sentry-check.js"`. Sentry web : dans la console du navigateur, `setTimeout(() => { throw new Error('sentry-check') })`.
 - En-têtes : `curl -sI https://creno.<votre-domaine>/` (CSP, HSTS, nosniff) ; `curl -sI "$API_URL/health"` (`Cache-Control: no-store`).
-- Mise en veille : 10 min sans requête → `az containerapp replica list -n ca-creno-api -g rg-creno` est vide.
+- Mise en veille : environ 6 min sans requête (`cooldownPeriod` de 300 s, plus le délai de KEDA ; mesuré : 5 min 55 s) → `az containerapp replica list -n ca-creno-api -g rg-creno` est vide.
 
 ## Exploitation
 
@@ -200,6 +200,10 @@ az postgres flexible-server firewall-rule delete -g rg-creno -n "$PG_NAME" --rul
 ```
 
 **Journée de démo** (pas de réveil de 20 s) : `az containerapp update -n ca-creno-api -g rg-creno --min-replicas 1` (~0,15 à 0,45 €/jour), puis `--min-replicas 0` le soir.
+
+**Réveil à froid** ([ADR 0018](adr/0018-reveil-a-froid.md)) : mesurer après une mise en veille (`replica list` vide), puis `curl -s -o /dev/null -w '%{time_total}\n' "$API_URL/health"` ; le détail des phases est dans les journaux système (`az containerapp logs show -n ca-creno-api -g rg-creno --type system`), de `AssigningReplica` à `app.started`. Référence au 2026-10-20 : 28 s à 0,25 vCPU, avant les imports ciblés de `date-fns`. Leviers si besoin, à chiffrer avant : 0,5 vCPU / 1 GiB et sonde `Startup` à 1 s (relance du Bicep, voir plus bas), ou un `cooldownPeriod` plus court (moins de consommation, mais l'API se rendort plus vite).
+
+**Limite de débit Vercel** : aucune règle WAF (ADR 0018). Si l'alerte de budget Azure se déclenche, chercher l'origine du trafic (IP, JA4) dans les journaux Vercel et Azure, puis créer dans Vercel → Firewall une règle personnalisée « Deny » sur cette origine (3 règles sur l'offre Hobby). L'unique règle de limite de débit de l'offre se réserve à `/api/` (par exemple 120 requêtes par minute et par IP).
 
 **Retour arrière** : `az containerapp update -n ca-creno-api -g rg-creno --image ghcr.io/kasselfelix/creno-api@sha256:<ancien>` (ou le workflow _Deploy API_ lancé à la main). Les migrations ne reculent pas : chaque migration reste compatible avec la version précédente de l'API (colonne `NOT NULL` en deux migrations, pas de renommage en une fois).
 

@@ -22,7 +22,7 @@ En ligne, « un coiffeur sur paris pour lundi après midi » trouvait les coiffe
 - **Une règle simple et la même pour tous les `slotMinutes`.** Un créneau de 17 h à 19 h ne compte pas pour « après 18 h » : il commence avant. C'est dit dans le README.
 - **Changements d'heure.** L'heure murale se lit par ressource ; le jour de passage à l'heure d'hiver, les deux créneaux de 2 h comptent tous les deux dans « avant 6 h » (7 créneaux d'une heure de 0 h à 6 h), et le jour de passage à l'heure d'été, 2 h n'existe pas (5). Un test compare la recherche et `getSlots` ces deux jours.
 - **Le parseur ne devine pas.** Seule une heure introduite par un mot (« après », « dès », « avant », « jusqu'à », « à », « vers », « entre … et … ») fait une plage. Une heure seule (« samedi 18h ») ou une durée (« pendant 2h ») reste signalée comme ignorée. Le lieu s'arrête où commence l'expression horaire (« à Lyon l'après-midi »).
-- **La fiche ne filtre pas.** Le lien d'un résultat ouvre le bon jour et la bonne ressource, mais la grille montre toute la journée.
+- **La fiche ne filtre pas.** Le lien d'un résultat ouvre le bon jour et la bonne ressource, mais la grille montre toute la journée. Mise à jour du 2026-10-20 : le lien porte aussi la plage, et la fiche la met en évidence (« Votre plage », puis « Autres horaires ») sans rien masquer.
 
 ## Alternatives écartées
 
