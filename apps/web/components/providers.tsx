@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
+import { ApiWakeUp } from '@/features/health/api-wake-up';
 
 export function Providers({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
   // Un QueryClient par navigateur, créé une seule fois (pas à chaque rendu).
@@ -16,6 +17,7 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
       <ThemeProvider nonce={nonce}>
         {children}
         <Toaster position="top-center" />
+        <ApiWakeUp />
       </ThemeProvider>
     </QueryClientProvider>
   );
