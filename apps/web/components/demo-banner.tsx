@@ -8,9 +8,9 @@ export function DemoBanner() {
   if (!publicEnv.NEXT_PUBLIC_DEMO_MODE) return null;
   const notice = (
     <>
-      <strong className="text-foreground font-medium">Démo</strong> : paiements en mode test (carte
-      4242 4242 4242 4242). Serveur en veille sans visite : la première recherche peut prendre une
-      vingtaine de secondes.
+      {/* Assez court pour tenir sur une ligne dès 1024 px, où le défilement s'arrête. */}
+      <strong className="text-foreground font-medium">Démo</strong> : paiements de test (carte 4242
+      4242 4242 4242). Serveur en veille sans visite : la première recherche prend ~20 s.
     </>
   );
   return (
