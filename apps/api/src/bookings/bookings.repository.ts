@@ -325,12 +325,17 @@ export class BookingsRepository {
   /**
    * Verrouille la réservation avant de la déplacer ou de l'annuler : un déplacement ou une
    * annulation concurrente attend la fin de la transaction, et le statut relu ici est celui qui
-   * sera modifié.
+   * sera modifié. `waitMs` borne l'attente du verrou (`lock_timeout`, erreur 55P03 au-delà).
    */
   async lockForUpdate(
     id: string,
     tx: Database,
+    waitMs?: number,
   ): Promise<{ status: BookingStatus; start: Date } | undefined> {
+    // `SET LOCAL` ne vaut que pour cette transaction ; `SET` n'accepte pas de paramètre lié.
+    if (waitMs !== undefined) {
+      await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${Math.trunc(waitMs)}ms'`));
+    }
     const [row] = await tx
       .select({
         status: bookings.status,

@@ -141,6 +141,11 @@ const paymentsNotReady = () =>
   );
 const cancellationNotAllowed = (message: string) =>
   new DomainError('CANCELLATION_NOT_ALLOWED', 409, message);
+/** Attente maximale du verrou d'une réservation qu'une autre requête est en train d'annuler. */
+const CANCEL_LOCK_WAIT_MS = 3_000;
+/** SQLSTATE `lock_not_available` : le `lock_timeout` de la transaction est dépassé. */
+const PG_LOCK_NOT_AVAILABLE = '55P03';
+
 const notCancellable = (row: BookingDetailRow, now: Date) =>
   cancellationNotAllowed(
     row.status === 'confirmed' && row.start <= now
@@ -491,7 +496,16 @@ export class BookingsService {
     // et prestataire) et couvre l'appel à Stripe : sans lui, deux appels simultanés pourraient
     // chacun rembourser un palier partiel. La seconde annulation voit la réservation déjà annulée.
     const { percent, refundDueCents } = await this.handle.db.transaction(async (tx) => {
-      await this.bookings.lockForUpdate(id, tx);
+      // Une annulation concurrente tient le verrou pendant son appel à Stripe : on ne l'attend
+      // que quelques secondes, pour ne pas immobiliser une connexion du pool par requête en attente.
+      await this.bookings.lockForUpdate(id, tx, CANCEL_LOCK_WAIT_MS).catch((error: unknown) => {
+        if (sqlState(error) === PG_LOCK_NOT_AVAILABLE) {
+          throw cancellationNotAllowed(
+            'Une annulation de cette réservation est déjà en cours. Réessayez dans un instant.',
+          );
+        }
+        throw error;
+      });
       const locked = await this.bookings.findDetail(id, tx);
       const at = new Date();
       if (!locked || locked.status !== 'confirmed' || !cancellableUntil(locked, viewer, at)) {

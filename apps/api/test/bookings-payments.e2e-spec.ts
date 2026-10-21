@@ -568,6 +568,27 @@ describe('bookings : paiement, liste, annulation', () => {
       expect((await rowOf(booking.id)).refundDueCents).toBe(winner);
     });
 
+    it('Stripe très lent : la seconde annulation n’attend pas plus de 3 s le verrou → 409', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      gateway.refund.mockImplementation(async ({ amountCents }) => {
+        await new Promise((resolve) => setTimeout(resolve, 4_000));
+        return { refundedCents: amountCents };
+      });
+
+      const [first, second] = await Promise.all([
+        cancelExpecting(agent, booking.id, 4500),
+        new Promise<request.Response>((resolve) => {
+          // Part après la première, qui tient alors le verrou pendant son appel à Stripe.
+          setTimeout(() => resolve(cancelExpecting(agent, booking.id, 4500)), 200);
+        }),
+      ]);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(409);
+      expect(apiErrorSchema.parse(second.body).message).toContain('déjà en cours');
+      expect(gateway.refund).toHaveBeenCalledTimes(1);
+    }, 15_000);
+
     it('corps invalide → 400', async () => {
       const { agent } = await registerAs(app, 'customer');
       const booking = await confirmedBooking(agent);
