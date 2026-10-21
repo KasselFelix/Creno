@@ -12,7 +12,7 @@ export default function HomePage() {
           <h1 className="text-4xl font-semibold tracking-tight">
             Réservez le bon créneau, au bon endroit.
           </h1>
-          <p className="text-muted-foreground text-lg">
+          <p className="text-muted-foreground text-left text-lg">
             Salles, coiffeurs, terrains, photographes : trouvez votre prestataire, choisissez un
             créneau libre, réservez et payez en ligne.
           </p>
