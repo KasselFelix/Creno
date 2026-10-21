@@ -56,7 +56,7 @@ export function HomeAiSearch() {
         className="text-muted-foreground hover:text-foreground inline-flex min-h-11 w-fit items-center gap-2 text-sm underline underline-offset-4"
       >
         <SlidersHorizontal aria-hidden className="size-4" />
-        Recherche détaillée (lieu, catégorie, prix, jour, horaire)
+        Affiner la recherche
       </Link>
     </div>
   );

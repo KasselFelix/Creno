@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { headers } from 'next/headers';
-import { DemoBanner } from '@/components/demo-banner';
 import { Providers } from '@/components/providers';
 import { SiteFooter } from '@/components/site-footer';
 import './globals.css';
@@ -26,7 +25,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     >
       <body className="bg-background text-foreground flex min-h-full flex-col">
         <Providers nonce={nonce}>
-          <DemoBanner />
           {children}
           <SiteFooter />
         </Providers>
