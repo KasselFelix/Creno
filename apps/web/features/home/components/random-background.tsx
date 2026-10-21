@@ -43,7 +43,7 @@ export function RandomBackground() {
         <Button
           variant="ghost"
           size="icon"
-          className="text-muted-foreground absolute right-4 bottom-2 size-11"
+          className="text-foreground absolute top-2 right-4 size-11"
           aria-label={paused ? "Relancer l'animation" : "Mettre l'animation en pause"}
           onClick={() => setPaused((value) => !value)}
         >
