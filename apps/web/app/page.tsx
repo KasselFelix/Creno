@@ -8,7 +8,7 @@ export default function HomePage() {
     <>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-16">
-        <div className="flex max-w-2xl flex-col gap-4">
+        <div className="mx-auto flex max-w-2xl flex-col gap-4 text-center">
           <h1 className="text-4xl font-semibold tracking-tight">
             Réservez le bon créneau, au bon endroit.
           </h1>
