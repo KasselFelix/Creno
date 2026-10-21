@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { CircleAlert, LoaderCircle, Search, Sparkles } from 'lucide-react';
 import { cn } from 'cn';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import {
   AI_QUERY_MAX,
@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { useWakingScreen } from '@/features/health/api-wake-up';
 import { ApiClientError } from '@/lib/api/errors';
 import { useInterpretSearch } from '../api';
 import { interpretationNotices, understoodFilters } from '../interpretation';
@@ -30,16 +31,8 @@ export const SEARCH_EXAMPLES = [
   'Salle de réunion à Paris mardi matin',
 ];
 
-/** Au-delà, le message d'attente s'affiche : l'API sort peut-être de veille (20 à 30 s). */
+/** Au-delà, « Recherche en cours… » s'affiche (Mistral lent). Un réveil de l'API a son propre avis. */
 const SLOW_AFTER_MS = 3000;
-
-/**
- * Réveille l'API en veille pendant que le visiteur tape : une requête sans attendre la réponse
- * (liveness, qui ne touche pas la base). Un échec ne change rien, la recherche réveillera l'API.
- */
-function wakeUpApi() {
-  void fetch('/api/health', { cache: 'no-store' }).catch(() => undefined);
-}
 
 /**
  * Recherche en langage naturel : la phrase part à l'API, qui renvoie des filtres validés. La phrase
@@ -49,8 +42,8 @@ export function AiSearchBar({
   examples,
   defaultQuery = '',
   busy = false,
-  wakeApi = false,
   framed = false,
+  wakingScreen = false,
   onInterpreted,
 }: {
   examples: readonly string[];
@@ -58,10 +51,10 @@ export function AiSearchBar({
   defaultQuery?: string;
   /** La page travaille encore après l'interprétation (géolocalisation, navigation). */
   busy?: boolean;
-  /** Réveille l'API au premier contact avec la barre (accueil) ; `/search` l'a déjà réveillée. */
-  wakeApi?: boolean;
   /** Champ dans un cadre (accueil). */
   framed?: boolean;
+  /** Pendant un réveil de l'API, l'écran de chargement couvre la page jusqu'à la suivante (accueil). */
+  wakingScreen?: boolean;
   onInterpreted: (response: InterpretResponse, query: string) => void | Promise<void>;
 }) {
   const interpret = useInterpretSearch();
@@ -70,14 +63,9 @@ export function AiSearchBar({
     defaultValues: { query: defaultQuery },
   });
   const pending = interpret.isPending || busy;
+  useWakingScreen(wakingScreen && pending);
 
   const [noticeShown, setNoticeShown] = useState(false);
-  const woken = useRef(false);
-  function onFirstContact() {
-    if (!wakeApi || woken.current) return;
-    woken.current = true;
-    wakeUpApi();
-  }
 
   // Message d'attente pour la recherche en cours seulement (`submittedAt` l'identifie).
   const [slowSince, setSlowSince] = useState<number | null>(null);
@@ -109,11 +97,8 @@ export function AiSearchBar({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        {/* Clic ou focus : Safari ne donne pas le focus à un bouton cliqué (exemples). */}
         <form
           onSubmit={(event) => void submit(event)}
-          onFocusCapture={onFirstContact}
-          onPointerDownCapture={onFirstContact}
           noValidate
           role="search"
           className={framed ? 'rounded-lg border p-4 shadow-sm' : undefined}
@@ -162,12 +147,7 @@ export function AiSearchBar({
 
         {/* Région toujours présente (vide sans attente) : les lecteurs d'écran annoncent le message. */}
         <div aria-live="polite">
-          {slow && (
-            <p className="text-muted-foreground mt-2 text-sm">
-              Recherche en cours… Si le serveur était en veille, cela peut prendre jusqu&apos;à 30
-              secondes.
-            </p>
-          )}
+          {slow && <p className="text-muted-foreground mt-2 text-sm">Recherche en cours…</p>}
         </div>
       </div>
 

@@ -1,5 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { addDays, addHours, addMinutes, max, min, subHours } from 'date-fns';
+import { addDays } from 'date-fns/addDays';
+import { addHours } from 'date-fns/addHours';
+import { addMinutes } from 'date-fns/addMinutes';
+import { max } from 'date-fns/max';
+import { min } from 'date-fns/min';
+import { subHours } from 'date-fns/subHours';
 import { type DbHandle, PG_DEADLOCK_DETECTED, retryOnDeadlock, sqlState } from '@creno/db';
 import {
   type Booking,

@@ -1,13 +1,15 @@
 'use client';
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { BOOKING_HORIZON_DAYS, type Resource, type Slot } from '@creno/shared';
+import { useEffect, useId, useState } from 'react';
+import { BOOKING_HORIZON_DAYS, type Resource, type Slot, type TimeRange } from '@creno/shared';
 import { QueryError } from '@/components/query-error';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { addDays, formatLocalDate, timeInZone, todayInZone } from '@/lib/format';
+import { timeRangePhrase, timeRangeWithHours } from '@/features/search/params';
 import { useSlots } from '../api';
+import { splitSlotsByRange } from '../slot-range';
 import { WEEK, weekStartFor } from '../week';
 
 /**
@@ -18,6 +20,7 @@ import { WEEK, weekStartFor } from '../week';
 export function SlotChooser({
   resource,
   initialDate,
+  timeRange,
   title,
   titleId,
   selectedStart,
@@ -25,6 +28,8 @@ export function SlotChooser({
 }: {
   resource: Pick<Resource, 'id' | 'timezone'>;
   initialDate?: string;
+  /** Plage horaire cherchée : ses créneaux passent en premier, sous leur propre titre. */
+  timeRange?: TimeRange;
   title: string;
   titleId: string;
   selectedStart: string | null;
@@ -149,8 +154,9 @@ export function SlotChooser({
                 Aucun créneau ce jour. Essayez un autre jour de la semaine.
               </p>
             ) : (
-              <SlotGrid
+              <DaySlots
                 slots={day.slots}
+                timeRange={timeRange}
                 timezone={resource.timezone}
                 selectedStart={selected?.start ?? null}
                 onSelect={(start) => {
@@ -166,17 +172,50 @@ export function SlotChooser({
   );
 }
 
-function SlotGrid({
-  slots,
-  timezone,
-  selectedStart,
-  onSelect,
-}: {
+type GridProps = {
   slots: Slot[];
   timezone: string;
   selectedStart: string | null;
   onSelect: (start: string) => void;
-}) {
+};
+
+/**
+ * Créneaux du jour ; avec une plage horaire, deux groupes titrés : « Votre plage » (ce que le
+ * visiteur a cherché) puis « Autres horaires ».
+ */
+export function DaySlots({ timeRange, ...grid }: GridProps & { timeRange?: TimeRange }) {
+  const rangeId = useId();
+  const othersId = useId();
+  if (!timeRange) return <SlotGrid {...grid} />;
+
+  const { inRange, others } = splitSlotsByRange(grid.slots, timeRange, grid.timezone);
+  return (
+    <div className="flex flex-col gap-4">
+      <div role="group" aria-labelledby={rangeId} className="flex flex-col gap-2">
+        <h3 id={rangeId} className="text-sm font-medium">
+          Votre plage : {timeRangeWithHours(timeRange)}
+        </h3>
+        {inRange.some((slot) => slot.available) ? (
+          <SlotGrid {...grid} slots={inRange} />
+        ) : (
+          <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-sm">
+            Aucun créneau libre {timeRangePhrase(timeRange)} ce jour.
+          </p>
+        )}
+      </div>
+      {others.length > 0 && (
+        <div role="group" aria-labelledby={othersId} className="flex flex-col gap-2">
+          <h3 id={othersId} className="text-sm font-medium">
+            Autres horaires
+          </h3>
+          <SlotGrid {...grid} slots={others} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SlotGrid({ slots, timezone, selectedStart, onSelect }: GridProps) {
   // Le jour du passage à l'heure d'hiver, une heure existe deux fois : on précise alors le décalage.
   const labels = slots.map((slot) => timeInZone(slot.start, timezone));
   const repeated = new Set(labels.filter((label, index) => labels.indexOf(label) !== index));

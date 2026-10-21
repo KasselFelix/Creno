@@ -1,5 +1,6 @@
 import { Search } from 'lucide-react';
 import Link from 'next/link';
+import { CrenoLogo } from '@/components/creno-logo';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { buttonVariants } from '@/components/ui/button';
 import { UserMenu } from '@/features/auth/components/user-menu';
@@ -13,9 +14,11 @@ export async function SiteHeader() {
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2">
         <Link
           href="/"
-          className="inline-flex h-11 items-center text-lg font-semibold tracking-tight"
+          className="inline-flex h-11 min-w-11 items-center gap-2 text-lg font-semibold tracking-tight"
         >
-          Creno
+          <CrenoLogo className="size-6 shrink-0" />
+          {/* Sous 640 px, le logo seul : le nom ferait déborder l'en-tête à 375 px. */}
+          <span className="max-sm:sr-only">Creno</span>
         </Link>
         <nav aria-label="Principale" className="mr-auto">
           <Link

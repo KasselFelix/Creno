@@ -169,6 +169,23 @@ export function timeRangePhrase(range: TimeRange): string | undefined {
   return undefined;
 }
 
+/** Heures d'une plage : « 12 h – 18 h », « avant 12 h », « après 18 h ». */
+function timeRangeHours({ timeFrom, timeTo }: TimeRange): string | undefined {
+  if (timeFrom && timeTo) return `${formatHour(timeFrom)} – ${formatHour(timeTo)}`;
+  if (timeFrom) return `après ${formatHour(timeFrom)}`;
+  if (timeTo) return `avant ${formatHour(timeTo)}`;
+  return undefined;
+}
+
+/**
+ * Plage avec ses heures, pour la fiche : « l'après-midi (12 h – 18 h) ». Une plage libre les donne
+ * déjà : « entre 14 h et 16 h ».
+ */
+export function timeRangeWithHours(range: TimeRange): string | undefined {
+  const phrase = timeRangePhrase(range);
+  return phrase && timeOfDayOf(range) ? `${phrase} (${timeRangeHours(range)})` : phrase;
+}
+
 /** Plage horaire seule (badge, option du sélecteur) : « Après-midi », « Après 18 h 30 ». */
 export function timeRangeLabel(range: TimeRange): string | undefined {
   const period = timeOfDayOf(range);
@@ -184,11 +201,21 @@ export function describeFreeSlots(count: number, date: string, range: TimeRange 
   return `${slots} le ${formatSearchDay(date)}${time ? ` ${time}` : ''}`;
 }
 
-/** Lien vers la fiche ; avec une date, la fiche s'ouvre sur ce jour et sur la ressource libre. */
-export function providerHref(provider: SearchProvider, date: string | undefined): string {
+/**
+ * Lien vers la fiche ; avec une date, la fiche s'ouvre sur ce jour et sur la ressource libre, et met
+ * en évidence la plage horaire cherchée.
+ */
+export function providerHref(
+  provider: SearchProvider,
+  date: string | undefined,
+  range: TimeRange = {},
+): string {
   const path = `/providers/${provider.slug}`;
   if (!date || !provider.availableResourceId) return path;
-  return `${path}?${new URLSearchParams({ date, resource: provider.availableResourceId }).toString()}`;
+  const params = new URLSearchParams({ date, resource: provider.availableResourceId });
+  if (range.timeFrom) params.set('timeFrom', range.timeFrom);
+  if (range.timeTo) params.set('timeTo', range.timeTo);
+  return `${path}?${params.toString()}`;
 }
 
 /** 850 → « 850 m », 3240 → « 3,2 km », 24800 → « 25 km ». */

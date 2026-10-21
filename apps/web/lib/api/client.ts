@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import { ApiClientError, toApiClientError } from './errors';
+import { trackApiCall } from './wake';
 
 interface ApiFetchOptions<T extends z.ZodType> {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -29,15 +30,24 @@ function refreshSession(): Promise<boolean> {
   return refreshing;
 }
 
-function send(
+/** Chaque appel est suivi (wake.ts) : une attente sans réponse récente de l'API est un réveil. */
+async function send(
   path: string,
   { method = 'GET', body }: ApiFetchOptions<z.ZodType>,
 ): Promise<Response> {
-  return fetch(`/api${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const ended = trackApiCall('request');
+  let status: number | undefined;
+  try {
+    const res = await fetch(`/api${path}`, {
+      method,
+      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    status = res.status;
+    return res;
+  } finally {
+    ended(status);
+  }
 }
 
 /**

@@ -1,4 +1,4 @@
-import { subHours } from 'date-fns';
+import { subHours } from 'date-fns/subHours';
 import { REMINDER_LEAD_HOURS } from '@creno/shared';
 
 /**

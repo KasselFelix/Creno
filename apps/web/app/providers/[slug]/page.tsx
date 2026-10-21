@@ -6,13 +6,19 @@ import { localDateSchema, publicProviderSchema } from '@creno/shared';
 import { SiteHeader } from '@/components/site-header';
 import { Badge } from '@/components/ui/badge';
 import { SlotPicker } from '@/features/availability/components/slot-picker';
+import { parseSlotRange } from '@/features/availability/slot-range';
 import { categoryLabels } from '@/features/providers/labels';
 import { getCurrentUser, serverFetch } from '@/lib/api/server';
 
 type Props = {
   params: Promise<{ slug: string }>;
-  /** Depuis un résultat de recherche avec date : `?date=YYYY-MM-DD&resource=<id>`. */
-  searchParams: Promise<{ date?: string | string[]; resource?: string | string[] }>;
+  /** Depuis un résultat de recherche avec date : `?date=YYYY-MM-DD&resource=<id>&timeFrom=&timeTo=`. */
+  searchParams: Promise<{
+    date?: string | string[];
+    resource?: string | string[];
+    timeFrom?: string | string[];
+    timeTo?: string | string[];
+  }>;
 };
 
 // `cache` : la page et ses métadonnées partagent le même appel à l'API.
@@ -35,6 +41,7 @@ export default async function ProviderPage({ params, searchParams }: Props) {
   // Paramètres invalides ignorés ; la plage de dates est vérifiée dans le fuseau de la ressource.
   const date = localDateSchema.safeParse(query.date);
   const resourceId = typeof query.resource === 'string' ? query.resource : undefined;
+  const timeRange = parseSlotRange(query);
 
   return (
     <>
@@ -60,6 +67,7 @@ export default async function ProviderPage({ params, searchParams }: Props) {
             resources={provider.resources}
             initialResourceId={resourceId}
             initialDate={date.success ? date.data : undefined}
+            timeRange={timeRange}
             isAuthenticated={user !== null}
             onlinePayment={provider.onlinePayment}
             providerPath={`/providers/${provider.slug}`}

@@ -1,5 +1,6 @@
 import { TZDate, tzOffset } from '@date-fns/tz';
-import { addMinutes, format } from 'date-fns';
+import { addMinutes } from 'date-fns/addMinutes';
+import { format } from 'date-fns/format';
 
 /**
  * Moteur de calcul des créneaux. Fonctions pures : ni base de données ni horloge (`now` est un

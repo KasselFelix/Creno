@@ -220,7 +220,7 @@ export function SearchFilterFields({
           </SelectContent>
         </Select>
         {!filters.center && (
-          <FieldDescription id={`${idPrefix}-radius-help`} className="lg:sr-only">
+          <FieldDescription id={`${idPrefix}-radius-help`}>
             Choisissez d&apos;abord un lieu.
           </FieldDescription>
         )}
@@ -275,7 +275,7 @@ export function SearchFilterFields({
           </SelectContent>
         </Select>
         {!filters.date && (
-          <FieldDescription id={`${idPrefix}-time-help`} className="lg:sr-only">
+          <FieldDescription id={`${idPrefix}-time-help`}>
             Choisissez d&apos;abord un jour.
           </FieldDescription>
         )}

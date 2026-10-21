@@ -152,3 +152,19 @@
 .dark .mapboxgl-map .mapboxgl-ctrl-group button .mapboxgl-ctrl-icon {
   filter: invert(1);
 }
+
+/* Bandeau de démo : défilement sur une ligne sous 1024 px (deux copies du texte, -50 % = une copie). */
+@keyframes marquee {
+  to {
+    transform: translateX(calc(-50% - 1.5rem));
+  }
+}
+@media (max-width: 1023px) and (prefers-reduced-motion: no-preference) {
+  .marquee-track {
+    animation: marquee 25s linear infinite;
+  }
+  .marquee:hover .marquee-track,
+  .marquee:focus-within .marquee-track {
+    animation-play-state: paused;
+  }
+}

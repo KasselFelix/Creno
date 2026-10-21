@@ -173,7 +173,7 @@ export default function SearchMap({
                 <span>{describeFreeSlots(selected.availableSlots, date, timeRange)}</span>
               )}
               <Link
-                href={providerHref(selected, date)}
+                href={providerHref(selected, date, timeRange)}
                 className="text-primary inline-flex min-h-11 items-center font-medium underline underline-offset-4 md:min-h-0"
               >
                 Voir les créneaux
