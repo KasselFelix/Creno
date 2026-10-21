@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { InterpretResponse } from '@creno/shared';
 import {
   addRecentSearch,
+  getRecentSearches,
+  saveRecentSearch,
+  subscribeRecentSearches,
   isWorthRemembering,
   readRecentSearches,
   RECENT_SEARCHES_KEY,
@@ -140,6 +143,13 @@ describe('readRecentSearches / writeRecentSearches', () => {
     expect(readRecentSearches(storage)).toEqual(['Coiffeur à Paris']);
   });
 
+  it('retire les doublons d’un contenu modifié à la main', () => {
+    const storage = memoryStorage({
+      [RECENT_SEARCHES_KEY]: JSON.stringify(['Coiffeur à Paris', 'coiffeur a paris']),
+    });
+    expect(readRecentSearches(storage)).toEqual(['Coiffeur à Paris']);
+  });
+
   it('ignore un contenu absent, illisible ou d’un autre format', () => {
     const tooLong = 'a'.repeat(5000);
     for (const raw of [
@@ -158,5 +168,49 @@ describe('readRecentSearches / writeRecentSearches', () => {
   it('ne lève jamais d’erreur quand le stockage est bloqué', () => {
     expect(readRecentSearches(blockedStorage)).toEqual([]);
     expect(() => writeRecentSearches(blockedStorage, ['Coiffeur à Paris'])).not.toThrow();
+  });
+});
+
+describe('store du navigateur', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stubWindow() {
+    const storage = memoryStorage();
+    vi.stubGlobal('window', {
+      localStorage: storage,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    return storage;
+  }
+
+  it('relit le stockage après une page sans barre de recherche (autre onglet entre-temps)', () => {
+    const storage = stubWindow();
+    const unsubscribe = subscribeRecentSearches(() => {});
+    saveRecentSearch('Coiffeur à Paris');
+    unsubscribe();
+    // Un autre onglet enregistre une recherche pendant que celui-ci n'affiche pas de barre.
+    storage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(['Salle à Lyon', 'Coiffeur à Paris']));
+    subscribeRecentSearches(() => {});
+    expect(getRecentSearches()).toEqual(['Salle à Lyon', 'Coiffeur à Paris']);
+  });
+
+  it('une recherche part du stockage et n’écrase pas celle d’un autre onglet', () => {
+    const storage = stubWindow();
+    subscribeRecentSearches(() => {});
+    saveRecentSearch('Coiffeur à Paris');
+    storage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(['Salle à Lyon', 'Coiffeur à Paris']));
+    saveRecentSearch('Photographe à Bordeaux');
+    expect(readRecentSearches(storage)).toEqual([
+      'Photographe à Bordeaux',
+      'Salle à Lyon',
+      'Coiffeur à Paris',
+    ]);
+  });
+
+  it('garde un instantané stable tant que rien ne change', () => {
+    stubWindow();
+    subscribeRecentSearches(() => {});
+    expect(getRecentSearches()).toBe(getRecentSearches());
   });
 });

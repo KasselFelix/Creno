@@ -93,7 +93,10 @@ export function readRecentSearches(storage: RecentStorage): string[] {
     const raw = storage.getItem(RECENT_SEARCHES_KEY);
     if (raw === null) return [];
     const parsed = storedSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : [];
+    // Contenu modifié à la main : on retire aussi ses doublons (le premier gagne).
+    return parsed.success
+      ? parsed.data.reduceRight<string[]>((list, query) => addRecentSearch(list, query), [])
+      : [];
   } catch {
     return [];
   }
@@ -127,7 +130,7 @@ function load(): string[] {
   return storage ? readRecentSearches(storage) : [];
 }
 
-function getSnapshot(): string[] {
+export function getRecentSearches(): string[] {
   cache ??= load();
   return cache;
 }
@@ -143,13 +146,21 @@ function onStorage(event: StorageEvent) {
   notify();
 }
 
-function subscribe(listener: () => void) {
+export function subscribeRecentSearches(listener: () => void) {
   if (listeners.size === 0) window.addEventListener('storage', onStorage);
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0) window.removeEventListener('storage', onStorage);
+    if (listeners.size > 0) return;
+    window.removeEventListener('storage', onStorage);
+    // Plus personne n'écoute les autres onglets : le cache sera relu au prochain affichage.
+    cache = undefined;
   };
+}
+
+/** Repart du stockage (un autre onglet a pu l'écrire), sinon de la liste en mémoire. */
+function current(): string[] {
+  return browserStorage() ? load() : getRecentSearches();
 }
 
 function update(next: string[]) {
@@ -160,14 +171,14 @@ function update(next: string[]) {
 }
 
 export function saveRecentSearch(query: string): void {
-  update(addRecentSearch(getSnapshot(), query));
+  update(addRecentSearch(current(), query));
 }
 
 export function forgetRecentSearch(query: string): void {
-  update(removeRecentSearch(getSnapshot(), query));
+  update(removeRecentSearch(current(), query));
 }
 
 /** `null` pendant le rendu serveur et l'hydratation : la liste n'est pas encore connue. */
 export function useRecentSearches(): string[] | null {
-  return useSyncExternalStore(subscribe, getSnapshot, () => null);
+  return useSyncExternalStore(subscribeRecentSearches, getRecentSearches, () => null);
 }
