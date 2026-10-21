@@ -23,6 +23,10 @@ const data = (overrides: Partial<MessageData> = {}): MessageData => ({
   timezone: 'Europe/Paris',
   bookingStatus: 'confirmed',
   paidCents: 4500,
+  refundDueCents: null,
+  rescheduledAt: null,
+  // Cinq jours avant le créneau : les trois paliers de remboursement sont à venir.
+  sentAt: new Date('2026-10-10T08:00:00Z'),
   currency: 'EUR',
   bookingUrl: 'https://creno.test/bookings/123/confirmation',
   providerUrl: 'https://creno.test/providers/studio-lumiere',
@@ -64,10 +68,27 @@ describe('renderEmail', () => {
     expect(email.html).toContain('<html lang="fr">');
   });
 
-  it('réservation gratuite : aucun montant', () => {
+  it('confirmation : les paliers de remboursement à venir, dans le fuseau de la ressource', () => {
+    expect(renderEmail(data()).text).toContain(
+      "Annulation gratuite jusqu'au mardi 13 octobre 2026 à 10:00, remboursée à 50 % jusqu'au mercredi 14 octobre 2026 à 10:00, puis sans remboursement.",
+    );
+    // Réservée 30 h avant le début : le remboursement intégral est déjà passé.
+    const late = renderEmail(data({ sentAt: new Date('2026-10-14T02:00:00Z') }));
+    expect(late.text).toContain(
+      "Annulation remboursée à 50 % jusqu'au mercredi 14 octobre 2026 à 10:00, puis sans remboursement.",
+    );
+    expect(late.text).not.toContain('gratuite');
+    const lastMinute = renderEmail(data({ sentAt: new Date('2026-10-15T06:00:00Z') }));
+    expect(lastMinute.text).toContain(
+      'Annulation sans remboursement (moins de 24 h avant le début).',
+    );
+  });
+
+  it('réservation gratuite : aucun montant ni palier', () => {
     const email = renderEmail(data({ paidCents: null }));
     expect(email.text).toContain('Aucun paiement à prévoir.');
     expect(email.text).not.toContain('€');
+    expect(email.text).not.toContain('Annulation');
   });
 
   it('échappe les noms saisis par les utilisateurs dans le HTML', () => {
@@ -95,21 +116,61 @@ describe('renderEmail', () => {
   });
 
   it('annulation : le client apprend son remboursement, le prestataire que le créneau est libre', () => {
-    const toCustomer = renderEmail(data({ kind: 'booking_cancelled', bookingStatus: 'cancelled' }));
-    expect(toCustomer.text).toMatch(/Vous êtes remboursé de 45,00\s€\./);
+    const cancelled = { kind: 'booking_cancelled', bookingStatus: 'cancelled' } as const;
+    const toCustomer = renderEmail(data({ ...cancelled, refundDueCents: 4500 }));
+    expect(toCustomer.text).toMatch(/Vous êtes remboursé de 45,00\s€\. Le remboursement apparaît/);
     expect(toCustomer.text).toContain('https://creno.test/providers/studio-lumiere');
 
     const toProvider = renderEmail(
-      data({ kind: 'booking_cancelled', audience: 'provider', bookingStatus: 'cancelled' }),
+      data({ ...cancelled, audience: 'provider', refundDueCents: 4500 }),
     );
     expect(toProvider.text).toContain('Camille Martin a annulé sa réservation de Studio A');
-    expect(toProvider.text).not.toContain('remboursé');
+    expect(toProvider.text).toContain('Le client est remboursé intégralement.');
+    expect(toProvider.text).toContain('Le créneau est de nouveau réservable.');
 
     const byProvider = renderEmail(
       data({ kind: 'booking_cancelled_by_provider', bookingStatus: 'cancelled' }),
     );
     expect(byProvider.subject).toBe('Réservation annulée par Studio Lumière');
     expect(byProvider.text).toContain('Studio Lumière a annulé votre réservation');
+  });
+
+  it('annulation à 50 % : le montant rendu au client et la part que garde le prestataire', () => {
+    const half = {
+      kind: 'booking_cancelled',
+      bookingStatus: 'cancelled',
+      refundDueCents: 2250,
+    } as const;
+    expect(renderEmail(data(half)).text).toMatch(
+      /Vous êtes remboursé de 22,50\s€ sur 45,00\s€ \(annulation moins de 48 h avant le début\)\. Le remboursement apparaît/,
+    );
+    expect(renderEmail(data({ ...half, audience: 'provider' })).text).toMatch(
+      /Le client est remboursé de 22,50\s€ ; vous conservez 22,50\s€ sur ce paiement, avant commission\./,
+    );
+  });
+
+  it('annulation à 0 % : pas de remboursement, ni de délai bancaire', () => {
+    const none = {
+      kind: 'booking_cancelled',
+      bookingStatus: 'cancelled',
+      refundDueCents: 0,
+    } as const;
+    const toCustomer = renderEmail(data(none)).text;
+    expect(toCustomer).toContain('Annulation moins de 24 h avant le début : pas de remboursement.');
+    expect(toCustomer).not.toContain('relevé');
+    expect(renderEmail(data({ ...none, audience: 'provider' })).text).toContain(
+      'Annulation tardive : vous conservez le paiement, avant commission.',
+    );
+  });
+
+  it('annulation d’une réservation gratuite : rien sur le remboursement', () => {
+    const free = {
+      kind: 'booking_cancelled',
+      bookingStatus: 'cancelled',
+      paidCents: null,
+    } as const;
+    expect(renderEmail(data(free)).text).not.toContain('rembours');
+    expect(renderEmail(data({ ...free, audience: 'provider' })).text).not.toContain('rembours');
   });
 
   it('paiement tardif : le remboursement d’abord, puis la raison selon le cas', () => {
@@ -137,6 +198,7 @@ describe('renderEmail', () => {
 
     const free = renderEmail(data({ kind: 'booking_moved', paidCents: null }));
     expect(free.text).not.toContain('remboursé');
+    expect(free.text).toContain("Vous pouvez annuler en ligne jusqu'au début du créneau.");
   });
 
   it('chaque type de notification a un sujet et un corps', () => {

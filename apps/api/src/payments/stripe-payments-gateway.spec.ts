@@ -9,7 +9,7 @@ function fakeStripe() {
     accounts: { retrieve: vi.fn() },
     v2: { core: { accounts: { create: vi.fn() }, accountLinks: { create: vi.fn() } } },
     checkout: { sessions: { create: vi.fn(), retrieve: vi.fn(), expire: vi.fn() } },
-    refunds: { create: vi.fn() },
+    refunds: { create: vi.fn(), list: vi.fn() },
   };
   return { client, gateway: new StripePaymentsGateway('', client as unknown as Stripe) };
 }
@@ -25,6 +25,7 @@ const checkoutInput = {
   destinationAccountId: 'acct_test_1',
   productName: 'Studio A — Studio Lumière',
   description: 'lundi 7 janvier 2030 à 10:00',
+  cancellationPolicy: "Annulation gratuite jusqu'au samedi 5 janvier 2030 à 10:00.",
   customerEmail: 'client@test.dev',
   expiresAt: EXPIRES_AT,
   successUrl: 'http://localhost:3000/ok',
@@ -51,6 +52,9 @@ describe('StripePaymentsGateway', () => {
         metadata: { bookingId: BOOKING_ID, feeCents: '450' },
       },
       metadata: { bookingId: BOOKING_ID, feeCents: '450' },
+      custom_text: {
+        submit: { message: "Annulation gratuite jusqu'au samedi 5 janvier 2030 à 10:00." },
+      },
       expires_at: EXPIRES_AT.getTime() / 1000,
     });
     expect(options).toEqual({
@@ -138,24 +142,58 @@ describe('StripePaymentsGateway', () => {
     expect((await gateway.retrieveAccount('acct_test_1')).chargesEnabled).toBe(false);
   });
 
-  it('rembourse en reprenant le versement et la commission, avec une clé d’idempotence', async () => {
+  const refundInput = { paymentIntentId: 'pi_test_1', bookingId: BOOKING_ID, amountCents: 2250 };
+  const noRefunds = { data: [] };
+
+  it('rembourse le montant demandé en reprenant au prorata versement et commission', async () => {
     const { client, gateway } = fakeStripe();
+    client.refunds.list.mockResolvedValue(noRefunds);
     client.refunds.create.mockResolvedValue({ id: 're_test_1' });
-    await gateway.refund({ paymentIntentId: 'pi_test_1', bookingId: BOOKING_ID });
+    expect(await gateway.refund(refundInput)).toEqual({ refundedCents: 2250 });
+    expect(client.refunds.list).toHaveBeenCalledWith({ payment_intent: 'pi_test_1', limit: 100 });
     const [params, options] = client.refunds.create.mock.calls[0]!;
     expect(params).toEqual({
       payment_intent: 'pi_test_1',
+      amount: 2250,
       reverse_transfer: true,
       refund_application_fee: true,
       metadata: { bookingId: BOOKING_ID },
     });
+    // Le montant est dans la clé : un autre montant ne réutilise pas la réponse d'un essai précédent.
     expect((options as { idempotencyKey: string }).idempotencyKey).toMatch(
-      new RegExp(`^refund-${BOOKING_ID}-\\d+$`),
+      new RegExp(`^refund-${BOOKING_ID}-2250-\\d+$`),
     );
   });
 
-  it('un paiement déjà remboursé n’est pas une erreur', async () => {
+  it('ne crée pas de second remboursement : renvoie le total de ceux qui n’ont pas échoué', async () => {
     const { client, gateway } = fakeStripe();
+    client.refunds.list.mockResolvedValue({
+      data: [
+        { amount: 4500, status: 'succeeded' },
+        { amount: 1000, status: 'failed' },
+        { amount: 500, status: 'canceled' },
+      ],
+    });
+    expect(await gateway.refund(refundInput)).toEqual({ refundedCents: 4500 });
+    expect(client.refunds.create).not.toHaveBeenCalled();
+  });
+
+  it('à 0 : ne crée rien, mais rapporte un remboursement déjà fait', async () => {
+    const { client, gateway } = fakeStripe();
+    client.refunds.list.mockResolvedValueOnce(noRefunds);
+    expect(await gateway.refund({ ...refundInput, amountCents: 0 })).toEqual({ refundedCents: 0 });
+    client.refunds.list.mockResolvedValueOnce({ data: [{ amount: 2250, status: 'pending' }] });
+    expect(await gateway.refund({ ...refundInput, amountCents: 0 })).toEqual({
+      refundedCents: 2250,
+    });
+    expect(client.refunds.create).not.toHaveBeenCalled();
+  });
+
+  it('remboursé entre-temps par un autre appel : relit le total chez Stripe', async () => {
+    const { client, gateway } = fakeStripe();
+    client.refunds.list
+      .mockResolvedValueOnce(noRefunds)
+      .mockResolvedValueOnce({ data: [{ amount: 4500, status: 'succeeded' }] });
     client.refunds.create.mockRejectedValue(
       new Stripe.errors.StripeInvalidRequestError({
         type: 'invalid_request_error',
@@ -163,9 +201,16 @@ describe('StripePaymentsGateway', () => {
         message: 'déjà remboursé',
       }),
     );
-    await expect(
-      gateway.refund({ paymentIntentId: 'pi_test_1', bookingId: BOOKING_ID }),
-    ).resolves.toBeUndefined();
+    expect(await gateway.refund(refundInput)).toEqual({ refundedCents: 4500 });
+  });
+
+  it('une panne de Stripe pendant la vérification est une erreur de la passerelle', async () => {
+    const { client, gateway } = fakeStripe();
+    client.refunds.list.mockRejectedValue(
+      new Stripe.errors.StripeConnectionError({ type: 'api_error', message: 'coupure' }),
+    );
+    await expect(gateway.refund(refundInput)).rejects.toMatchObject({ reason: 'network' });
+    expect(client.refunds.create).not.toHaveBeenCalled();
   });
 
   it('expirer une session déjà terminée ne lève pas d’erreur ; une panne réseau, si', async () => {

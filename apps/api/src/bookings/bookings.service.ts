@@ -1,10 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { addDays } from 'date-fns/addDays';
-import { addHours } from 'date-fns/addHours';
 import { addMinutes } from 'date-fns/addMinutes';
-import { max } from 'date-fns/max';
-import { min } from 'date-fns/min';
-import { subHours } from 'date-fns/subHours';
 import { type DbHandle, PG_DEADLOCK_DETECTED, retryOnDeadlock, sqlState } from '@creno/db';
 import {
   type Booking,
@@ -14,9 +10,10 @@ import {
   type BookingsQuery,
   type Calendar,
   type CalendarQuery,
+  type CancelBookingInput,
   type CheckoutResponse,
   type CreateBookingInput,
-  FREE_CANCELLATION_HOURS,
+  customerRefundSteps,
   HOLD_MINUTES,
   MAX_ACTIVE_HOLDS,
   MAX_ACTIVE_HOLDS_PER_RESOURCE,
@@ -26,6 +23,11 @@ import {
   type ProviderBooking,
   type ProviderBookingList,
   type ProviderBookingsQuery,
+  type RefundAmountChangedDetails,
+  refundCentsFor,
+  type RefundPercent,
+  refundPolicyText,
+  refundStepAt,
   type RescheduleBookingInput,
 } from '@creno/shared';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -33,6 +35,7 @@ import { AvailabilityService } from '../availability/availability.service.js';
 import { DomainError } from '../common/domain-error.js';
 import { mapPgError } from '../common/pg-errors.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { formatInstant } from '../notifications/templates.js';
 import { APP_CONFIG } from '../config/config.module.js';
 import type { AppConfig } from '../config/env.js';
 import { DB } from '../database/database.module.js';
@@ -66,26 +69,26 @@ type Viewer = 'customer' | 'provider';
 
 /**
  * Dernier instant où `viewer` peut annuler, ou `null` s'il ne le peut pas.
- * Client : un hold tant qu'il court, une réservation confirmée jusqu'à 24 h avant le début.
+ * Client : un hold tant qu'il court ; une réservation confirmée jusqu'à son début, avec le
+ * remboursement du palier en cours (`refundPercentOf`).
  * Prestataire : une réservation confirmée jusqu'à son début.
- * Réservation déplacée par le prestataire : le client a au moins 24 h après le déplacement pour
- * annuler (sans dépasser le début), puisqu'il n'a pas choisi ce nouvel horaire ; ensuite, la règle
- * habituelle reprend.
  */
-function customerCancellationLimit(row: BookingDetailRow): Date {
-  const usual = subHours(row.start, FREE_CANCELLATION_HOURS);
-  if (row.rescheduledAt === null) return usual;
-  const decisionDelay = addHours(row.rescheduledAt, FREE_CANCELLATION_HOURS);
-  return min([row.start, max([usual, decisionDelay])]);
-}
-
 export function cancellableUntil(row: BookingDetailRow, viewer: Viewer, now: Date): Date | null {
   if (row.status === 'pending') {
     return viewer === 'customer' && row.holdActive ? row.expiresAt : null;
   }
   if (row.status !== 'confirmed') return null;
-  const limit = viewer === 'customer' ? customerCancellationLimit(row) : row.start;
-  return now < limit ? limit : null;
+  return now < row.start ? row.start : null;
+}
+
+/**
+ * Part du paiement rendue par une annulation à `now` (ADR 0020). Le client suit les paliers, qui
+ * tiennent compte d'un déplacement par le prestataire ; le prestataire qui annule rend tout.
+ */
+function refundPercentOf(row: BookingDetailRow, viewer: Viewer, now: Date): RefundPercent {
+  if (viewer === 'provider') return 100;
+  // Appelée sur une réservation annulable, donc pas commencée : un palier est toujours en cours.
+  return refundStepAt(customerRefundSteps(row), now)?.percent ?? 0;
 }
 
 const toDetail = (row: BookingDetailRow, viewer: Viewer, now = new Date()): BookingDetail => ({
@@ -96,6 +99,7 @@ const toDetail = (row: BookingDetailRow, viewer: Viewer, now = new Date()): Book
   timezone: row.timezone,
   paymentStatus: row.paymentStatus,
   refundedCents: row.refundedCents ?? 0,
+  refundDueCents: row.refundDueCents,
   checkoutStarted: row.checkoutStartedAt !== null,
   cancellableUntil: cancellableUntil(row, viewer, now)?.toISOString() ?? null,
   rescheduledAt: row.rescheduledAt?.toISOString() ?? null,
@@ -111,6 +115,8 @@ const toProviderBooking = (row: ProviderBookingRow, now: Date): ProviderBooking 
   customer:
     row.status === 'pending' ? null : { fullName: row.customerName, email: row.customerEmail },
   paymentStatus: row.paymentStatus,
+  refundedCents: row.refundedCents ?? 0,
+  refundDueCents: row.refundDueCents,
   rescheduledAt: row.rescheduledAt?.toISOString() ?? null,
   cancellableUntil: cancellableUntil(row, 'provider', now)?.toISOString() ?? null,
   reschedulable:
@@ -413,11 +419,14 @@ export class BookingsService {
             currency: fresh.currency,
             destinationAccountId: row.providerStripeAccountId,
             productName: `${fresh.resourceName} — ${fresh.providerName}`,
-            description: new Intl.DateTimeFormat('fr-FR', {
-              dateStyle: 'full',
-              timeStyle: 'short',
-              timeZone: fresh.timezone,
-            }).format(fresh.start),
+            description: formatInstant(fresh.start, fresh.timezone),
+            // Paliers à venir depuis le lancement du paiement : cet instant ne bouge plus, donc la
+            // phrase reste la même à chaque appel pour cette session (même clé d'idempotence).
+            cancellationPolicy: refundPolicyText(
+              customerRefundSteps(fresh),
+              fresh.checkoutStartedAt ?? new Date(),
+              (date) => formatInstant(date, fresh.timezone),
+            ),
             customerEmail: await this.bookings.customerEmail(current.id),
             expiresAt: fresh.expiresAt,
             successUrl: this.confirmationUrl(id, 'success'),
@@ -444,17 +453,21 @@ export class BookingsService {
 
   /**
    * Annule une réservation. Pour une réservation payée, le remboursement est demandé AVANT de
-   * libérer le créneau : si Stripe échoue, rien ne change et l'appelant peut réessayer (la clé
-   * d'idempotence empêche un double remboursement). Le paiement ne passe à `refunded` que par le
-   * webhook `charge.refunded`.
+   * libérer le créneau : si Stripe échoue, rien ne change et l'appelant peut réessayer (la passerelle
+   * ne crée jamais un second remboursement). Le montant suit le palier en cours (ADR 0020) ; le
+   * paiement ne passe à `refunded` que par le webhook `charge.refunded`.
    */
-  async cancel(current: AuthUser, id: string): Promise<BookingDetail> {
+  async cancel(
+    current: AuthUser,
+    id: string,
+    input: CancelBookingInput = {},
+  ): Promise<BookingDetail> {
     const { row, viewer } = await this.requireVisible(current, id);
     const now = new Date();
     if (!cancellableUntil(row, viewer, now)) {
       throw cancellationNotAllowed(
-        row.status === 'confirmed' && viewer === 'customer' && row.start > now
-          ? `L'annulation en ligne n'est plus possible à moins de ${FREE_CANCELLATION_HOURS} h du début.`
+        row.status === 'confirmed' && row.start <= now
+          ? 'Cette réservation a commencé.'
           : 'Cette réservation ne peut plus être annulée.',
       );
     }
@@ -473,23 +486,55 @@ export class BookingsService {
       return toDetail(await this.reload(id), viewer);
     }
 
-    const refund = row.paymentIntentId !== null && row.paymentStatus === 'succeeded';
-    if (row.paymentIntentId !== null && refund) {
+    // Réservation payée : le montant dû est recalculé ici, à partir du paiement enregistré.
+    // `expectedRefundCents` ne sert qu'à vérifier que le client a vu ce montant.
+    let percent: RefundPercent | null = null;
+    let refundDueCents: number | null = null;
+    if (row.paymentIntentId !== null && row.paidCents !== null) {
+      percent = refundPercentOf(row, viewer, now);
+      const due = refundCentsFor(row.paidCents, percent);
+      if (
+        viewer === 'customer' &&
+        input.expectedRefundCents !== undefined &&
+        input.expectedRefundCents !== due
+      ) {
+        throw new DomainError(
+          'REFUND_AMOUNT_CHANGED',
+          409,
+          'Le montant du remboursement vient de changer.',
+          { refundDueCents: due, percent } satisfies RefundAmountChangedDetails,
+        );
+      }
+      // Appelée même à 0 % : un essai précédent a pu être remboursé chez Stripe sans être enregistré
+      // ici. C'est le total remboursé chez Stripe qui est dû, pas le palier recalculé.
       try {
-        await this.gateway.refund({ paymentIntentId: row.paymentIntentId, bookingId: id });
+        ({ refundedCents: refundDueCents } = await this.gateway.refund({
+          paymentIntentId: row.paymentIntentId,
+          bookingId: id,
+          amountCents: due,
+        }));
       } catch (error) {
         throw this.gatewayFailure('refund', id, error);
       }
+      if (refundDueCents !== due) {
+        this.logger.warn({ event: 'payment.refund_already_exists', bookingId: id, percent });
+      }
     }
     const cancelled = await this.handle.db.transaction(async (tx) => {
-      if (!(await this.bookings.cancel(id, 'confirmed', tx))) return false;
+      if (!(await this.bookings.cancel(id, 'confirmed', tx, refundDueCents))) return false;
       await this.notifications.bookingCancelled(id, viewer, tx);
       return true;
     });
     if (!cancelled) {
       throw cancellationNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
     }
-    this.logger.log({ event: 'booking.cancelled', bookingId: id, by: viewer, refunded: refund });
+    this.logger.log({
+      event: 'booking.cancelled',
+      bookingId: id,
+      by: viewer,
+      percent,
+      refunded: (refundDueCents ?? 0) > 0,
+    });
     return toDetail(await this.reload(id), viewer);
   }
 

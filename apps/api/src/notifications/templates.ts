@@ -1,4 +1,9 @@
-import type { BookingStatus, NotificationKind } from '@creno/shared';
+import {
+  type BookingStatus,
+  customerRefundSteps,
+  type NotificationKind,
+  refundPolicyText,
+} from '@creno/shared';
 
 /** Ce qu'un gabarit peut afficher. Relu en base au moment de l'envoi, jamais porté par le job. */
 export interface MessageData {
@@ -16,6 +21,12 @@ export interface MessageData {
   bookingStatus: BookingStatus;
   /** Montant encaissé pour cette réservation ; `null` si elle n'a pas été payée (gratuite). */
   paidCents: number | null;
+  /** Montant dû au client par l'annulation (ADR 0020) ; `null` sans paiement. */
+  refundDueCents: number | null;
+  /** Date du dernier déplacement par le prestataire : elle compte dans les paliers de remboursement. */
+  rescheduledAt: Date | null;
+  /** Instant de l'envoi : les paliers déjà passés ne sont pas listés. */
+  sentAt: Date;
   currency: string;
   /** Page de la réservation (client). */
   bookingUrl: string;
@@ -49,6 +60,15 @@ export function formatSlot(start: Date, end: Date, timezone: string): string {
   return `${day.format(start)} de ${time.format(start)} à ${time.format(end)}`;
 }
 
+/** « jeudi 15 octobre 2026 à 10:00 », dans le fuseau de la ressource. */
+export function formatInstant(instant: Date, timezone: string): string {
+  return new Intl.DateTimeFormat('fr-FR', {
+    dateStyle: 'full',
+    timeStyle: 'short',
+    timeZone: timezone,
+  }).format(instant);
+}
+
 export function formatMoney(cents: number, currency: string): string {
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency }).format(cents / 100);
 }
@@ -62,6 +82,41 @@ export interface EmailParts {
 }
 
 const REFUND_DELAY = 'Le remboursement apparaît sur votre relevé sous quelques jours ouvrés.';
+
+/** Ce que l'annulation rend au client, selon le montant dû (ADR 0020). */
+function customerRefundLine(data: MessageData): string | null {
+  if (data.paidCents === null || data.refundDueCents === null) return null;
+  if (data.refundDueCents === 0) {
+    return 'Annulation moins de 24 h avant le début : pas de remboursement.';
+  }
+  const due = formatMoney(data.refundDueCents, data.currency);
+  if (data.refundDueCents >= data.paidCents)
+    return `Vous êtes remboursé de ${due}. ${REFUND_DELAY}`;
+  const paid = formatMoney(data.paidCents, data.currency);
+  return `Vous êtes remboursé de ${due} sur ${paid} (annulation moins de 48 h avant le début). ${REFUND_DELAY}`;
+}
+
+/** Ce que le prestataire garde d'une annulation par le client, avant la commission de Creno. */
+function providerRefundLine(data: MessageData): string | null {
+  if (data.paidCents === null || data.refundDueCents === null) return null;
+  if (data.refundDueCents === 0) {
+    return 'Annulation tardive : vous conservez le paiement, avant commission.';
+  }
+  if (data.refundDueCents >= data.paidCents) return 'Le client est remboursé intégralement.';
+  const due = formatMoney(data.refundDueCents, data.currency);
+  const kept = formatMoney(data.paidCents - data.refundDueCents, data.currency);
+  return `Le client est remboursé de ${due} ; vous conservez ${kept} sur ce paiement, avant commission.`;
+}
+
+/** Les paliers de remboursement encore à venir, dans le fuseau de la ressource. */
+function refundPolicyLine(data: MessageData): string | null {
+  return refundPolicyText(customerRefundSteps(data), data.sentAt, (date) =>
+    formatInstant(date, data.timezone),
+  );
+}
+
+/** Un paragraphe facultatif : rien quand il n'y a rien à dire. */
+const optional = (paragraph: string | null): string[] => (paragraph ? [paragraph] : []);
 
 function parts(data: MessageData): EmailParts {
   const slot = formatSlot(data.start, data.end, data.timezone);
@@ -78,6 +133,7 @@ function parts(data: MessageData): EmailParts {
         paragraphs: [
           `${what}, ${slot}.`,
           paid ? `Paiement reçu : ${paid}.` : 'Aucun paiement à prévoir.',
+          ...(paid ? optional(refundPolicyLine(data)) : []),
         ],
         action: seeBooking,
       };
@@ -97,6 +153,7 @@ function parts(data: MessageData): EmailParts {
           title: 'Une réservation a été annulée',
           paragraphs: [
             `${data.customerName} a annulé sa réservation de ${data.resourceName}, ${slot}.`,
+            ...optional(providerRefundLine(data)),
             'Le créneau est de nouveau réservable.',
           ],
         };
@@ -104,10 +161,7 @@ function parts(data: MessageData): EmailParts {
       return {
         subject: `Réservation annulée : ${what}`,
         title: 'Votre réservation est annulée',
-        paragraphs: [
-          `Vous avez annulé ${what}, ${slot}.`,
-          ...(paid ? [`Vous êtes remboursé de ${paid}. ${REFUND_DELAY}`] : []),
-        ],
+        paragraphs: [`Vous avez annulé ${what}, ${slot}.`, ...optional(customerRefundLine(data))],
         action: rebook,
       };
     case 'booking_cancelled_by_provider':
@@ -148,7 +202,7 @@ function parts(data: MessageData): EmailParts {
           `${data.providerName} a déplacé votre réservation. Nouvel horaire : ${data.resourceName}, ${slot}.`,
           paid
             ? 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne et être remboursé intégralement pendant au moins 24 h, sans dépasser le début du créneau.'
-            : 'Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne pendant au moins 24 h, sans dépasser le début du créneau.',
+            : "Cet horaire ne vous convient pas ? Vous pouvez annuler en ligne jusqu'au début du créneau.",
         ],
         action: seeBooking,
       };

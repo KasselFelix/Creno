@@ -71,7 +71,11 @@ describe('webhook Stripe', () => {
 
   const statusOf = async (bookingId: string) => {
     const [row] = await db()
-      .select({ status: bookings.status, expiresAt: bookings.expiresAt })
+      .select({
+        status: bookings.status,
+        expiresAt: bookings.expiresAt,
+        refundDueCents: bookings.refundDueCents,
+      })
       .from(bookings)
       .where(eq(bookings.id, bookingId));
     return row!;
@@ -136,7 +140,11 @@ describe('webhook Stripe', () => {
       const { booking } = await heldBooking();
       await postStripeEvent(app, 'checkout.session.completed', paidSession(booking)).expect(200);
 
-      expect(await statusOf(booking.id)).toEqual({ status: 'confirmed', expiresAt: null });
+      expect(await statusOf(booking.id)).toEqual({
+        status: 'confirmed',
+        expiresAt: null,
+        refundDueCents: null,
+      });
       expect(await paymentRows()).toMatchObject([
         {
           bookingId: booking.id,
@@ -223,11 +231,16 @@ describe('webhook Stripe', () => {
       );
 
       expect(gateway.refund).toHaveBeenCalledTimes(1);
+      // Un paiement arrivé trop tard est rendu en entier, et ce montant est dû au client.
       expect(gateway.refund).toHaveBeenCalledWith({
         paymentIntentId: `pi_test_${late.booking.id}`,
         bookingId: late.booking.id,
+        amountCents: late.booking.priceCents,
       });
-      expect((await statusOf(late.booking.id)).status).toBe('expired');
+      expect(await statusOf(late.booking.id)).toMatchObject({
+        status: 'expired',
+        refundDueCents: late.booking.priceCents,
+      });
       expect((await statusOf(winner.booking.id)).status).toBe('pending');
       // Le paiement reçu est tracé ; il passera à `refunded` avec l'événement `charge.refunded`.
       expect(await paymentRows()).toMatchObject([
@@ -267,7 +280,10 @@ describe('webhook Stripe', () => {
       await agent.post(`/v1/bookings/${booking.id}/cancel`).expect(200);
       await postStripeEvent(app, 'checkout.session.completed', paidSession(booking)).expect(200);
       expect(gateway.refund).toHaveBeenCalledTimes(1);
-      expect((await statusOf(booking.id)).status).toBe('cancelled');
+      expect(await statusOf(booking.id)).toMatchObject({
+        status: 'cancelled',
+        refundDueCents: booking.priceCents,
+      });
       expect(logged('payment.late_refund')).toMatchObject([{ reason: 'booking_cancelled' }]);
     });
 

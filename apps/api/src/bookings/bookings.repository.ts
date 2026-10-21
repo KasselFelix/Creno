@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import {
   bookings,
   type Database,
@@ -47,7 +47,11 @@ export interface BookingDetailRow extends BookingRow {
   providerStripeAccountId: string | null;
   providerChargesEnabled: boolean;
   paymentStatus: PaymentStatus | null;
+  /** Montant encaissé (`payments.amount_cents`) ; `null` sans paiement. */
+  paidCents: number | null;
   refundedCents: number | null;
+  /** Montant dû au client par l'annulation (ADR 0020) ; `null` sans paiement. */
+  refundDueCents: number | null;
   paymentIntentId: string | null;
   rescheduledAt: Date | null;
   rescheduleCount: number;
@@ -85,7 +89,9 @@ const detailColumns = {
   providerStripeAccountId: providers.stripeAccountId,
   providerChargesEnabled: providers.stripeChargesEnabled,
   paymentStatus: payments.status,
+  paidCents: payments.amountCents,
   refundedCents: payments.refundedCents,
+  refundDueCents: bookings.refundDueCents,
   paymentIntentId: payments.stripePaymentIntentId,
   rescheduledAt: bookings.rescheduledAt,
   rescheduleCount: bookings.rescheduleCount,
@@ -424,15 +430,19 @@ export class BookingsRepository {
     return rows.length > 0;
   }
 
-  /** Annule une réservation si elle a encore le statut attendu. Renvoie vrai si la ligne a changé. */
+  /**
+   * Annule une réservation si elle a encore le statut attendu, avec le montant dû au client
+   * (`null` sans paiement). Renvoie vrai si la ligne a changé.
+   */
   async cancel(
     id: string,
     from: 'pending' | 'confirmed',
     tx: Database = this.handle.db,
+    refundDueCents: number | null = null,
   ): Promise<boolean> {
     const rows = await tx
       .update(bookings)
-      .set({ status: 'cancelled', cancelledAt: sql`now()`, expiresAt: null })
+      .set({ status: 'cancelled', cancelledAt: sql`now()`, expiresAt: null, refundDueCents })
       .where(and(eq(bookings.id, id), eq(bookings.status, from)))
       .returning({ id: bookings.id });
     return rows.length > 0;
@@ -486,6 +496,17 @@ export class BookingsRepository {
         confirmedAt: sql`now()`,
       })
       .where(eq(bookings.id, id));
+  }
+
+  /**
+   * Paiement arrivé trop tard, déjà remboursé : il est dû en entier au client. Sans effet si la
+   * réservation n'est plus annulée ni expirée (la contrainte `bookings_refund_due_valid` l'exige).
+   */
+  async recordLateRefund(id: string, refundDueCents: number, tx: Database): Promise<void> {
+    await tx
+      .update(bookings)
+      .set({ refundDueCents })
+      .where(and(eq(bookings.id, id), inArray(bookings.status, ['cancelled', 'expired'])));
   }
 
   /** Session Checkout expirée sans paiement : le hold est libéré. Renvoie vrai si la ligne a changé. */

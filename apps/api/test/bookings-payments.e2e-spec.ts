@@ -10,10 +10,10 @@ import {
   bookingListSchema,
   CHECKOUT_MINUTES,
   checkoutResponseSchema,
-  FREE_CANCELLATION_HOURS,
   HOLD_MINUTES,
   MAX_FREE_UPCOMING_BOOKINGS,
   type Resource,
+  refundAmountChangedDetailsSchema,
   slotsResponseSchema,
 } from '@creno/shared';
 import { PaymentsGatewayError } from '../src/payments/payments-gateway.js';
@@ -74,6 +74,17 @@ describe('bookings : paiement, liste, annulation', () => {
   }
   const checkout = (agent: request.Agent, id: string) => agent.post(`/v1/bookings/${id}/checkout`);
   const cancel = (agent: request.Agent, id: string) => agent.post(`/v1/bookings/${id}/cancel`);
+  /** Annulation par le client, avec le montant qu'on lui a annoncé (comme le fait le front). */
+  const cancelExpecting = (agent: request.Agent, id: string, expectedRefundCents: number) =>
+    cancel(agent, id).send({ expectedRefundCents });
+  /** Place le créneau de la réservation `hours` heures après maintenant (négatif : commencé). */
+  const startsIn = (id: string, hours: number) =>
+    db()
+      .update(bookings)
+      .set({
+        during: sql`tstzrange(now() + make_interval(hours => ${hours}), now() + make_interval(hours => ${hours + 2}), '[)')`,
+      })
+      .where(eq(bookings.id, id));
 
   /** Hold payé : la confirmation passe par le webhook, comme en production. */
   async function confirmedBooking(agent: request.Agent, time = '10:00', day = DAY) {
@@ -120,6 +131,10 @@ describe('bookings : paiement, liste, annulation', () => {
         successUrl: `${WEB_ORIGIN}/stripe/return?booking=${booking.id}&checkout=success`,
         cancelUrl: `${WEB_ORIGIN}/stripe/return?booking=${booking.id}&checkout=cancelled`,
       });
+      // Les conditions d'annulation du créneau, dans le fuseau de la ressource.
+      expect(input.cancellationPolicy).toMatch(
+        /^Annulation gratuite jusqu'au .+ à 10:00, remboursée à 50 % jusqu'au .+ à 10:00, puis sans remboursement\.$/,
+      );
 
       // Le hold est prolongé jusqu'à la fin de la session Stripe (au moins 30 min).
       const row = await rowOf(booking.id);
@@ -235,6 +250,14 @@ describe('bookings : paiement, liste, annulation', () => {
       });
       expect(gateway.createCheckoutSession).not.toHaveBeenCalled();
       expect(await db().select().from(payments)).toHaveLength(0);
+
+      // Rien à rembourser : le client l'annule jusqu'au début, même à moins de 24 h, sans Stripe.
+      await startsIn(booking.id, 2);
+      const cancelled = bookingDetailSchema.parse(
+        (await cancel(agent, booking.id).expect(200)).body,
+      );
+      expect(cancelled).toMatchObject({ status: 'cancelled', refundDueCents: null });
+      expect(gateway.refund).not.toHaveBeenCalled();
     });
 
     it(`pas plus de ${MAX_FREE_UPCOMING_BOOKINGS} réservations gratuites à venir par client`, async () => {
@@ -328,10 +351,8 @@ describe('bookings : paiement, liste, annulation', () => {
       const mine = bookingDetailSchema.parse(
         (await me.agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
       );
-      // Le client annule jusqu'à 24 h avant, le prestataire jusqu'au début.
-      expect(mine.cancellableUntil).toBe(
-        new Date(Date.parse(booking.start) - FREE_CANCELLATION_HOURS * 60 * MINUTE).toISOString(),
-      );
+      // Le client et le prestataire annulent jusqu'au début ; le remboursement du client suit les paliers.
+      expect(mine.cancellableUntil).toBe(booking.start);
       const theirs = bookingDetailSchema.parse(
         (await provider.agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
       );
@@ -359,60 +380,159 @@ describe('bookings : paiement, liste, annulation', () => {
       return slotsResponseSchema.parse(res.body).days[0]!.slots.map((s) => s.available);
     };
 
-    it('client, plus de 24 h avant : remboursement demandé, réservation annulée, créneau libéré', async () => {
+    const refundedEvent = (bookingId: string, amountRefunded: number, full: boolean) =>
+      postStripeEvent(app, 'charge.refunded', {
+        id: `ch_test_${bookingId}`,
+        object: 'charge',
+        payment_intent: `pi_test_${bookingId}`,
+        amount_refunded: amountRefunded,
+        refunded: full,
+      }).expect(200);
+
+    it('client, plus de 48 h avant : remboursement intégral, réservation annulée, créneau libéré', async () => {
       const { agent } = await registerAs(app, 'customer');
       const booking = await confirmedBooking(agent);
       expect(await slots()).toEqual([true, false, true]);
 
-      const body = bookingDetailSchema.parse((await cancel(agent, booking.id).expect(200)).body);
+      const body = bookingDetailSchema.parse(
+        (await cancelExpecting(agent, booking.id, 4500).expect(200)).body,
+      );
       // Le statut du paiement ne change que par le webhook `charge.refunded`.
-      expect(body).toMatchObject({ status: 'cancelled', paymentStatus: 'succeeded' });
+      expect(body).toMatchObject({
+        status: 'cancelled',
+        paymentStatus: 'succeeded',
+        refundDueCents: 4500,
+        refundedCents: 0,
+      });
       expect(body.cancellableUntil).toBeNull();
       expect(gateway.refund).toHaveBeenCalledTimes(1);
       expect(gateway.refund).toHaveBeenCalledWith({
         paymentIntentId: `pi_test_${booking.id}`,
         bookingId: booking.id,
+        amountCents: 4500,
       });
       expect((await rowOf(booking.id)).cancelledAt).toBeInstanceOf(Date);
       expect(await slots()).toEqual([true, true, true]);
       expect(logged('booking.cancelled')).toMatchObject([
-        { bookingId: booking.id, by: 'customer', refunded: true },
+        { bookingId: booking.id, by: 'customer', percent: 100, refunded: true },
       ]);
 
-      await postStripeEvent(app, 'charge.refunded', {
-        id: 'ch_test_cancel',
-        object: 'charge',
-        payment_intent: `pi_test_${booking.id}`,
-        amount_refunded: 4500,
-        refunded: true,
-      }).expect(200);
+      await refundedEvent(booking.id, 4500, true);
       const after = bookingDetailSchema.parse(
         (await agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
       );
       expect(after).toMatchObject({ paymentStatus: 'refunded', refundedCents: 4500 });
     });
 
-    it('client, moins de 24 h avant → 409 CANCELLATION_NOT_ALLOWED ; le prestataire, lui, peut annuler et rembourser', async () => {
+    it('client, 36 h avant : remboursé à 50 %, le paiement reste `succeeded` après le webhook partiel', async () => {
       const { agent } = await registerAs(app, 'customer');
       const booking = await confirmedBooking(agent);
-      // Le créneau commence dans 23 h : la limite du client est dépassée.
-      await db()
-        .update(bookings)
-        .set({
-          during: sql`tstzrange(now() + interval '23 hours', now() + interval '24 hours', '[)')`,
-        })
-        .where(eq(bookings.id, booking.id));
+      await startsIn(booking.id, 36);
 
-      expectCode(await cancel(agent, booking.id).expect(409), 'CANCELLATION_NOT_ALLOWED');
+      const body = bookingDetailSchema.parse(
+        (await cancelExpecting(agent, booking.id, 2250).expect(200)).body,
+      );
+      expect(body).toMatchObject({ status: 'cancelled', refundDueCents: 2250 });
+      expect(gateway.refund).toHaveBeenCalledWith(expect.objectContaining({ amountCents: 2250 }));
+      expect(logged('booking.cancelled')).toMatchObject([{ percent: 50, refunded: true }]);
+
+      await refundedEvent(booking.id, 2250, false);
+      const after = bookingDetailSchema.parse(
+        (await agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
+      );
+      expect(after).toMatchObject({
+        paymentStatus: 'succeeded',
+        refundedCents: 2250,
+        refundDueCents: 2250,
+      });
+    });
+
+    it('client, 12 h avant : annulée sans remboursement, créneau libéré', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await startsIn(booking.id, 12);
+
+      const body = bookingDetailSchema.parse(
+        (await cancelExpecting(agent, booking.id, 0).expect(200)).body,
+      );
+      expect(body).toMatchObject({ status: 'cancelled', refundDueCents: 0 });
+      // La passerelle est consultée même à 0 % : elle ne crée rien (voir son test unitaire).
+      expect(gateway.refund).toHaveBeenCalledWith(expect.objectContaining({ amountCents: 0 }));
+      expect(logged('booking.cancelled')).toMatchObject([{ percent: 0, refunded: false }]);
+    });
+
+    it('client, créneau commencé → 409 CANCELLATION_NOT_ALLOWED, rien ne change', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await startsIn(booking.id, -1);
+
+      const res = await cancelExpecting(agent, booking.id, 0).expect(409);
+      expectCode(res, 'CANCELLATION_NOT_ALLOWED');
+      expect(apiErrorSchema.parse(res.body).message).toBe('Cette réservation a commencé.');
       expect(gateway.refund).not.toHaveBeenCalled();
       expect((await rowOf(booking.id)).status).toBe('confirmed');
+    });
+
+    it('montant annoncé dépassé → 409 REFUND_AMOUNT_CHANGED avec le nouveau montant ; rien ne change', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      // La fenêtre a annoncé un remboursement intégral, mais le palier à 50 % a commencé depuis.
+      await startsIn(booking.id, 36);
+
+      const res = await cancelExpecting(agent, booking.id, 4500).expect(409);
+      const error = apiErrorSchema.parse(res.body);
+      expect(error.code).toBe('REFUND_AMOUNT_CHANGED');
+      expect(refundAmountChangedDetailsSchema.parse(error.details)).toEqual({
+        refundDueCents: 2250,
+        percent: 50,
+      });
+      expect(gateway.refund).not.toHaveBeenCalled();
+      expect((await rowOf(booking.id)).status).toBe('confirmed');
+
+      await cancelExpecting(agent, booking.id, 2250).expect(200);
+      expect((await rowOf(booking.id)).refundDueCents).toBe(2250);
+    });
+
+    it('remboursement déjà fait chez Stripe (essai précédent) : c’est son montant qui est dû', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await startsIn(booking.id, 36);
+      gateway.refund.mockResolvedValueOnce({ refundedCents: 4500 });
+
+      const body = bookingDetailSchema.parse(
+        (await cancelExpecting(agent, booking.id, 2250).expect(200)).body,
+      );
+      expect(body.refundDueCents).toBe(4500);
+      expect(logged('payment.refund_already_exists')).toMatchObject([
+        { bookingId: booking.id, percent: 50 },
+      ]);
+    });
+
+    it('prestataire, 12 h avant et sans corps : remboursement intégral (le montant annoncé ne le concerne pas)', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      const other = await confirmedBooking(agent, '11:00');
+      await startsIn(booking.id, 12);
 
       const body = bookingDetailSchema.parse(
         (await cancel(provider.agent, booking.id).expect(200)).body,
       );
-      expect(body.status).toBe('cancelled');
-      expect(gateway.refund).toHaveBeenCalledTimes(1);
-      expect(logged('booking.cancelled')).toMatchObject([{ by: 'provider', refunded: true }]);
+      expect(body).toMatchObject({ status: 'cancelled', refundDueCents: 4500 });
+      expect(gateway.refund).toHaveBeenCalledWith(expect.objectContaining({ amountCents: 4500 }));
+      expect(logged('booking.cancelled')).toMatchObject([
+        { by: 'provider', percent: 100, refunded: true },
+      ]);
+
+      await cancelExpecting(provider.agent, other.id, 1).expect(200);
+      expect((await rowOf(other.id)).refundDueCents).toBe(4500);
+    });
+
+    it('corps invalide → 400', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await cancel(agent, booking.id).send({ expectedRefundCents: -1 }).expect(400);
+      await cancel(agent, booking.id).send({ expectedRefundCents: '4500' }).expect(400);
+      expect((await rowOf(booking.id)).status).toBe('confirmed');
     });
 
     it('503 si le remboursement échoue : rien ne change, et un nouvel essai aboutit', async () => {

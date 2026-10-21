@@ -152,6 +152,10 @@ describe('notifications', () => {
       const toCustomer = emails().find((message) => message.to === user.email)!;
       expect(toCustomer.subject).toBe('Réservation confirmée : Studio A chez Studio Lumière');
       expect(toCustomer.text).toContain('Paiement reçu : 45,00');
+      // Les paliers de remboursement : le créneau est dans une semaine, les trois sont à venir.
+      expect(toCustomer.text).toMatch(
+        /Annulation gratuite jusqu'au .+, remboursée à 50 % jusqu'au .+, puis sans remboursement\./,
+      );
       expect(toCustomer.text).toContain(
         `http://localhost:3000/bookings/${booking.id}/confirmation`,
       );
@@ -480,6 +484,28 @@ describe('notifications', () => {
       const toProvider = emails().find((message) => message.to === provider.user.email)!;
       expect(toProvider.subject).toBe('Réservation annulée : Studio A');
       expect(toProvider.text).toContain('Test customer a annulé sa réservation');
+      expect(toProvider.text).toContain('Le client est remboursé intégralement.');
+    });
+
+    it('par le client à 36 h du début → les emails donnent la part remboursée et la part conservée', async () => {
+      const { agent, user } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await runJobs(app, SEND_QUEUE);
+      email.send.mockClear();
+      await db()
+        .update(bookings)
+        .set({
+          during: sql`tstzrange(now() + interval '36 hours', now() + interval '37 hours', '[)')`,
+        })
+        .where(eq(bookings.id, booking.id));
+
+      await agent.post(`/v1/bookings/${booking.id}/cancel`).expect(200);
+      expect(await runJobs(app, SEND_QUEUE)).toBe(2);
+
+      const toCustomer = emails().find((message) => message.to === user.email)!;
+      expect(toCustomer.text).toMatch(/Vous êtes remboursé de 22,50\s€ sur 45,00\s€/);
+      const toProvider = emails().find((message) => message.to === provider.user.email)!;
+      expect(toProvider.text).toMatch(/vous conservez 22,50\s€ sur ce paiement, avant commission/);
     });
 
     it('par le prestataire → email au client seulement', async () => {

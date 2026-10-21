@@ -226,6 +226,9 @@ export class NotificationsWorker implements OnModuleInit {
       timezone: context.timezone,
       bookingStatus: context.bookingStatus,
       paidCents: context.paidCents,
+      refundDueCents: context.refundDueCents,
+      rescheduledAt: context.rescheduledAt,
+      sentAt: new Date(),
       currency: context.currency,
       // Adresses construites ici, à partir de l'origine configurée.
       bookingUrl: `${this.config.WEB_ORIGIN}/bookings/${context.bookingId}/confirmation`,
