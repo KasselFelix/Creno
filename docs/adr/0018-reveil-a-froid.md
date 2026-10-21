@@ -31,13 +31,12 @@ Mesuré le 2026-10-20 dans les journaux système de `ca-creno-api` (0,25 vCPU / 
 
 Le temps passé à lire et à taper couvre une partie du réveil, et l'API ne se rendort pas sous les yeux d'un visiteur qui lit une fiche.
 
-**Expliquer l'attente seulement quand c'en est une.** Le client API note la dernière réponse de l'API (les 502/503/504 du relais ne comptent pas) et suit ses requêtes. Un toast « Le serveur de démo se réveille » (logo, barre de progression, « la page continue toute seule ») s'affiche quand trois conditions sont réunies :
+**Montrer un chargement, pas une explication.** Le client API note la dernière réponse de l'API (les 502/503/504 du relais ne comptent pas) et suit ses requêtes. Pendant un réveil (aucune réponse depuis 4 min), aucun texte : le visiteur voit un chargement d'app ordinaire.
 
-- une requête du visiteur attend ;
-- l'API n'a pas répondu depuis 4 min ;
-- le réveil dure depuis au moins 2 s.
+- **Écran de chargement Creno** (`components/creno-loader.tsx`) pour les changements de page : recherche de l'accueil jusqu'à `/search`, `/search` ou fiche ouverts par un lien. Il s'ouvre après 1,5 s d'attente. Le calendrier du logo tourne ses pages jour après jour à partir d'aujourd'hui (rotation 3D autour des anneaux, 1,2 s par jour). Quand l'API répond : dernière page vierge, la coche s'y dessine, « Creno » se met en place, puis l'écran s'efface sur la page déjà chargée (≈ 4,4 s, rythme choisi sur un prototype réglable). Monté dans le layout racine, il survit au changement de route.
+- **Barre fine en haut de l'écran** pour les autres attentes (connexion, réservation, filtres, autocomplétion) : elle ne couvre jamais une page pendant qu'on tape. Elle part du début du réveil, pas du clic.
 
-Une API éveillée répond en moins d'1 s : une recherche lente parce que Mistral l'est n'affiche que « Recherche en cours… ». La barre part du début du réveil, pas du clic : un visiteur qui cherche 10 s après son arrivée la voit déjà à 40 %. Une fiche ouverte par un lien direct (rendu serveur) affiche le même avis depuis son `loading.tsx`.
+Une API éveillée répond en moins d'1 s : une recherche lente parce que Mistral l'est n'affiche que « Recherche en cours… ». Une fiche ouverte par un lien direct (rendu serveur) déclenche l'écran depuis son `loading.tsx`.
 
 **Démarrer plus vite, gratuitement.** `import … from 'date-fns'` chargeait les ~300 fichiers du paquet. Les imports ciblés (`date-fns/addMinutes`) font passer le chargement des modules de l'API de 3,1 à 2,3 s en local (−25 %). Une règle ESLint empêche d'y revenir côté API ; le front n'est pas concerné, son bundler ne garde que les fonctions utilisées.
 
@@ -45,7 +44,7 @@ Une API éveillée répond en moins d'1 s : une recherche lente parce que Mistra
 
 - **Coût** : inchangé par minute de visite. Au rythme mesuré (18 réveils et au plus 7,3 h d'activité en 4,9 jours, tests compris), l'API consomme environ 23 % de l'offre gratuite (180 000 vCPU-s par mois).
 - **Pas de règle de débit Vercel sur `/api/health`.** Garder l'API éveillée exige une requête toutes les 5 min, très en dessous de toute limite. Les rafales sont couvertes par la protection DDoS de Vercel, et les routes coûteuses par les limites par IP de l'API. Le déclencheur, c'est l'alerte de budget (voir `docs/deploy.md`).
-- **Limite connue** : un visiteur connecté sur une API endormie attend sans avis. `proxy.ts` renouvelle sa session avant d'envoyer la page, et un rendu de proxy ne peut pas afficher d'état d'attente. Couper l'appel plus tôt ferait perdre la session, puisque le refresh token tourne à chaque appel. Le ping au retour sur l'onglet raccourcit l'attente.
+- **Limite connue** : un visiteur connecté sur une API endormie attend sans écran de chargement. `proxy.ts` renouvelle sa session avant d'envoyer la page, et un rendu de proxy ne peut pas afficher d'état d'attente. Couper l'appel plus tôt ferait perdre la session, puisque le refresh token tourne à chaque appel. Le ping au retour sur l'onglet raccourcit l'attente.
 - **Robots** : ceux qui exécutent le JS réveillent l'API une fois par page, comme ils le faisaient déjà en ouvrant `/search`.
 
 ## Alternatives écartées
@@ -55,4 +54,5 @@ Une API éveillée répond en moins d'1 s : une recherche lente parce que Mistra
 - **Alléger l'image** : `@nestjs/swagger` tire `typescript`, `es-toolkit` et `swagger-ui-dist` (51 Mo décompressés), mais seulement ~5 Mo compressés sur 102, soit moins d'1 s de gagnée.
 - **Cache de compilation de Node (`NODE_COMPILE_CACHE`)** : −11 % au démarrage pour 19 Mo de plus dans l'image.
 - **Charger le SDK Mistral au premier usage** (0,6 s) : le coût serait déplacé sur la première recherche, qui est justement l'action de l'accueil.
-- **Écran de chargement bloquant** : les pages Vercel sont prêtes tout de suite, bloquer le visiteur n'ajouterait que de l'attente.
+- **Écran de chargement au lancement du site** : les pages Vercel sont prêtes tout de suite, bloquer le visiteur n'ajouterait que de l'attente. L'écran n'apparaît que lorsqu'une page attend vraiment l'API.
+- **Un toast qui explique la veille** (première version) : trop de détails pour le visiteur, qui n'a pas à connaître l'hébergement, et envahissant en haut de page.
