@@ -104,6 +104,7 @@ erDiagram
     timestamptz confirmed_at "date de confirmation, nullable"
     int reschedule_count "révision : +1 à chaque déplacement"
     timestamptz rescheduled_at "dernier déplacement, ssi révision > 0"
+    int refund_due_cents "dû au client à l'annulation d'une réservation payée, nullable"
   }
   payments {
     uuid id PK
@@ -170,6 +171,8 @@ Toutes les tables ont `created_at` / `updated_at` (`timestamptz`) sauf les règl
 | `0011_ai_requests.sql` (générée)                    | table `ai_requests` et enum `ai_request_outcome`, CHECK de cohérence (issue ⇔ appel au modèle), index sur `created_at`                           |
 | `0012_booking_reschedule.sql` (générée)             | révision des réservations (`reschedule_count`, `rescheduled_at`), `notifications.booking_revision` dans la clé d'unicité, valeur `booking_moved` |
 | `0013_booking_confirmed_at.sql` (générée, ajustée)  | `bookings.confirmed_at`, reprise depuis les notifications `booking_confirmed`                                                                    |
+| `0014_booking_refund_due_cents.sql` (générée)       | `bookings.refund_due_cents` et CHECK « montant dû ⇒ réservation annulée ou expirée »                                                             |
+| `0015_backfill_refund_due_cents.sql` (custom)       | reprise : les annulations et expirations payées existantes, toutes remboursées en entier, reçoivent leur montant dû                              |
 
 **Ajouter une valeur à un enum.** `ALTER TYPE … ADD VALUE` (migration 0012) est permis dans une transaction, mais la nouvelle valeur n'est utilisable qu'après le commit. Or `migrate()` de Drizzle applique **toutes** les migrations en attente dans **une seule** transaction : sur une base neuve (clone frais, CI), une migration qui citerait `'booking_moved'` en SQL (prédicat d'index, CHECK, valeur par défaut) échouerait avec « unsafe use of new value ». Aucune migration ne cite donc une valeur d'enum ajoutée par une migration de la même série ; si un jour c'est nécessaire, il faut la poser dans une valeur par défaut côté application, ou appliquer les migrations en deux fois.
 
@@ -294,7 +297,7 @@ RETURNING id;   -- aucune ligne renvoyée = déjà traité → 200, rien d'autre
 
 L'insertion et le traitement sont dans **la même transaction** : si le traitement échoue, l'insertion est annulée, l'API répond 500 et Stripe renvoie l'événement. Deux envois simultanés du même événement s'attendent sur la clé primaire ; le second voit le conflit une fois le premier validé.
 
-**2. Un seul paiement par réservation.** `payments.booking_id` et `payments.stripe_payment_intent_id` sont `UNIQUE` : deux événements différents pour la même session ne créent pas deux lignes. Les lignes de `payments` ne sont écrites que par le webhook ; `status` ne passe à `refunded` qu'à la réception de `charge.refunded`.
+**2. Un seul paiement par réservation.** `payments.booking_id` et `payments.stripe_payment_intent_id` sont `UNIQUE` : deux événements différents pour la même session ne créent pas deux lignes. Les lignes de `payments` ne sont écrites que par le webhook ; `status` ne passe à `refunded` qu'à la réception de `charge.refunded` pour un remboursement intégral (un remboursement partiel ne fait monter que `refunded_cents`).
 
 **3. Un paiement tardif ne vole pas un créneau.** À la réception de `checkout.session.completed`, la réservation est verrouillée (`SELECT … FOR UPDATE`) puis :
 
@@ -326,6 +329,20 @@ SELECT count(*) FILTER (WHERE checkout_started_at IS NULL)     AS sans_paiement_
   FROM bookings b
  WHERE status = 'expired' AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id);
 ```
+
+**Remboursement d'une annulation.** Décisions : [ADR 0020](adr/0020-tiered-refunds.md). Le client est remboursé selon le palier en cours : 100 % plus de 48 h avant le début, 50 % jusqu'à 24 h, puis 0 %. Deux colonnes, deux sources :
+
+- `bookings.refund_due_cents` : ce que l'annulation doit au client, écrit par l'API dans l'`UPDATE` qui annule, avec le total que Stripe a accepté. Il est aussi écrit au second passage du webhook pour un paiement arrivé trop tard (montant entier). `NULL` signifie qu'il n'y a pas eu de paiement.
+- `payments.refunded_cents` : ce que Stripe a réellement remboursé, écrit par le seul webhook `charge.refunded`. Un remboursement partiel laisse le paiement `succeeded`.
+
+```sql
+-- Remboursements en attente du webhook : montant dû pas encore atteint
+SELECT b.id, b.refund_due_cents, p.refunded_cents
+  FROM bookings b JOIN payments p ON p.booking_id = b.id
+ WHERE b.refund_due_cents > p.refunded_cents;
+```
+
+`CHECK (refund_due_cents IS NULL OR (refund_due_cents >= 0 AND status IN ('cancelled', 'expired')))` : un montant dû n'existe que pour une réservation terminée. La borne « au plus le montant payé » porte sur une autre table : c'est l'API qui la garantit, en calculant le montant depuis `payments.amount_cents`.
 
 **Compte du prestataire.** `providers.stripe_charges_enabled` recopie l'état du compte Stripe (capacité de transfert active : le prestataire peut recevoir l'argent des réservations) (webhook `account.updated`, ou relecture au retour du formulaire). `CHECK (NOT stripe_charges_enabled OR stripe_account_id IS NOT NULL)` : pas de paiements actifs sans compte vers lequel verser. `stripe_account_id` ne sort jamais de l'API.
 
