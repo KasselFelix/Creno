@@ -1,0 +1,192 @@
+/*
+ * Écran de chargement : le calendrier du logo tourne ses pages (rotation 3D autour des anneaux),
+ * puis la coche se dessine et le nom se met en place. 1 unité = 1/32 du logo.
+ * Couleurs : jetons du thème uniquement (--foreground, --background).
+ */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background);
+  transition: opacity 750ms ease;
+}
+
+.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* L'unité est posée ici : le calendrier et le nom (à côté, pas dedans) la partagent. */
+.lockup {
+  --u: 2.25px;
+  display: flex;
+  align-items: center;
+}
+
+@media (min-width: 640px) {
+  .lockup {
+    --u: 2.75px;
+  }
+}
+
+.calendar {
+  position: relative;
+  flex-shrink: 0;
+  width: calc(var(--u) * 32);
+  height: calc(var(--u) * 32);
+  perspective: calc(var(--u) * 110);
+  perspective-origin: 50% calc(var(--u) * 7);
+}
+
+.stack,
+.flipper {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+/* Axe de rotation : le haut de la page, au niveau des anneaux. */
+.flipper {
+  transform-origin: 50% calc(var(--u) * 7);
+}
+
+.sheet {
+  position: absolute;
+  left: calc(var(--u) * 2);
+  top: calc(var(--u) * 7);
+  box-sizing: border-box;
+  width: calc(var(--u) * 28);
+  height: calc(var(--u) * 23);
+  overflow: hidden;
+  border-radius: calc(var(--u) * 6);
+  background: var(--foreground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: calc(var(--u) * 4.5);
+}
+
+/* Encoches autour des anneaux, découpées dans la page : elles tournent avec elle. */
+.notch {
+  position: absolute;
+  top: calc(var(--u) * -6.5);
+  left: calc(var(--u) * 4.5);
+  width: calc(var(--u) * 7);
+  height: calc(var(--u) * 11);
+  border-radius: calc(var(--u) * 3.5);
+  background: var(--background);
+}
+
+.notch + .notch {
+  left: calc(var(--u) * 16.5);
+}
+
+.face {
+  backface-visibility: hidden;
+}
+
+/* Dos de la page, vu quand elle passe au-dessus des anneaux : vierge, de la couleur du logo. */
+.back {
+  transform: rotateX(180deg);
+}
+
+/* Retournée, le bas de la face arrière se retrouve contre les anneaux : ses encoches y sont. */
+.back .notch {
+  top: calc(var(--u) * 18.5);
+}
+
+.day {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: calc(var(--u) * 12.5);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--background);
+}
+
+.ring {
+  position: absolute;
+  top: calc(var(--u) * 2);
+  left: calc(var(--u) * 8);
+  width: calc(var(--u) * 4);
+  height: calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 2);
+  background: var(--foreground);
+}
+
+.ring + .ring {
+  left: calc(var(--u) * 20);
+}
+
+.check {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.check path {
+  fill: none;
+  stroke: var(--background);
+  stroke-width: 3.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1.2;
+  stroke-dashoffset: 1.1;
+}
+
+/* Le nom : largeur nulle pendant le chargement (le calendrier reste centré), puis il s'ouvre. */
+.word {
+  display: inline-flex;
+  overflow: hidden;
+  max-width: 0;
+  margin-left: 0;
+  font-size: calc(var(--u) * 22.5);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--foreground);
+  transition:
+    max-width 1140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    margin-left 1140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.wordOpen {
+  max-width: 4.2em;
+  margin-left: calc(var(--u) * 7);
+}
+
+.word span {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(45%);
+}
+
+.wordOpen span {
+  animation: letter 1140ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes letter {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen,
+  .word {
+    transition: none;
+  }
+
+  .wordOpen span {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

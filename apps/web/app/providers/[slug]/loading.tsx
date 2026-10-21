@@ -1,5 +1,5 @@
 import { Skeleton } from '@/components/ui/skeleton';
-import { ServerWaitNotice } from '@/features/health/api-wake-up';
+import { ServerWaitScreen } from '@/features/health/api-wake-up';
 
 export default function Loading() {
   return (
@@ -19,7 +19,7 @@ export default function Loading() {
       </div>
       <span className="sr-only">Chargement de la fiche…</span>
       {/* Lien direct sur une API en veille : la fiche attend son réveil côté serveur. */}
-      <ServerWaitNotice />
+      <ServerWaitScreen />
     </main>
   );
 }

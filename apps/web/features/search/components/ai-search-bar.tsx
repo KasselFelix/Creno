@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { useWakingScreen } from '@/features/health/api-wake-up';
 import { ApiClientError } from '@/lib/api/errors';
 import { useInterpretSearch } from '../api';
 import { interpretationNotices, understoodFilters } from '../interpretation';
@@ -42,6 +43,7 @@ export function AiSearchBar({
   defaultQuery = '',
   busy = false,
   framed = false,
+  wakingScreen = false,
   onInterpreted,
 }: {
   examples: readonly string[];
@@ -51,6 +53,8 @@ export function AiSearchBar({
   busy?: boolean;
   /** Champ dans un cadre (accueil). */
   framed?: boolean;
+  /** Pendant un réveil de l'API, l'écran de chargement couvre la page jusqu'à la suivante (accueil). */
+  wakingScreen?: boolean;
   onInterpreted: (response: InterpretResponse, query: string) => void | Promise<void>;
 }) {
   const interpret = useInterpretSearch();
@@ -59,6 +63,7 @@ export function AiSearchBar({
     defaultValues: { query: defaultQuery },
   });
   const pending = interpret.isPending || busy;
+  useWakingScreen(wakingScreen && pending);
 
   const [noticeShown, setNoticeShown] = useState(false);
 

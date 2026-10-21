@@ -1,15 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import { CrenoLogo } from '@/components/creno-logo';
-import { Progress, ProgressLabel } from '@/components/ui/progress';
+import { CrenoLoader } from '@/components/creno-loader';
 import {
+  holdScreen,
   isWaking,
   pingApi,
+  SCREEN_AFTER_MS,
   useApiWake,
-  WAKING_NOTICE_AFTER_MS,
   wakeProgress,
+  wantsScreen,
 } from '@/lib/api/wake';
 
 /** Activités qui montrent un visiteur présent : de quoi garder l'API éveillée pour lui. */
@@ -17,8 +17,9 @@ const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'tou
 
 /**
  * Garde l'API éveillée tant que le visiteur est là : ping au chargement, puis à chaque activité si
- * l'API n'a pas répondu depuis 4 min (elle dort après 5). Affiche l'avis de réveil quand le visiteur
- * attend une réponse pendant un réveil. Sans rendu ; monté une fois dans le layout racine.
+ * l'API n'a pas répondu depuis 4 min (elle dort après 6). Pendant un réveil, affiche la barre de
+ * chargement fine ou, pour un changement de page, l'écran de chargement. Monté une fois dans le
+ * layout racine, pour que l'écran survive au passage d'une page à l'autre.
  */
 export function ApiWakeUp() {
   useEffect(() => {
@@ -40,69 +41,78 @@ export function ApiWakeUp() {
   }, []);
 
   const state = useApiWake();
-  const watching = state.requests > 0 && state.wakingSince !== null;
+  // Horloge, seulement pendant qu'on attend l'API ou qu'une page la réclame.
+  const watching =
+    state.serverWaits > 0 || (state.wakingSince !== null && state.requests + state.pageWaits > 0);
   const [now, setNow] = useState(0);
   useEffect(() => {
     if (!watching) return;
-    const timer = setInterval(() => setNow(Date.now()), 500);
+    const timer = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(timer);
   }, [watching]);
 
-  const since = watching && isWaking(state, now) ? state.wakingSince : null;
-  useWakingToast(since);
-  return null;
-}
+  // Écran : s'ouvre pendant un réveil, reste tant qu'une page attend, puis joue sa fin.
+  const [screen, setScreen] = useState<'off' | 'on' | 'finishing'>('off');
+  const holding = state.pageWaits + state.serverWaits > 0;
+  if (screen === 'off' && watching && wantsScreen(state, now)) setScreen('on');
+  if (screen === 'on' && !holding) setScreen('finishing');
 
-/**
- * Attente d'un rendu serveur (fiche ouverte par un lien direct) : au bout de 2 s, l'API sort de veille.
- * À placer dans un `loading.tsx`, l'avis se ferme quand la page arrive.
- */
-export function ServerWaitNotice() {
-  const [since, setSince] = useState<number | null>(null);
-  useEffect(() => {
-    const start = Date.now();
-    const timer = setTimeout(() => setSince(start), WAKING_NOTICE_AFTER_MS);
-    return () => clearTimeout(timer);
-  }, []);
-  useWakingToast(since);
-  return null;
-}
-
-/**
- * Ouvre l'avis tant que `since` (début du réveil) est connu, le ferme sinon. Un identifiant neuf à
- * chaque ouverture : sonner laisse invisible un toast rouvert sous l'identifiant qu'on vient de
- * fermer (double montage des effets en dev, nouveau réveil juste après le précédent).
- */
-function useWakingToast(since: number | null) {
-  useEffect(() => {
-    if (since === null) return;
-    const id = toast.custom(() => <WakingNotice since={since} />, { duration: Infinity });
-    return () => {
-      toast.dismiss(id);
-    };
-  }, [since]);
-}
-
-function WakingNotice({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(timer);
-  }, []);
-
+  const bar = screen === 'off' && state.wakingSince !== null && isWaking(state, now);
   return (
-    <div className="bg-popover text-popover-foreground flex w-full flex-col gap-3 rounded-lg border p-4 shadow-lg">
-      <div className="flex items-center gap-3">
-        <CrenoLogo className="size-6 shrink-0 motion-safe:animate-pulse" />
-        <p className="text-sm font-medium">Le serveur de démo se réveille</p>
-      </div>
-      <p className="text-muted-foreground text-sm">
-        Il se met en veille quand personne ne l&apos;utilise, pour rester gratuit. Comptez une
-        vingtaine de secondes : la page continue toute seule.
-      </p>
-      <Progress value={Math.round(wakeProgress(since, now))}>
-        <ProgressLabel className="sr-only">Réveil du serveur</ProgressLabel>
-      </Progress>
+    <>
+      {bar && <WakeBar progress={wakeProgress(state.wakingSince ?? now, now)} />}
+      {screen !== 'off' && (
+        <CrenoLoader finishing={screen === 'finishing'} onDone={() => setScreen('off')} />
+      )}
+    </>
+  );
+}
+
+/** Barre fine en haut de l'écran : avancement estimé du réveil, sans texte. */
+function WakeBar({ progress }: { progress: number }) {
+  return (
+    <div
+      role="progressbar"
+      aria-label="Chargement"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(progress)}
+      className="fixed inset-x-0 top-0 z-50 h-0.5"
+    >
+      <div
+        className="bg-primary h-full origin-left transition-transform duration-300 motion-reduce:transition-none"
+        style={{ transform: `scaleX(${progress / 100})` }}
+      />
     </div>
   );
+}
+
+/**
+ * La page attend l'API (premier chargement, passage de l'accueil à la recherche) : pendant un
+ * réveil, l'écran de chargement la couvre au lieu de la barre.
+ */
+export function useWakingScreen(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    return holdScreen('page');
+  }, [active]);
+}
+
+/**
+ * Rendu serveur qui traîne (fiche ouverte par un lien direct, API en veille) : l'écran de
+ * chargement au bout de 1,5 s. À placer dans un `loading.tsx` ; l'écran joue sa fin quand la page
+ * arrive.
+ */
+export function ServerWaitScreen() {
+  useEffect(() => {
+    let release: (() => void) | undefined;
+    const timer = setTimeout(() => {
+      release = holdScreen('server');
+    }, SCREEN_AFTER_MS);
+    return () => {
+      clearTimeout(timer);
+      release?.();
+    };
+  }, []);
+  return null;
 }

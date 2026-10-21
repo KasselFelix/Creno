@@ -24,6 +24,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PlaceCombobox } from '@/features/geocoding/components/place-combobox';
 import { publicEnv } from '@/lib/env';
 import { useMediaQuery } from '@/lib/use-media-query';
+import { useWakingScreen } from '@/features/health/api-wake-up';
 import { useSearchProviders } from '../api';
 import { applyInterpretation, interpretationMatches } from '../interpretation';
 import {
@@ -61,6 +62,8 @@ export function SearchView() {
   const setFilters = (next: SearchFilters) => router.push(searchHref(next), { scroll: false });
 
   const results = useSearchProviders(filters);
+  // Page ouverte pendant un réveil de l'API : l'écran de chargement jusqu'aux premiers résultats.
+  useWakingScreen(results.isPending);
   const items = results.data?.items ?? NO_ITEMS;
   const total = results.data?.total ?? 0;
   const capped = results.data?.totalIsCapped ?? false;

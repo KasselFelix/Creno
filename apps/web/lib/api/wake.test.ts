@@ -9,7 +9,11 @@ import {
   STALE_AFTER_MS,
   type WakeState,
   WAKE_ESTIMATE_MS,
-  WAKING_NOTICE_AFTER_MS,
+  BAR_AFTER_MS,
+  getApiWakeState,
+  holdScreen,
+  SCREEN_AFTER_MS,
+  wantsScreen,
   wakeProgress,
 } from './wake';
 
@@ -65,29 +69,61 @@ describe('callStarted / callEnded', () => {
   });
 });
 
-describe('isWaking', () => {
-  it("affiche l'avis quand le visiteur attend pendant un réveil de plus de 2 s", () => {
+describe('isWaking (barre de chargement)', () => {
+  it('affiche la barre quand le visiteur attend pendant un réveil de plus d’1 s', () => {
     const pinging = callStarted(initialWakeState, 'ping', 0);
     const waiting = callStarted(pinging, 'request', 1_000);
-    expect(isWaking(waiting, WAKING_NOTICE_AFTER_MS - 1)).toBe(false);
-    expect(isWaking(waiting, WAKING_NOTICE_AFTER_MS)).toBe(true);
-    // Le visiteur cherche 10 s après son arrivée : l'avis s'affiche tout de suite.
+    expect(isWaking(waiting, BAR_AFTER_MS - 1)).toBe(false);
+    expect(isWaking(waiting, BAR_AFTER_MS)).toBe(true);
+    // Le visiteur cherche 10 s après son arrivée : la barre s'affiche tout de suite.
     expect(isWaking(callStarted(pinging, 'request', 10_000), 10_000)).toBe(true);
   });
 
-  it("pas d'avis pendant un simple ping (le visiteur lit, il n'attend rien)", () => {
+  it("pas de barre pendant un simple ping (le visiteur lit, il n'attend rien)", () => {
     expect(isWaking(callStarted(initialWakeState, 'ping', 0), 10_000)).toBe(false);
   });
 
-  it("pas d'avis sur une API éveillée mais lente (Mistral)", () => {
+  it('pas de barre sur une API éveillée mais lente (Mistral)', () => {
     const slow = callStarted(awakeAt(0), 'request', 1_000);
     expect(isWaking(slow, 9_000)).toBe(false);
   });
 
-  it("l'avis disparaît à la première réponse", () => {
+  it('la barre disparaît à la première réponse', () => {
     const waiting = callStarted(callStarted(initialWakeState, 'ping', 0), 'request', 0);
     const answered = callEnded(waiting, 'ping', 200, 20_000);
     expect(isWaking(answered, 20_000)).toBe(false);
+  });
+});
+
+describe('wantsScreen (écran de chargement)', () => {
+  const waking = callStarted(initialWakeState, 'ping', 0);
+
+  it('pendant un réveil, seulement si une page le réclame, au bout de 1,5 s', () => {
+    expect(wantsScreen(waking, 10_000)).toBe(false);
+    const page = { ...waking, pageWaits: 1 };
+    expect(wantsScreen(page, SCREEN_AFTER_MS - 1)).toBe(false);
+    expect(wantsScreen(page, SCREEN_AFTER_MS)).toBe(true);
+  });
+
+  it('jamais sur une API qui a répondu récemment, même si la page attend', () => {
+    const awake = { ...initialWakeState, lastContactAt: 0, pageWaits: 1 };
+    expect(wantsScreen(callStarted(awake, 'request', 1_000), 10_000)).toBe(false);
+  });
+
+  it('un rendu serveur qui traîne suffit (fiche ouverte par un lien)', () => {
+    expect(wantsScreen({ ...initialWakeState, serverWaits: 1 }, 0)).toBe(true);
+  });
+});
+
+describe('holdScreen', () => {
+  it('compte les attentes et ne les lève qu’une fois', () => {
+    const release = holdScreen('page');
+    const releaseServer = holdScreen('server');
+    expect(getApiWakeState()).toMatchObject({ pageWaits: 1, serverWaits: 1 });
+    release();
+    release();
+    releaseServer();
+    expect(getApiWakeState()).toMatchObject({ pageWaits: 0, serverWaits: 0 });
   });
 });
 

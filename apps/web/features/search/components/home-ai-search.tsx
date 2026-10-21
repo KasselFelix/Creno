@@ -47,6 +47,7 @@ export function HomeAiSearch() {
       <AiSearchBar
         examples={HOME_EXAMPLES}
         busy={locating || navigating}
+        wakingScreen
         framed
         onInterpreted={onInterpreted}
       />
