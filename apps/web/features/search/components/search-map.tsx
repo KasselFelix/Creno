@@ -170,9 +170,15 @@ export default function SearchMap({
                 aria-pressed={isSelected}
                 data-active={active}
                 className="border-foreground/20 bg-background text-foreground focus-visible:ring-ring/50 data-[active=true]:border-primary data-[active=true]:bg-primary data-[active=true]:text-primary-foreground flex h-8 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-sm font-semibold whitespace-nowrap tabular-nums shadow-md outline-none focus-visible:ring-3 data-[active=true]:scale-110 motion-safe:transition-transform"
-                onMouseEnter={() => onActiveChange(provider.id)}
-                onMouseLeave={() => onActiveChange(null)}
-                onFocus={() => onActiveChange(provider.id)}
+                // Survol à la souris et focus au clavier seulement : un toucher émule un survol et
+                // donne le focus, la pastille resterait inversée après sa désélection.
+                onPointerEnter={(event) => {
+                  if (event.pointerType === 'mouse') onActiveChange(provider.id);
+                }}
+                onPointerLeave={() => onActiveChange(null)}
+                onFocus={(event) => {
+                  if (event.currentTarget.matches(':focus-visible')) onActiveChange(provider.id);
+                }}
                 onBlur={() => onActiveChange(null)}
               >
                 <Icon aria-hidden className="size-4" />
