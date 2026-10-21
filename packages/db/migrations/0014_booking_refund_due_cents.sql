@@ -1,0 +1,2 @@
+ALTER TABLE "bookings" ADD COLUMN "refund_due_cents" integer;--> statement-breakpoint
+ALTER TABLE "bookings" ADD CONSTRAINT "bookings_refund_due_valid" CHECK ("bookings"."refund_due_cents" IS NULL OR ("bookings"."refund_due_cents" >= 0 AND "bookings"."status" IN ('cancelled', 'expired')));

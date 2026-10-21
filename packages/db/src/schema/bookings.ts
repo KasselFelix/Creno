@@ -57,6 +57,11 @@ export const bookings = pgTable(
     // Date du dernier déplacement : une réservation déplacée reste annulable par le client jusqu'à
     // son début (il n'a pas choisi ce nouvel horaire).
     rescheduledAt: timestamp('rescheduled_at', { withTimezone: true }),
+    // Montant dû au client par l'annulation (ou l'expiration) d'une réservation payée, tel que
+    // Stripe l'a accepté (ADR 0020) ; `null` sans paiement. Le montant réellement remboursé est
+    // `payments.refunded_cents`, écrit par le webhook : tant qu'il est inférieur, le remboursement
+    // est en cours.
+    refundDueCents: integer('refund_due_cents'),
     ...timestamps,
   },
   (t) => [
@@ -87,6 +92,12 @@ export const bookings = pgTable(
     check(
       'bookings_rescheduled_has_date',
       sql`(${t.rescheduleCount} = 0) = (${t.rescheduledAt} IS NULL)`,
+    ),
+    // Un montant dû n'existe que pour une réservation terminée. La borne « au plus le montant
+    // payé » porte sur `payments` : c'est l'API qui la garantit.
+    check(
+      'bookings_refund_due_valid',
+      sql`${t.refundDueCents} IS NULL OR (${t.refundDueCents} >= 0 AND ${t.status} IN ('cancelled', 'expired'))`,
     ),
   ],
 );
