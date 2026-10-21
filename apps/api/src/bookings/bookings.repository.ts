@@ -323,10 +323,11 @@ export class BookingsRepository {
   }
 
   /**
-   * Verrouille la réservation avant de la déplacer : une annulation concurrente attend la fin de
-   * la transaction, et le statut relu ici est celui qui sera modifié.
+   * Verrouille la réservation avant de la déplacer ou de l'annuler : un déplacement ou une
+   * annulation concurrente attend la fin de la transaction, et le statut relu ici est celui qui
+   * sera modifié.
    */
-  async lockForReschedule(
+  async lockForUpdate(
     id: string,
     tx: Database,
   ): Promise<{ status: BookingStatus; start: Date } | undefined> {
@@ -424,7 +425,7 @@ export class BookingsRepository {
   async confirmFree(id: string, tx: Database): Promise<boolean> {
     const rows = await tx
       .update(bookings)
-      .set({ status: 'confirmed', expiresAt: null, confirmedAt: sql`now()` })
+      .set({ status: 'confirmed', expiresAt: null, confirmedAt: sql`now()`, refundDueCents: null })
       .where(and(eq(bookings.id, id), activeHold, eq(bookings.priceCents, 0)))
       .returning({ id: bookings.id });
     return rows.length > 0;
@@ -494,6 +495,8 @@ export class BookingsRepository {
         expiresAt: null,
         stripeCheckoutSessionId: sessionId,
         confirmedAt: sql`now()`,
+        // Une réservation active n'a pas de montant dû (contrainte `bookings_refund_due_valid`).
+        refundDueCents: null,
       })
       .where(eq(bookings.id, id));
   }

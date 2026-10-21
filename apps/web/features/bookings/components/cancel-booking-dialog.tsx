@@ -32,7 +32,7 @@ function refundSentence(booking: BookingDetail, quote: RefundQuote | null): stri
     return 'Vous ne serez pas remboursé : le créneau commence dans moins de 24 h. Il sera libéré pour les autres clients.';
   }
   const due = formatPrice(quote.refundDueCents, booking.currency);
-  return `Vous serez remboursé de ${due} sur ${price} (${quote.percent} %) ${BANK_DELAY} : le créneau commence dans moins de 48 h.`;
+  return `Le créneau commence dans moins de 48 h. Vous serez remboursé de ${due} sur ${price} (${quote.percent} %) ${BANK_DELAY}.`;
 }
 
 /**
@@ -96,7 +96,8 @@ export function CancelBookingDialog({ booking }: { booking: BookingDetail }) {
       >
         Annuler
       </AlertDialogTrigger>
-      <AlertDialogContent>
+      {/* Plus large que la taille par défaut : les deux boutons du pied tiennent sur une ligne. */}
+      <AlertDialogContent className="data-[size=default]:sm:max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>Annuler cette réservation ?</AlertDialogTitle>
           <AlertDialogDescription>

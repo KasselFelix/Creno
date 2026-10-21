@@ -170,7 +170,12 @@ function parts(data: MessageData): EmailParts {
         title: 'Votre réservation a été annulée',
         paragraphs: [
           `${data.providerName} a annulé votre réservation : ${data.resourceName}, ${slot}.`,
-          ...(paid ? [`Vous êtes remboursé de ${paid}. ${REFUND_DELAY}`] : []),
+          // Le montant dû, pas le montant payé : c'est ce que Stripe a accepté de rendre.
+          ...optional(
+            data.refundDueCents
+              ? `Vous êtes remboursé de ${formatMoney(data.refundDueCents, data.currency)}. ${REFUND_DELAY}`
+              : null,
+          ),
         ],
         action: rebook,
       };

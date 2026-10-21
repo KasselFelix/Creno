@@ -161,7 +161,7 @@ describe('StripePaymentsGateway', () => {
     });
     // Le montant est dans la clé : un autre montant ne réutilise pas la réponse d'un essai précédent.
     expect((options as { idempotencyKey: string }).idempotencyKey).toMatch(
-      new RegExp(`^refund-${BOOKING_ID}-2250-\\d+$`),
+      new RegExp(`^refund-${BOOKING_ID}-2250-0-\\d+$`),
     );
   });
 
@@ -176,6 +176,20 @@ describe('StripePaymentsGateway', () => {
     });
     expect(await gateway.refund(refundInput)).toEqual({ refundedCents: 4500 });
     expect(client.refunds.create).not.toHaveBeenCalled();
+  });
+
+  it('remboursement partiel déjà fait, montant visé plus haut : ne crée que le complément', async () => {
+    const { client, gateway } = fakeStripe();
+    client.refunds.list.mockResolvedValue({ data: [{ amount: 2250, status: 'succeeded' }] });
+    client.refunds.create.mockResolvedValue({ id: 're_test_2' });
+    expect(await gateway.refund({ ...refundInput, amountCents: 4500 })).toEqual({
+      refundedCents: 4500,
+    });
+    const [params, options] = client.refunds.create.mock.calls[0]!;
+    expect(params).toMatchObject({ amount: 2250 });
+    expect((options as { idempotencyKey: string }).idempotencyKey).toMatch(
+      new RegExp(`^refund-${BOOKING_ID}-4500-2250-\\d+$`),
+    );
   });
 
   it('à 0 : ne crée rien, mais rapporte un remboursement déjà fait', async () => {

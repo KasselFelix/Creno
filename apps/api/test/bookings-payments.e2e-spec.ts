@@ -527,6 +527,47 @@ describe('bookings : paiement, liste, annulation', () => {
       expect((await rowOf(other.id)).refundDueCents).toBe(4500);
     });
 
+    it('deux annulations simultanées (double clic) : un seul remboursement, la seconde → 409', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await startsIn(booking.id, 36);
+      // Stripe lent : sans verrou sur la réservation, les deux requêtes rembourseraient chacune.
+      gateway.refund.mockImplementation(async ({ amountCents }) => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { refundedCents: amountCents };
+      });
+
+      const statuses = (
+        await Promise.all([
+          cancelExpecting(agent, booking.id, 2250),
+          cancelExpecting(agent, booking.id, 2250),
+        ])
+      ).map((res) => res.status);
+      expect(statuses.sort()).toEqual([200, 409]);
+      expect(gateway.refund).toHaveBeenCalledTimes(1);
+      expect((await rowOf(booking.id)).refundDueCents).toBe(2250);
+    });
+
+    it('le client et le prestataire annulent en même temps : un seul remboursement', async () => {
+      const { agent } = await registerAs(app, 'customer');
+      const booking = await confirmedBooking(agent);
+      await startsIn(booking.id, 36);
+      gateway.refund.mockImplementation(async ({ amountCents }) => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { refundedCents: amountCents };
+      });
+
+      const [byCustomer, byProvider] = await Promise.all([
+        cancelExpecting(agent, booking.id, 2250),
+        cancel(provider.agent, booking.id),
+      ]);
+      expect([byCustomer.status, byProvider.status].sort()).toEqual([200, 409]);
+      expect(gateway.refund).toHaveBeenCalledTimes(1);
+      // Le montant dû est celui de l'annulation qui l'a emporté.
+      const winner = byCustomer.status === 200 ? 2250 : 4500;
+      expect((await rowOf(booking.id)).refundDueCents).toBe(winner);
+    });
+
     it('corps invalide → 400', async () => {
       const { agent } = await registerAs(app, 'customer');
       const booking = await confirmedBooking(agent);

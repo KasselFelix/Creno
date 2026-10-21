@@ -520,6 +520,7 @@ describe('notifications', () => {
       expect(emails()).toMatchObject([
         { to: user.email, subject: 'Réservation annulée par Studio Lumière' },
       ]);
+      expect(emails()[0]!.text).toContain('Vous êtes remboursé de 45,00');
       expect((await rowsOf(booking.id)).at(-1)).toMatchObject({
         kind: 'booking_cancelled_by_provider',
         status: 'sent',

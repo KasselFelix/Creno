@@ -141,6 +141,12 @@ const paymentsNotReady = () =>
   );
 const cancellationNotAllowed = (message: string) =>
   new DomainError('CANCELLATION_NOT_ALLOWED', 409, message);
+const notCancellable = (row: BookingDetailRow, now: Date) =>
+  cancellationNotAllowed(
+    row.status === 'confirmed' && row.start <= now
+      ? 'Cette réservation a commencé.'
+      : 'Cette réservation ne peut plus être annulée.',
+  );
 const rescheduleNotAllowed = (message: string) =>
   new DomainError('RESCHEDULE_NOT_ALLOWED', 409, message);
 const slotNotOffered = () =>
@@ -324,7 +330,7 @@ export class BookingsService {
         attempts += 1;
         return this.handle.db.transaction(async (tx) => {
           // Relu sous verrou : une annulation a pu passer depuis la lecture ci-dessus.
-          const locked = await this.bookings.lockForReschedule(id, tx);
+          const locked = await this.bookings.lockForUpdate(id, tx);
           if (locked?.status !== 'confirmed' || locked.start <= new Date()) {
             throw rescheduleNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
           }
@@ -453,9 +459,10 @@ export class BookingsService {
 
   /**
    * Annule une réservation. Pour une réservation payée, le remboursement est demandé AVANT de
-   * libérer le créneau : si Stripe échoue, rien ne change et l'appelant peut réessayer (la passerelle
-   * ne crée jamais un second remboursement). Le montant suit le palier en cours (ADR 0020) ; le
-   * paiement ne passe à `refunded` que par le webhook `charge.refunded`.
+   * libérer le créneau, dans la transaction qui verrouille la réservation : si Stripe échoue, tout
+   * est annulé et l'appelant peut réessayer (la passerelle ne crée jamais un second remboursement).
+   * Le montant suit le palier en cours (ADR 0020) ; le paiement ne passe à `refunded` que par le
+   * webhook `charge.refunded`.
    */
   async cancel(
     current: AuthUser,
@@ -464,13 +471,7 @@ export class BookingsService {
   ): Promise<BookingDetail> {
     const { row, viewer } = await this.requireVisible(current, id);
     const now = new Date();
-    if (!cancellableUntil(row, viewer, now)) {
-      throw cancellationNotAllowed(
-        row.status === 'confirmed' && row.start <= now
-          ? 'Cette réservation a commencé.'
-          : 'Cette réservation ne peut plus être annulée.',
-      );
-    }
+    if (!cancellableUntil(row, viewer, now)) throw notCancellable(row, now);
 
     if (row.status === 'pending') {
       if (!(await this.bookings.cancel(id, 'pending'))) {
@@ -486,48 +487,25 @@ export class BookingsService {
       return toDetail(await this.reload(id), viewer);
     }
 
-    // Réservation payée : le montant dû est recalculé ici, à partir du paiement enregistré.
-    // `expectedRefundCents` ne sert qu'à vérifier que le client a vu ce montant.
-    let percent: RefundPercent | null = null;
-    let refundDueCents: number | null = null;
-    if (row.paymentIntentId !== null && row.paidCents !== null) {
-      percent = refundPercentOf(row, viewer, now);
-      const due = refundCentsFor(row.paidCents, percent);
-      if (
-        viewer === 'customer' &&
-        input.expectedRefundCents !== undefined &&
-        input.expectedRefundCents !== due
-      ) {
-        throw new DomainError(
-          'REFUND_AMOUNT_CHANGED',
-          409,
-          'Le montant du remboursement vient de changer.',
-          { refundDueCents: due, percent } satisfies RefundAmountChangedDetails,
-        );
+    // Le verrou sur la ligne sérialise les annulations d'une même réservation (double clic, client
+    // et prestataire) et couvre l'appel à Stripe : sans lui, deux appels simultanés pourraient
+    // chacun rembourser un palier partiel. La seconde annulation voit la réservation déjà annulée.
+    const { percent, refundDueCents } = await this.handle.db.transaction(async (tx) => {
+      await this.bookings.lockForUpdate(id, tx);
+      const locked = await this.bookings.findDetail(id, tx);
+      const at = new Date();
+      if (!locked || locked.status !== 'confirmed' || !cancellableUntil(locked, viewer, at)) {
+        throw locked && locked.status === 'confirmed'
+          ? notCancellable(locked, at)
+          : cancellationNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
       }
-      // Appelée même à 0 % : un essai précédent a pu être remboursé chez Stripe sans être enregistré
-      // ici. C'est le total remboursé chez Stripe qui est dû, pas le palier recalculé.
-      try {
-        ({ refundedCents: refundDueCents } = await this.gateway.refund({
-          paymentIntentId: row.paymentIntentId,
-          bookingId: id,
-          amountCents: due,
-        }));
-      } catch (error) {
-        throw this.gatewayFailure('refund', id, error);
+      const refund = await this.refundForCancel(locked, viewer, at, input);
+      if (!(await this.bookings.cancel(id, 'confirmed', tx, refund.refundDueCents))) {
+        throw cancellationNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
       }
-      if (refundDueCents !== due) {
-        this.logger.warn({ event: 'payment.refund_already_exists', bookingId: id, percent });
-      }
-    }
-    const cancelled = await this.handle.db.transaction(async (tx) => {
-      if (!(await this.bookings.cancel(id, 'confirmed', tx, refundDueCents))) return false;
       await this.notifications.bookingCancelled(id, viewer, tx);
-      return true;
+      return refund;
     });
-    if (!cancelled) {
-      throw cancellationNotAllowed('Cette réservation vient de changer de statut. Réessayez.');
-    }
     this.logger.log({
       event: 'booking.cancelled',
       bookingId: id,
@@ -536,6 +514,51 @@ export class BookingsService {
       refunded: (refundDueCents ?? 0) > 0,
     });
     return toDetail(await this.reload(id), viewer);
+  }
+
+  /**
+   * Remboursement d'une annulation confirmée, sous le verrou de la réservation. Le montant dû est
+   * recalculé ici, à partir du paiement enregistré : `expectedRefundCents` ne sert qu'à vérifier
+   * que le client a vu ce montant. La passerelle est appelée même à 0 % : un essai précédent a pu
+   * être remboursé chez Stripe sans être enregistré ici, et c'est le total chez Stripe qui est dû.
+   */
+  private async refundForCancel(
+    row: BookingDetailRow,
+    viewer: Viewer,
+    now: Date,
+    input: CancelBookingInput,
+  ): Promise<{ percent: RefundPercent | null; refundDueCents: number | null }> {
+    if (row.paymentIntentId === null || row.paidCents === null) {
+      return { percent: null, refundDueCents: null };
+    }
+    const percent = refundPercentOf(row, viewer, now);
+    const due = refundCentsFor(row.paidCents, percent);
+    if (
+      viewer === 'customer' &&
+      input.expectedRefundCents !== undefined &&
+      input.expectedRefundCents !== due
+    ) {
+      throw new DomainError(
+        'REFUND_AMOUNT_CHANGED',
+        409,
+        'Le montant du remboursement vient de changer.',
+        { refundDueCents: due, percent } satisfies RefundAmountChangedDetails,
+      );
+    }
+    let refunded: number;
+    try {
+      ({ refundedCents: refunded } = await this.gateway.refund({
+        paymentIntentId: row.paymentIntentId,
+        bookingId: row.id,
+        amountCents: due,
+      }));
+    } catch (error) {
+      throw this.gatewayFailure('refund', row.id, error);
+    }
+    if (refunded !== due) {
+      this.logger.warn({ event: 'payment.refund_already_exists', bookingId: row.id, percent });
+    }
+    return { percent, refundDueCents: refunded };
   }
 
   /** La réservation, si l'appelant est son client ou le prestataire propriétaire de la ressource. */

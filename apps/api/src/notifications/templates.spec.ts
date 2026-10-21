@@ -129,10 +129,24 @@ describe('renderEmail', () => {
     expect(toProvider.text).toContain('Le créneau est de nouveau réservable.');
 
     const byProvider = renderEmail(
-      data({ kind: 'booking_cancelled_by_provider', bookingStatus: 'cancelled' }),
+      data({
+        kind: 'booking_cancelled_by_provider',
+        bookingStatus: 'cancelled',
+        refundDueCents: 4500,
+      }),
     );
     expect(byProvider.subject).toBe('Réservation annulée par Studio Lumière');
     expect(byProvider.text).toContain('Studio Lumière a annulé votre réservation');
+    expect(byProvider.text).toMatch(/Vous êtes remboursé de 45,00\s€\./);
+    // Le montant dû (ce que Stripe rend), pas le montant payé.
+    const partial = renderEmail(
+      data({
+        kind: 'booking_cancelled_by_provider',
+        bookingStatus: 'cancelled',
+        refundDueCents: 2250,
+      }),
+    );
+    expect(partial.text).toMatch(/Vous êtes remboursé de 22,50\s€\./);
   });
 
   it('annulation à 50 % : le montant rendu au client et la part que garde le prestataire', () => {

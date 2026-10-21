@@ -131,8 +131,7 @@ const localTime = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2
 function refundOf(booking: BookingDetail): string {
   const due = booking.refundDueCents;
   if (due === null) return '';
-  if (due === 0)
-    return " Elle a été annulée moins de 24 h avant le début : elle n'est pas remboursée.";
+  if (due === 0) return '';
   const amount = formatPrice(due, booking.currency);
   if (booking.refundedCents >= due) {
     return due >= booking.priceCents
@@ -204,7 +203,10 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
       return {
         icon: <CircleSlash aria-hidden className="size-8" />,
         title: 'Réservation annulée',
-        description: `Cette réservation a été annulée.${refund}`,
+        description:
+          booking.refundDueCents === 0
+            ? "Cette réservation a été annulée moins de 24 h avant le début : elle n'est pas remboursée."
+            : `Cette réservation a été annulée.${refund}`,
         open: false,
       };
     case 'expired':

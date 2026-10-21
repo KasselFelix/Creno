@@ -178,25 +178,27 @@ export class StripePaymentsGateway implements PaymentsGateway {
   }
 
   async refund(input: RefundInput): Promise<{ refundedCents: number }> {
-    // Un paiement n'est remboursé qu'une fois. La clé d'idempotence ne couvre que 10 min : au-delà,
-    // un rejeu d'un remboursement partiel en créerait un second. On regarde donc d'abord ce que
-    // Stripe a déjà (essai précédent accepté, réponse perdue ou enregistrement local échoué).
+    // On part de ce que Stripe a déjà remboursé (essai précédent accepté, réponse perdue ou
+    // enregistrement local échoué) : la clé d'idempotence ne couvre que 10 min, et au-delà un rejeu
+    // d'un remboursement partiel en créerait un second. Seul le complément est créé, jamais plus.
     const refunded = await this.refundedTotal(input.paymentIntentId);
-    if (refunded > 0 || input.amountCents === 0) return { refundedCents: refunded };
+    const missing = input.amountCents - refunded;
+    if (missing <= 0) return { refundedCents: refunded };
 
     try {
       await this.stripe.refunds.create(
         {
           payment_intent: input.paymentIntentId,
-          amount: input.amountCents,
+          amount: missing,
           // Reprend au prorata l'argent versé au prestataire et la commission de la plateforme.
           reverse_transfer: true,
           refund_application_fee: true,
           metadata: { bookingId: input.bookingId },
         },
-        // Le montant fait partie de la clé : Stripe refuse une même clé avec d'autres paramètres.
+        // Le montant visé et le déjà remboursé font partie de la clé : Stripe refuse une même clé
+        // avec d'autres paramètres.
         {
-          idempotencyKey: `refund-${input.bookingId}-${input.amountCents}-${attemptWindow(10)}`,
+          idempotencyKey: `refund-${input.bookingId}-${input.amountCents}-${refunded}-${attemptWindow(10)}`,
         },
       );
     } catch (error) {

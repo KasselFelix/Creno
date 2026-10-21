@@ -70,9 +70,11 @@ export interface PaymentsGateway {
   /** Ferme une session encore ouverte ; sans effet si elle est déjà terminée. */
   expireCheckoutSession(sessionId: string): Promise<void>;
   /**
-   * Rembourse `amountCents` du paiement, reprend au prorata le versement au prestataire et la
-   * commission. Si le paiement a déjà un remboursement (un essai précédent accepté par Stripe), rien
-   * n'est créé. Renvoie le total remboursé chez Stripe : c'est lui qui est enregistré.
+   * Porte le total remboursé du paiement à `amountCents`, en reprenant au prorata le versement au
+   * prestataire et la commission. Si un remboursement existe déjà (un essai précédent accepté par
+   * Stripe), seul le complément est créé, et rien s'il couvre déjà le montant. Renvoie le total
+   * remboursé chez Stripe : c'est lui qui est enregistré. Les appels pour une même réservation sont
+   * sérialisés par l'appelant (verrou sur la réservation).
    */
   refund(input: RefundInput): Promise<{ refundedCents: number }>;
 }
