@@ -196,7 +196,9 @@ export function AiSearchBar({
         role="group"
         aria-label="Suggestions de recherche"
         className={cn(
-          '-m-1 flex items-center gap-2 overflow-x-auto p-1 sm:flex-wrap sm:overflow-visible',
+          // `relative` : les textes `sr-only` (absolus) restent dans la rangée qui défile, sinon ils
+          // élargissent la page sur mobile.
+          'relative -m-1 flex items-center gap-2 overflow-x-auto p-1 sm:flex-wrap sm:overflow-visible',
           (recent === null || !suggestions.visible) && 'invisible',
         )}
       >
