@@ -64,6 +64,10 @@ export function BookingDetailsSheet({
             <dd>
               {formatPrice(booking.priceCents, booking.currency)}
               {booking.paymentStatus ? ` · ${paymentLabels[booking.paymentStatus]}` : ''}
+              {/* Annulation tardive par le client : une partie seulement lui a été rendue. */}
+              {booking.paymentStatus === 'succeeded' && booking.refundedCents > 0
+                ? ` · ${formatPrice(booking.refundedCents, booking.currency)} remboursés au client`
+                : ''}
             </dd>
             {booking.rescheduledAt && (
               <>

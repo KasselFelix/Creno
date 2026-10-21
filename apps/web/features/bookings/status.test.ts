@@ -17,6 +17,7 @@ const booking = (overrides: Partial<BookingDetail>): BookingDetail => ({
   timezone: 'Europe/Paris',
   paymentStatus: null,
   refundedCents: 0,
+  refundDueCents: null,
   checkoutStarted: false,
   cancellableUntil: '2030-01-01T09:15:00.000Z',
   rescheduledAt: null,
@@ -29,13 +30,30 @@ describe('bookingStatusView', () => {
     [{ cancellableUntil: null }, 'Délai de paiement dépassé', 'closed'],
     [{ status: 'confirmed', paymentStatus: 'succeeded' }, 'Confirmée', 'success'],
     [{ status: 'cancelled' }, 'Annulée', 'closed'],
+    [{ status: 'cancelled', refundDueCents: 0 }, 'Annulée · non remboursée', 'closed'],
+    [{ status: 'cancelled', refundDueCents: 4500 }, 'Annulée · remboursement en cours', 'closed'],
     [
-      { status: 'cancelled', paymentStatus: 'succeeded' },
-      'Annulée · remboursement en cours',
+      { status: 'cancelled', refundDueCents: 4500, refundedCents: 4500 },
+      'Annulée · remboursée',
       'closed',
     ],
-    [{ status: 'cancelled', paymentStatus: 'refunded' }, 'Annulée · remboursée', 'closed'],
-    [{ status: 'expired', paymentStatus: 'refunded' }, 'Expirée · remboursée', 'closed'],
+    [{ status: 'cancelled', refundDueCents: 2250 }, 'Annulée · remboursement en cours', 'closed'],
+    [
+      { status: 'cancelled', refundDueCents: 2250, refundedCents: 2250 },
+      'Annulée · remboursée à 50 %',
+      'closed',
+    ],
+    // 45,01 € à 50 % : 22,50 € rendus, affichés « 50 % ».
+    [
+      { status: 'cancelled', priceCents: 4501, refundDueCents: 2250, refundedCents: 2250 },
+      'Annulée · remboursée à 50 %',
+      'closed',
+    ],
+    [
+      { status: 'expired', refundDueCents: 4500, refundedCents: 4500 },
+      'Expirée · remboursée',
+      'closed',
+    ],
     [{ status: 'expired' }, 'Expirée', 'closed'],
   ] as const)('%j → %s', (overrides, label, tone) => {
     expect(bookingStatusView(booking(overrides))).toEqual({ label, tone });
@@ -51,16 +69,19 @@ describe('isPayable', () => {
 });
 
 describe('providerBookingStatusView', () => {
+  const refund = { priceCents: 4500, refundDueCents: null, refundedCents: 0 };
   it.each([
-    [{ status: 'pending', paymentStatus: null }, 'Paiement en cours', 'waiting'],
-    [{ status: 'confirmed', paymentStatus: 'succeeded' }, 'Confirmée', 'success'],
+    [{ status: 'pending' }, 'Paiement en cours', 'waiting'],
+    [{ status: 'confirmed' }, 'Confirmée', 'success'],
+    [{ status: 'cancelled', refundDueCents: 4500 }, 'Annulée · remboursement en cours', 'closed'],
     [
-      { status: 'cancelled', paymentStatus: 'succeeded' },
-      'Annulée · remboursement en cours',
+      { status: 'cancelled', refundDueCents: 2250, refundedCents: 2250 },
+      'Annulée · remboursée à 50 %',
       'closed',
     ],
-    [{ status: 'cancelled', paymentStatus: null }, 'Annulée', 'closed'],
+    [{ status: 'cancelled', refundDueCents: 0 }, 'Annulée · non remboursée', 'closed'],
+    [{ status: 'cancelled' }, 'Annulée', 'closed'],
   ] as const)('%o → %s', (overrides, label, tone) => {
-    expect(providerBookingStatusView(overrides)).toEqual({ label, tone });
+    expect(providerBookingStatusView({ ...refund, ...overrides })).toEqual({ label, tone });
   });
 });

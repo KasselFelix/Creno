@@ -128,6 +128,7 @@ function ResourceSlots({
               <ReserveButton
                 resourceId={resource.id}
                 start={selected.slot.start}
+                timezone={resource.timezone}
                 free={resource.priceCents === 0}
                 isAuthenticated={booking.isAuthenticated}
                 loginNext={booking.providerPath}

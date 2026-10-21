@@ -23,6 +23,7 @@ const messages: Partial<Record<ErrorCode, string>> = {
   PAYMENT_PROVIDER_UNAVAILABLE:
     'Le paiement est momentanément indisponible. Réessayez dans un instant.',
   CANCELLATION_NOT_ALLOWED: 'Cette réservation ne peut plus être annulée en ligne.',
+  REFUND_AMOUNT_CHANGED: 'Le montant du remboursement vient de changer.',
   RESCHEDULE_NOT_ALLOWED: 'Cette réservation ne peut plus être déplacée.',
   PHONE_NOT_ALLOWED: 'Seuls les numéros mobiles français (06 ou 07) sont acceptés pour l’instant.',
   PHONE_CODE_INVALID: 'Code incorrect ou expiré.',
@@ -38,6 +39,8 @@ export class ApiClientError extends Error {
   readonly statusCode: number;
   /** Erreurs par champ renvoyées par l'API (`details.fieldErrors`). */
   readonly fieldErrors: Record<string, string[]>;
+  /** `details` brut de l'erreur, à lire avec le schéma partagé de son code. */
+  readonly details: unknown;
 
   constructor(error: ApiError | null, statusCode: number) {
     super((error && messages[error.code]) ?? FALLBACK);
@@ -45,6 +48,7 @@ export class ApiClientError extends Error {
     this.code = error?.code ?? 'NETWORK_ERROR';
     this.statusCode = statusCode;
     this.fieldErrors = extractFieldErrors(error?.details);
+    this.details = error?.details;
   }
 }
 

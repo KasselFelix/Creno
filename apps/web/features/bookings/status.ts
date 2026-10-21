@@ -12,11 +12,20 @@ export function isPayable(booking: BookingDetail): boolean {
   return booking.status === 'pending' && booking.cancellableUntil !== null;
 }
 
-/** Suffixe sur l'état du remboursement, quand un paiement a été reçu pour une réservation close. */
-function refundSuffix(booking: Pick<BookingDetail, 'paymentStatus'>): string {
-  if (booking.paymentStatus === 'refunded') return ' · remboursée';
-  if (booking.paymentStatus === 'succeeded') return ' · remboursement en cours';
-  return '';
+/** Ce qu'il faut pour dire où en est le remboursement d'une réservation close (ADR 0020). */
+type RefundFields = Pick<BookingDetail, 'priceCents' | 'refundDueCents' | 'refundedCents'>;
+
+/**
+ * Suffixe sur le remboursement d'une réservation close qui avait été payée : le montant dû est
+ * fixé à l'annulation, le montant remboursé arrive avec le webhook Stripe.
+ */
+function refundSuffix(booking: RefundFields): string {
+  const due = booking.refundDueCents;
+  if (due === null) return '';
+  if (due === 0) return ' · non remboursée';
+  if (booking.refundedCents < due) return ' · remboursement en cours';
+  if (due >= booking.priceCents) return ' · remboursée';
+  return ` · remboursée à ${Math.round((100 * due) / booking.priceCents)} %`;
 }
 
 /** Libellé affiché pour une réservation : statut de la réservation et, s'il y a lieu, du remboursement. */
@@ -40,7 +49,7 @@ export function bookingStatusView(booking: BookingDetail): BookingStatusView {
  * prestataire ne voit jamais les holds expirés (l'API ne les liste pas).
  */
 export function providerBookingStatusView(
-  booking: Pick<BookingDetail, 'status' | 'paymentStatus'>,
+  booking: Pick<BookingDetail, 'status'> & RefundFields,
 ): BookingStatusView {
   switch (booking.status) {
     case 'confirmed':

@@ -15,8 +15,9 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { dateTimeInZone } from '@/lib/format';
+import { formatPrice } from '@/lib/format';
 import { useBooking } from '../api';
+import { refundPolicyFor } from '../refund';
 import { isPayable } from '../status';
 import { BookingSummary } from './booking-summary';
 import { CancelBookingDialog } from './cancel-booking-dialog';
@@ -126,13 +127,30 @@ interface View {
 /** Heure locale du visiteur : l'échéance du hold le concerne lui, pas le fuseau de la ressource. */
 const localTime = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
-function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean): View {
-  const refund =
-    booking.paymentStatus === 'refunded'
+/** Où en est le remboursement d'une réservation close : montant dû, puis remboursé (webhook). */
+function refundOf(booking: BookingDetail): string {
+  const due = booking.refundDueCents;
+  if (due === null) return '';
+  if (due === 0)
+    return " Elle a été annulée moins de 24 h avant le début : elle n'est pas remboursée.";
+  const amount = formatPrice(due, booking.currency);
+  if (booking.refundedCents >= due) {
+    return due >= booking.priceCents
       ? ' Votre paiement a été remboursé.'
-      : booking.paymentStatus === 'succeeded'
-        ? ' Votre paiement est en cours de remboursement (5 à 10 jours selon votre banque).'
-        : '';
+      : ` ${amount} vous ont été remboursés.`;
+  }
+  return ` Le remboursement de ${amount} est en cours (5 à 10 jours selon votre banque).`;
+}
+
+/** Les paliers de remboursement à venir, pour une réservation payante pas encore commencée. */
+function policyOf(booking: BookingDetail): string {
+  if (booking.priceCents === 0 || !booking.cancellableUntil) return '';
+  const policy = refundPolicyFor(booking);
+  return policy ? ` ${policy}` : '';
+}
+
+function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean): View {
+  const refund = refundOf(booking);
 
   if (waiting) {
     return {
@@ -152,9 +170,9 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
           icon: <CalendarClock aria-hidden className="text-primary size-8" />,
           title: 'Réservation déplacée',
           description: `Le prestataire a déplacé cette réservation : l'horaire ci-dessous est le nouveau.${
-            booking.cancellableUntil
-              ? ` S'il ne vous convient pas, vous pouvez l'annuler en ligne jusqu'au ${dateTimeInZone(booking.cancellableUntil, booking.timezone)}.`
-              : ''
+            booking.priceCents === 0 && booking.cancellableUntil
+              ? " S'il ne vous convient pas, vous pouvez l'annuler en ligne jusqu'au début du créneau."
+              : policyOf(booking)
           }`,
           open: true,
         };
@@ -165,7 +183,7 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
         description:
           booking.priceCents === 0
             ? 'Votre créneau est réservé. Un email de confirmation vous a été envoyé.'
-            : 'Votre paiement est accepté et votre créneau est réservé. Un email de confirmation vous a été envoyé.',
+            : `Votre paiement est accepté et votre créneau est réservé. Un email de confirmation vous a été envoyé.${policyOf(booking)}`,
         open: true,
       };
     case 'pending':
@@ -173,7 +191,7 @@ function viewOf(booking: BookingDetail, waiting: boolean, waitedTooLong: boolean
         ? {
             icon: <Clock aria-hidden className="size-8" />,
             title: 'Paiement en attente',
-            description: `Votre créneau est bloqué jusqu'à ${localTime.format(new Date(booking.expiresAt))}. Sans paiement d'ici là, il sera remis à disposition.`,
+            description: `Votre créneau est bloqué jusqu'à ${localTime.format(new Date(booking.expiresAt))}. Sans paiement d'ici là, il sera remis à disposition.${policyOf(booking)}`,
             open: true,
           }
         : {
