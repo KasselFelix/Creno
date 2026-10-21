@@ -46,14 +46,26 @@
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent);
 }
 
-/* Soleil, puis lune. Halos, cratères et nuages bougent avec lui. */
+/*
+ * Soleil, puis lune. Halos, cratères et nuages bougent avec lui. `isolation` : contexte d'empilement
+ * stable (sinon il n'existe que pendant les animations) ; le disque est un pseudo-élément, les halos
+ * (z-index -1) restent derrière lui avant comme après une bascule.
+ */
 .thumb {
   position: absolute;
+  isolation: isolate;
   left: calc(var(--u) * 4);
   top: calc(var(--u) * 4);
   width: calc(var(--u) * 26);
   height: calc(var(--u) * 26);
   border-radius: 9999px;
+}
+
+.thumb::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
   background: var(--toggle-sun);
 }
 
@@ -117,9 +129,14 @@
   height: calc(var(--u) * 3);
 }
 
-/* Nuages : deux couches, à droite du soleil ; la nuit, ils sortent du cadre avec lui. */
-.cloud {
+/* Nuages : deux couches, à droite du soleil ; la nuit, ils glissent avec lui et s'effacent. */
+.clouds {
+  position: absolute;
+  inset: 0;
   z-index: 2;
+}
+
+.cloud {
   background: var(--toggle-cloud);
   animation: cloud-sway 6s ease-in-out infinite paused;
 }
@@ -129,42 +146,42 @@
   animation-delay: 1s;
 }
 
-.cloud:nth-of-type(7) {
+.cloud:nth-child(1) {
   left: calc(var(--u) * 30);
   top: calc(var(--u) * 15);
   width: calc(var(--u) * 40);
   height: calc(var(--u) * 40);
 }
 
-.cloud:nth-of-type(8) {
+.cloud:nth-child(2) {
   left: calc(var(--u) * 44);
   top: calc(var(--u) * 10);
   width: calc(var(--u) * 20);
   height: calc(var(--u) * 20);
 }
 
-.cloud:nth-of-type(9) {
+.cloud:nth-child(3) {
   left: calc(var(--u) * 18);
   top: calc(var(--u) * 24);
   width: calc(var(--u) * 30);
   height: calc(var(--u) * 30);
 }
 
-.cloud:nth-of-type(10) {
+.cloud:nth-child(4) {
   left: calc(var(--u) * 36);
   top: calc(var(--u) * 18);
   width: calc(var(--u) * 40);
   height: calc(var(--u) * 40);
 }
 
-.cloud:nth-of-type(11) {
+.cloud:nth-child(5) {
   left: calc(var(--u) * 48);
   top: calc(var(--u) * 14);
   width: calc(var(--u) * 20);
   height: calc(var(--u) * 20);
 }
 
-.cloud:nth-of-type(12) {
+.cloud:nth-child(6) {
   left: calc(var(--u) * 22);
   top: calc(var(--u) * 26);
   width: calc(var(--u) * 30);
@@ -221,7 +238,14 @@
 
 :global(.dark) .thumb {
   translate: var(--thumb-shift) 0;
+}
+
+:global(.dark) .thumb::before {
   background: var(--toggle-moon);
+}
+
+:global(.dark) .clouds {
+  opacity: 0;
 }
 
 :global(.dark) .crater {
@@ -244,6 +268,16 @@
   animation: thumb-night 0.6s ease-in-out both;
 }
 
+:global(.dark) .toggle[data-switching='to-dark'] .thumb::before,
+:global(html:not(.dark)) .toggle[data-switching='to-light'] .thumb::before {
+  animation: disk-night 0.6s ease-in-out both;
+}
+
+:global(.dark) .toggle[data-switching='to-dark'] .clouds,
+:global(html:not(.dark)) .toggle[data-switching='to-light'] .clouds {
+  animation: fade-out 0.4s ease-in-out both;
+}
+
 :global(.dark) .toggle[data-switching='to-dark'] .crater,
 :global(html:not(.dark)) .toggle[data-switching='to-light'] .crater {
   animation: fade-in 0.4s ease-in-out both;
@@ -255,7 +289,10 @@
 }
 
 /* Vers le jour : les mêmes animations, jouées à l'envers. */
-:global(html:not(.dark)) .toggle[data-switching='to-light'] :is(.track, .thumb, .crater, .stars) {
+:global(html:not(.dark))
+  .toggle[data-switching='to-light']
+  :is(.track, .thumb, .crater, .clouds, .stars),
+:global(html:not(.dark)) .toggle[data-switching='to-light'] .thumb::before {
   animation-direction: reverse;
 }
 
@@ -284,12 +321,28 @@
   from {
     translate: 0 0;
     rotate: 0deg;
-    background: var(--toggle-sun);
   }
   to {
     translate: var(--thumb-shift) 0;
     rotate: 360deg;
+  }
+}
+
+@keyframes disk-night {
+  from {
+    background: var(--toggle-sun);
+  }
+  to {
     background: var(--toggle-moon);
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 
@@ -340,7 +393,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toggle * {
+  .toggle *,
+  .toggle *::before {
     animation: none !important;
   }
 }

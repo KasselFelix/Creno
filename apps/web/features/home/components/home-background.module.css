@@ -36,6 +36,8 @@
   grid-template-columns: 4rem repeat(14, 1fr);
   gap: 0.5rem;
   width: 94rem;
+  /* Les créneaux allumés se soulèvent (`translateZ`) au-dessus du plan. */
+  transform-style: preserve-3d;
   transform: translateX(-50%) rotateX(58deg);
   transform-origin: 50% 100%;
 }

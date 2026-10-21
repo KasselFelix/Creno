@@ -16,7 +16,7 @@ const CITIES: Location[] = [
 ];
 /** Angle qui place la longitude de Paris face à nous (convention de cobe). */
 const PHI_FRANCE = Math.PI - ((2.35 * Math.PI) / 180 - Math.PI / 2);
-const THETA = 0.32;
+const THETA = 0.05;
 const SWAY = 0.45;
 const SWAY_SPEED = 0.12;
 /** Diamètre du globe : 880 px au plus, 125 % de la largeur du bloc sur mobile. */
@@ -57,7 +57,7 @@ function markers(seconds: number, still: boolean) {
   return CITIES.map((location, index) => ({
     location,
     size:
-      (index === 0 ? 0.022 : 0.016) *
+      (index === 0 ? 0.018 : 0.013) *
       (still ? 1 : 1 + 0.35 * Math.sin(seconds * 2.2 + index * 1.3)),
   }));
 }

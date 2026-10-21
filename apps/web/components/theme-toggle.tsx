@@ -49,12 +49,14 @@ export function ThemeToggle() {
           <span className={styles.crater} />
           <span className={styles.crater} />
           <span className={styles.crater} />
-          <span className={cn(styles.cloud, styles.cloudBack)} />
-          <span className={cn(styles.cloud, styles.cloudBack)} />
-          <span className={cn(styles.cloud, styles.cloudBack)} />
-          <span className={styles.cloud} />
-          <span className={styles.cloud} />
-          <span className={styles.cloud} />
+          <span className={styles.clouds}>
+            <span className={cn(styles.cloud, styles.cloudBack)} />
+            <span className={cn(styles.cloud, styles.cloudBack)} />
+            <span className={cn(styles.cloud, styles.cloudBack)} />
+            <span className={styles.cloud} />
+            <span className={styles.cloud} />
+            <span className={styles.cloud} />
+          </span>
         </span>
         <span className={styles.stars}>
           {[0, 1, 2, 3].map((star) => (
