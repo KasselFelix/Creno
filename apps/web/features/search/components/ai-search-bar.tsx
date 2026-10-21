@@ -31,6 +31,7 @@ import {
   visibleSuggestions,
 } from '../recent-searches';
 import type { SearchFilters } from '../params';
+import styles from './ai-search-bar.module.css';
 
 /** Exemples de `/search`, choisis pour donner des résultats avec les données de démo. */
 export const SEARCH_EXAMPLES = [
@@ -140,7 +141,14 @@ export function AiSearchBar({
           <Field data-invalid={!!errors.query}>
             <FieldLabel htmlFor="ai-query">Que recherchez-vous ?</FieldLabel>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <InputGroup className="h-11 sm:flex-1 md:h-9">
+              {/* Bordure lumineuse de l'IA : elle remplace l'anneau de focus du champ. */}
+              <InputGroup
+                className={cn(
+                  'h-11 sm:flex-1 md:h-9',
+                  'has-[[data-slot=input-group-control]:focus-visible]:ring-0',
+                  styles.aiField,
+                )}
+              >
                 <InputGroupAddon>
                   <Sparkles aria-hidden />
                 </InputGroupAddon>

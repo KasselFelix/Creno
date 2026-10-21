@@ -1,0 +1,346 @@
+/*
+ * Toggle jour/nuit, adapté de RiccardoRapelli sur uiverse.io (« jolly-chicken-91 », licence MIT).
+ * Le soleil glisse et tourne puis devient lune ; les nuages sortent avec lui, les étoiles descendent.
+ * 1 unité = 1/60 de la largeur du dessin (60 × 34 unités). Couleurs : jetons --toggle-* uniquement.
+ *
+ * L'état affiché suit la classe `dark` que next-themes pose sur <html> avant l'affichage : pas de
+ * flash au chargement. La bascule est jouée par des @keyframes, pas des transitions : le
+ * ThemeProvider coupe toutes les transitions pendant le changement de thème
+ * (`disableTransitionOnChange`). Le clic pose `data-switching` ; l'animation ne s'applique que si
+ * l'attribut et la classe de <html> concordent, pour qu'un changement du thème système ne laisse
+ * jamais le toggle figé dans le mauvais état.
+ */
+.toggle {
+  --u: 0.75px;
+  --thumb-shift: calc(var(--u) * 26);
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: max(2.75rem, calc(var(--u) * 60));
+  height: 2.75rem;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+
+@media (min-width: 640px) {
+  .toggle {
+    --u: 1px;
+  }
+}
+
+/* `z-index: 0` : contexte d'empilement, les halos (z-index -1) passent derrière le soleil mais
+   devant le ciel. */
+.track {
+  position: relative;
+  z-index: 0;
+  width: calc(var(--u) * 60);
+  height: calc(var(--u) * 34);
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--toggle-sky-day);
+}
+
+.toggle:focus-visible .track {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent);
+}
+
+/* Soleil, puis lune. Halos, cratères et nuages bougent avec lui. */
+.thumb {
+  position: absolute;
+  left: calc(var(--u) * 4);
+  top: calc(var(--u) * 4);
+  width: calc(var(--u) * 26);
+  height: calc(var(--u) * 26);
+  border-radius: 9999px;
+  background: var(--toggle-sun);
+}
+
+.ray,
+.crater,
+.cloud {
+  position: absolute;
+  border-radius: 9999px;
+}
+
+.ray {
+  z-index: -1;
+  background: color-mix(in oklch, var(--toggle-moon) 10%, transparent);
+}
+
+.ray:nth-child(1) {
+  left: calc(var(--u) * -8);
+  top: calc(var(--u) * -8);
+  width: calc(var(--u) * 43);
+  height: calc(var(--u) * 43);
+}
+
+.ray:nth-child(2) {
+  left: calc(var(--u) * -13);
+  top: calc(var(--u) * -13);
+  width: calc(var(--u) * 55);
+  height: calc(var(--u) * 55);
+}
+
+.ray:nth-child(3) {
+  left: calc(var(--u) * -18);
+  top: calc(var(--u) * -18);
+  width: calc(var(--u) * 60);
+  height: calc(var(--u) * 60);
+}
+
+.crater {
+  z-index: 1;
+  opacity: 0;
+  background: var(--toggle-crater);
+}
+
+.crater:nth-of-type(4) {
+  left: calc(var(--u) * 10);
+  top: calc(var(--u) * 3);
+  width: calc(var(--u) * 6);
+  height: calc(var(--u) * 6);
+}
+
+.crater:nth-of-type(5) {
+  left: calc(var(--u) * 2);
+  top: calc(var(--u) * 10);
+  width: calc(var(--u) * 10);
+  height: calc(var(--u) * 10);
+}
+
+.crater:nth-of-type(6) {
+  left: calc(var(--u) * 16);
+  top: calc(var(--u) * 18);
+  width: calc(var(--u) * 3);
+  height: calc(var(--u) * 3);
+}
+
+/* Nuages : deux couches, à droite du soleil ; la nuit, ils sortent du cadre avec lui. */
+.cloud {
+  z-index: 2;
+  background: var(--toggle-cloud);
+  animation: cloud-sway 6s ease-in-out infinite paused;
+}
+
+.cloudBack {
+  background: var(--toggle-cloud-back);
+  animation-delay: 1s;
+}
+
+.cloud:nth-of-type(7) {
+  left: calc(var(--u) * 30);
+  top: calc(var(--u) * 15);
+  width: calc(var(--u) * 40);
+  height: calc(var(--u) * 40);
+}
+
+.cloud:nth-of-type(8) {
+  left: calc(var(--u) * 44);
+  top: calc(var(--u) * 10);
+  width: calc(var(--u) * 20);
+  height: calc(var(--u) * 20);
+}
+
+.cloud:nth-of-type(9) {
+  left: calc(var(--u) * 18);
+  top: calc(var(--u) * 24);
+  width: calc(var(--u) * 30);
+  height: calc(var(--u) * 30);
+}
+
+.cloud:nth-of-type(10) {
+  left: calc(var(--u) * 36);
+  top: calc(var(--u) * 18);
+  width: calc(var(--u) * 40);
+  height: calc(var(--u) * 40);
+}
+
+.cloud:nth-of-type(11) {
+  left: calc(var(--u) * 48);
+  top: calc(var(--u) * 14);
+  width: calc(var(--u) * 20);
+  height: calc(var(--u) * 20);
+}
+
+.cloud:nth-of-type(12) {
+  left: calc(var(--u) * 22);
+  top: calc(var(--u) * 26);
+  width: calc(var(--u) * 30);
+  height: calc(var(--u) * 30);
+}
+
+/* Étoiles, à gauche : cachées au-dessus du cadre le jour. */
+.stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  translate: 0 calc(var(--u) * -32);
+}
+
+.star {
+  position: absolute;
+  height: auto;
+  aspect-ratio: 1;
+  fill: var(--toggle-moon);
+  animation: star-twinkle 2s ease-in-out infinite paused;
+}
+
+.star:nth-child(1) {
+  left: calc(var(--u) * 3);
+  top: calc(var(--u) * 2);
+  width: calc(var(--u) * 20);
+  animation-delay: 0.3s;
+}
+
+.star:nth-child(2) {
+  left: calc(var(--u) * 3);
+  top: calc(var(--u) * 16);
+  width: calc(var(--u) * 6);
+}
+
+.star:nth-child(3) {
+  left: calc(var(--u) * 10);
+  top: calc(var(--u) * 20);
+  width: calc(var(--u) * 12);
+  animation-delay: 0.6s;
+}
+
+.star:nth-child(4) {
+  left: calc(var(--u) * 18);
+  top: 0;
+  width: calc(var(--u) * 18);
+  animation-delay: 1.3s;
+}
+
+/* Nuit. */
+:global(.dark) .track {
+  background: var(--toggle-sky-night);
+}
+
+:global(.dark) .thumb {
+  translate: var(--thumb-shift) 0;
+  background: var(--toggle-moon);
+}
+
+:global(.dark) .crater {
+  opacity: 1;
+}
+
+:global(.dark) .stars {
+  opacity: 1;
+  translate: 0 0;
+}
+
+/* Bascule, seulement quand l'attribut posé au clic concorde avec la classe de <html>. */
+:global(.dark) .toggle[data-switching='to-dark'] .track,
+:global(html:not(.dark)) .toggle[data-switching='to-light'] .track {
+  animation: sky-night 0.4s ease-in-out both;
+}
+
+:global(.dark) .toggle[data-switching='to-dark'] .thumb,
+:global(html:not(.dark)) .toggle[data-switching='to-light'] .thumb {
+  animation: thumb-night 0.6s ease-in-out both;
+}
+
+:global(.dark) .toggle[data-switching='to-dark'] .crater,
+:global(html:not(.dark)) .toggle[data-switching='to-light'] .crater {
+  animation: fade-in 0.4s ease-in-out both;
+}
+
+:global(.dark) .toggle[data-switching='to-dark'] .stars,
+:global(html:not(.dark)) .toggle[data-switching='to-light'] .stars {
+  animation: stars-drop 0.4s ease-in-out both;
+}
+
+/* Vers le jour : les mêmes animations, jouées à l'envers. */
+:global(html:not(.dark)) .toggle[data-switching='to-light'] :is(.track, .thumb, .crater, .stars) {
+  animation-direction: reverse;
+}
+
+/* Ambiance au survol ou au focus seulement : au repos, rien ne bouge (WCAG 2.2.2). */
+@media (hover: hover) {
+  .toggle:hover :is(.cloud, .star) {
+    animation-play-state: running;
+  }
+}
+
+.toggle:focus-visible :is(.cloud, .star) {
+  animation-play-state: running;
+}
+
+@keyframes sky-night {
+  from {
+    background: var(--toggle-sky-day);
+  }
+  to {
+    background: var(--toggle-sky-night);
+  }
+}
+
+/* `rotate-center` du modèle (appelée mais jamais définie) : un tour complet pendant le glissement. */
+@keyframes thumb-night {
+  from {
+    translate: 0 0;
+    rotate: 0deg;
+    background: var(--toggle-sun);
+  }
+  to {
+    translate: var(--thumb-shift) 0;
+    rotate: 360deg;
+    background: var(--toggle-moon);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes stars-drop {
+  from {
+    opacity: 0;
+    translate: 0 calc(var(--u) * -32);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes cloud-sway {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  40% {
+    translate: calc(var(--u) * 4) 0;
+  }
+  80% {
+    translate: calc(var(--u) * -4) 0;
+  }
+}
+
+@keyframes star-twinkle {
+  0%,
+  100% {
+    scale: 1;
+  }
+  40% {
+    scale: 1.2;
+  }
+  80% {
+    scale: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle * {
+    animation: none !important;
+  }
+}

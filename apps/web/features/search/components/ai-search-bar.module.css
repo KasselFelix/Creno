@@ -1,0 +1,108 @@
+/*
+ * Bordure lumineuse du champ de recherche IA : un dégradé conique aux couleurs de l'IA (--ai-1…4)
+ * qui tourne, en anneau de 2 px par-dessus la bordure (::before), avec un halo flouté autour
+ * (::after). Repos : bordure normale ; survol : anneau léger ; focus : anneau plein et halo ;
+ * analyse en cours : rotation rapide. En erreur, la bordure `destructive` reprend la main.
+ * L'anneau contraste à 3:1 au moins avec le fond : il remplace l'anneau de focus du champ.
+ */
+@property --ai-angle {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+
+/* `isolation` : le halo (z-index -1) passe derrière le champ sans glisser sous ses ancêtres. */
+.aiField {
+  isolation: isolate;
+}
+
+.aiField::before,
+.aiField::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(
+    from var(--ai-angle),
+    var(--ai-1),
+    var(--ai-2),
+    var(--ai-3),
+    var(--ai-4),
+    var(--ai-1)
+  );
+  /* Seul l'alpha du masque compte : il garde le contour et retire l'intérieur du champ. */
+  mask:
+    linear-gradient(black 0 0) content-box exclude,
+    linear-gradient(black 0 0);
+  transition: opacity 300ms ease;
+}
+
+/* Anneau de 2 px qui recouvre la bordure de 1 px : aucun décalage de mise en page. */
+.aiField::before {
+  inset: -1px;
+  padding: 2px;
+  border-radius: calc(var(--radius) + 1px);
+}
+
+/* Halo : le même dégradé, flouté, autour du champ seulement. */
+.aiField::after {
+  z-index: -1;
+  inset: -10px;
+  padding: 10px;
+  border-radius: calc(var(--radius) + 10px);
+  filter: blur(8px);
+}
+
+@media (hover: hover) {
+  .aiField:hover::before {
+    opacity: 0.6;
+  }
+
+  .aiField:hover {
+    animation: ai-spin 6s linear infinite;
+  }
+}
+
+.aiField:focus-within::before {
+  opacity: 1;
+}
+
+.aiField:focus-within::after {
+  opacity: 0.35;
+}
+
+.aiField:focus-within {
+  animation: ai-spin 4s linear infinite;
+}
+
+.aiField:has([aria-busy='true'])::before {
+  opacity: 1;
+}
+
+.aiField:has([aria-busy='true'])::after {
+  opacity: 0.6;
+}
+
+.aiField:has([aria-busy='true']) {
+  animation: ai-spin 1.2s linear infinite;
+}
+
+.aiField:has([aria-invalid='true'])::before,
+.aiField:has([aria-invalid='true'])::after {
+  display: none;
+}
+
+@keyframes ai-spin {
+  to {
+    --ai-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aiField,
+  .aiField:hover,
+  .aiField:focus-within,
+  .aiField:has([aria-busy='true']) {
+    animation: none;
+  }
+}

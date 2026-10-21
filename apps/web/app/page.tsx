@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { SiteHeader } from '@/components/site-header';
 import { ApiStatusCard, ApiStatusCardSkeleton } from '@/features/health/api-status-card';
+import { HomeBackground } from '@/features/home/components/home-background';
 import { HomeAiSearch } from '@/features/search/components/home-ai-search';
 
 export default function HomePage() {
@@ -20,6 +21,7 @@ export default function HomePage() {
         <div className="mx-auto w-full max-w-3xl">
           <HomeAiSearch />
         </div>
+        <HomeBackground />
         {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API. */}
         {process.env.NODE_ENV === 'development' && (
           <Suspense fallback={<ApiStatusCardSkeleton />}>
