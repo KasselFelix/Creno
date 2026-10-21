@@ -4,6 +4,15 @@ export function formatPrice(cents: number, currency: string): string {
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency }).format(cents / 100);
 }
 
+/** Prix sans centimes quand il tombe juste : 3000 → « 30 € », 1250 → « 12,50 € » (jamais arrondi). */
+export function formatPriceShort(cents: number, currency: string): string {
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency,
+    trailingZeroDisplay: 'stripIfInteger',
+  }).format(cents / 100);
+}
+
 /** 30 → « 30 min », 60 → « 1 h », 90 → « 1 h 30 ». */
 export function formatDuration(minutes: number): string {
   const hours = Math.floor(minutes / 60);

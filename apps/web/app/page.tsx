@@ -8,16 +8,16 @@ export default function HomePage() {
     <>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-16">
-        <div className="flex max-w-2xl flex-col gap-4">
+        <div className="mx-auto flex max-w-2xl flex-col gap-4 text-center">
           <h1 className="text-4xl font-semibold tracking-tight">
             Réservez le bon créneau, au bon endroit.
           </h1>
-          <p className="text-muted-foreground text-lg">
-            Salles, coiffeurs, terrains, photographes : trouvez un prestataire sur la carte,
-            choisissez un créneau libre et payez en ligne.
+          <p className="text-muted-foreground text-left text-lg">
+            Salles, coiffeurs, terrains, photographes : trouvez votre prestataire, choisissez un
+            créneau libre, réservez et payez en ligne.
           </p>
         </div>
-        <div className="max-w-3xl">
+        <div className="mx-auto w-full max-w-3xl">
           <HomeAiSearch />
         </div>
         {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API. */}

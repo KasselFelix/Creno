@@ -5,6 +5,7 @@ import {
   formatLocalDate,
   formatPhone,
   formatPrice,
+  formatPriceShort,
   timeInZone,
   todayInZone,
 } from './format';
@@ -12,6 +13,12 @@ import {
 describe('format', () => {
   it('formate un prix en centimes', () => {
     expect(formatPrice(4500, 'EUR').replace(/\s/g, ' ')).toBe('45,00 €');
+  });
+
+  it('formate un prix court : sans centimes seulement quand il tombe juste', () => {
+    expect(
+      [3000, 1250, 1205, 120000].map((cents) => formatPriceShort(cents, 'EUR').replace(/\s/g, ' ')),
+    ).toEqual(['30 €', '12,50 €', '12,05 €', '1 200 €']);
   });
 
   it('formate une durée', () => {

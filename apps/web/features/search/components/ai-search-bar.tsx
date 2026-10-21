@@ -104,7 +104,7 @@ export function AiSearchBar({
           className={framed ? 'rounded-lg border p-4 shadow-sm' : undefined}
         >
           <Field data-invalid={!!errors.query}>
-            <FieldLabel htmlFor="ai-query">Décrivez ce que vous cherchez</FieldLabel>
+            <FieldLabel htmlFor="ai-query">Que recherchez-vous ?</FieldLabel>
             <div className="flex flex-col gap-2 sm:flex-row">
               <InputGroup className="h-11 sm:flex-1 md:h-9">
                 <InputGroupAddon>
@@ -161,7 +161,6 @@ export function AiSearchBar({
           query !== '' && 'invisible',
         )}
       >
-        <span className="text-muted-foreground shrink-0 text-sm">Par exemple :</span>
         {examples.map((example) => (
           <Button
             key={example}
