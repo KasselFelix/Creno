@@ -134,6 +134,17 @@
  * La feuille de style de mapbox-gl est chargée après celle-ci : le préfixe `.mapboxgl-map` donne à
  * ces règles une spécificité plus forte, sinon celles de Mapbox l'emportent.
  */
+/*
+ * Empilement : le conteneur Mapbox ne crée pas de contexte d'empilement, le z-index des pastilles
+ * (0 à 2) les ferait passer devant ce qui entoure la carte (bouton « Rechercher dans cette zone »).
+ * La popup reste au-dessus de toutes les pastilles.
+ */
+.mapboxgl-map {
+  isolation: isolate;
+}
+.mapboxgl-map .mapboxgl-popup {
+  z-index: 3;
+}
 .mapboxgl-map .mapboxgl-popup-content {
   background: var(--popover);
   color: var(--popover-foreground);

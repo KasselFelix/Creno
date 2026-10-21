@@ -1,7 +1,8 @@
 'use client';
 
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapPin, Search } from 'lucide-react';
+import type { Marker as MapboxMarker } from 'mapbox-gl';
+import { Search } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -15,13 +16,25 @@ import {
 } from 'react-map-gl/mapbox';
 import { roundCoordinate, type SearchProvider, type TimeRange } from '@creno/shared';
 import { Button } from '@/components/ui/button';
+import { categoryIcons } from '@/features/providers/category-icons';
 import { categoryLabels } from '@/features/providers/labels';
-import { formatPrice } from '@/lib/format';
+import { formatPriceShort } from '@/lib/format';
+import { markerLayer } from '../map-markers';
 import { describeFreeSlots, providerHref } from '../params';
 
 // Vue d'ensemble de la France métropolitaine, quand il n'y a ni lieu ni résultat.
 const FRANCE = { longitude: 2.5, latitude: 46.6, zoom: 4.6 };
 const SINGLE_POINT_ZOOM = 13;
+
+/**
+ * Mapbox pose `role="img"` et `aria-label="Map marker"` sur l'élément de chaque marqueur : les enfants
+ * d'une image sont ignorés des lecteurs d'écran, qui entendraient « Map marker » au lieu du bouton.
+ */
+function exposeMarkerButton(marker: MapboxMarker | null) {
+  const element = marker?.getElement();
+  element?.removeAttribute('role');
+  element?.removeAttribute('aria-label');
+}
 
 export interface SearchMapProps {
   token: string;
@@ -33,6 +46,9 @@ export interface SearchMapProps {
   center?: { lat: number; lng: number };
   activeId: string | null;
   onActiveChange: (id: string | null) => void;
+  /** Prestataire choisi sur la carte : sa popup est ouverte et sa carte de la liste mise en évidence. */
+  selectedId: string | null;
+  onSelectedChange: (id: string | null) => void;
   /** Le visiteur demande une recherche autour du centre actuel de la carte. */
   onSearchArea: (center: { lat: number; lng: number }) => void;
 }
@@ -46,12 +62,13 @@ export default function SearchMap({
   center,
   activeId,
   onActiveChange,
+  selectedId,
+  onSelectedChange,
   onSearchArea,
 }: SearchMapProps) {
   const { resolvedTheme } = useTheme();
   const mapRef = useRef<MapRef>(null);
   const [loaded, setLoaded] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   // Résultats affichés au moment où le visiteur a déplacé la carte : tant que ce sont les mêmes, on
   // propose « Rechercher dans cette zone ». Une nouvelle recherche fait disparaître le bouton.
   const [movedOn, setMovedOn] = useState<SearchProvider[] | null>(null);
@@ -100,7 +117,12 @@ export default function SearchMap({
   };
 
   return (
-    <div className="relative size-full">
+    <div
+      className="relative size-full"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && selectedId) onSelectedChange(null);
+      }}
+    >
       <MapboxMap
         ref={mapRef}
         mapboxAccessToken={token}
@@ -116,39 +138,45 @@ export default function SearchMap({
         onResize={() => {
           if (!moved) fit();
         }}
-        onClick={() => setSelectedId(null)}
+        onClick={() => onSelectedChange(null)}
       >
         {/* En haut : la carte peut dépasser le bas de l'écran, le zoom doit rester visible. */}
         <NavigationControl position="top-right" showCompass={false} />
         {items.map((provider) => {
-          const active = provider.id === activeId || provider.id === selectedId;
+          const { active, zIndex } = markerLayer(provider.id, { activeId, selectedId });
+          const isSelected = provider.id === selectedId;
+          const Icon = categoryIcons[provider.category];
+          const price = formatPriceShort(provider.minPriceCents, provider.currency);
           return (
             <Marker
               key={provider.id}
+              ref={exposeMarkerButton}
               longitude={provider.longitude}
               latitude={provider.latitude}
               anchor="center"
-              style={{ zIndex: active ? 1 : 0 }}
+              style={{ zIndex }}
               onClick={(event) => {
                 // Sinon le clic atteint la carte, qui referme l'infobulle.
                 event.originalEvent.stopPropagation();
-                setSelectedId(provider.id);
+                onSelectedChange(isSelected ? null : provider.id);
               }}
             >
+              {/* La pastille est le bouton lui-même : une marge invisible prendrait les clics des
+                  pastilles voisines. L'échelle s'applique ici, Mapbox positionne le marqueur avec
+                  `transform`. */}
               <button
                 type="button"
-                aria-label={`${provider.name}, ${categoryLabels[provider.category]}`}
-                aria-pressed={provider.id === selectedId}
+                aria-label={`${provider.name}, ${categoryLabels[provider.category]}, à partir de ${price}`}
+                aria-pressed={isSelected}
                 data-active={active}
-                className="group focus-visible:ring-ring/50 flex size-11 cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-3"
+                className="border-foreground/20 bg-background text-foreground focus-visible:ring-ring/50 data-[active=true]:border-primary data-[active=true]:bg-primary data-[active=true]:text-primary-foreground flex h-8 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-sm font-semibold whitespace-nowrap tabular-nums shadow-md outline-none focus-visible:ring-3 data-[active=true]:scale-110 motion-safe:transition-transform"
                 onMouseEnter={() => onActiveChange(provider.id)}
                 onMouseLeave={() => onActiveChange(null)}
                 onFocus={() => onActiveChange(provider.id)}
                 onBlur={() => onActiveChange(null)}
               >
-                <span className="border-foreground/20 bg-background text-foreground group-data-[active=true]:border-background group-data-[active=true]:bg-primary group-data-[active=true]:text-primary-foreground flex size-8 items-center justify-center rounded-full border-2 shadow-md transition-transform group-data-[active=true]:scale-125">
-                  <MapPin aria-hidden className="size-4" />
-                </span>
+                <Icon aria-hidden className="size-4" />
+                {price}
               </button>
             </Marker>
           );
@@ -161,14 +189,14 @@ export default function SearchMap({
             offset={20}
             closeButton={false}
             closeOnClick={false}
-            onClose={() => setSelectedId(null)}
+            onClose={() => onSelectedChange(null)}
           >
             <div className="flex flex-col gap-1">
               <span className="text-muted-foreground text-xs">
                 {categoryLabels[selected.category]}
               </span>
               <span className="font-medium">{selected.name}</span>
-              <span>À partir de {formatPrice(selected.minPriceCents, selected.currency)}</span>
+              <span>À partir de {formatPriceShort(selected.minPriceCents, selected.currency)}</span>
               {date && selected.availableSlots !== null && (
                 <span>{describeFreeSlots(selected.availableSlots, date, timeRange)}</span>
               )}

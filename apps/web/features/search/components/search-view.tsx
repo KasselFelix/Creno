@@ -38,9 +38,10 @@ import {
   type SearchFilters,
 } from '../params';
 import { handoffFor, remember } from '../handoff';
+import { keepIfListed } from '../map-markers';
 import { useAroundMe } from '../use-around-me';
 import { AiSearchBar, InterpretationSummary, SEARCH_EXAMPLES } from './ai-search-bar';
-import { ResultList, ResultListSkeleton } from './result-list';
+import { ResultList, ResultListSkeleton, resultElementId } from './result-list';
 import { SearchFilterFields } from './search-filters';
 
 // mapbox-gl a besoin du navigateur (WebGL, `window`) : jamais rendu côté serveur.
@@ -51,6 +52,14 @@ const SearchMap = dynamic(() => import('./search-map'), {
 
 const NO_ITEMS: SearchProvider[] = [];
 const DESKTOP = '(min-width: 1024px)';
+
+/** Fait défiler la page jusqu'à la carte d'un prestataire dans la liste (rien si elle est visible). */
+function revealResult(providerId: string) {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document
+    .getElementById(resultElementId(providerId))
+    ?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+}
 
 type View = 'list' | 'map';
 
@@ -89,6 +98,15 @@ export function SearchView() {
       : null;
 
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Nouveaux résultats : on oublie le prestataire survolé ou choisi s'il n'y figure plus (une carte
+  // démontée sous la souris ne déclenche pas `mouseleave`), et il ne revient pas s'il réapparaît.
+  const [listedItems, setListedItems] = useState(items);
+  if (items !== listedItems) {
+    setListedItems(items);
+    setActiveId((id) => keepIfListed(id, items));
+    setSelectedId((id) => keepIfListed(id, items));
+  }
   const [view, setView] = useState<View>('list');
   const [mapOpened, setMapOpened] = useState(false);
   const { aroundMe, locating } = useAroundMe();
@@ -99,6 +117,12 @@ export function SearchView() {
   const hasFilters =
     filters.category !== undefined || filters.priceMax !== undefined || hasTimeRange(filters);
   const noTime = { timeFrom: undefined, timeTo: undefined };
+
+  function select(id: string | null) {
+    setSelectedId(id);
+    // Sur mobile, la liste est masquée derrière l'onglet Carte : on la fera défiler à son retour.
+    if (id && isDesktop) revealResult(id);
+  }
 
   function locate() {
     void aroundMe(filters).then((next) => next && setFilters(next));
@@ -193,6 +217,11 @@ export function SearchView() {
           onValueChange={(value) => {
             setView(value as View);
             if (value === 'map') setMapOpened(true);
+            // La liste s'affiche au rendu suivant : on la fait défiler ensuite.
+            if (value === 'list' && selectedId) {
+              const id = selectedId;
+              requestAnimationFrame(() => revealResult(id));
+            }
           }}
           className="lg:hidden"
         >
@@ -286,6 +315,7 @@ export function SearchView() {
                   date={resultsDate}
                   timeRange={resultsTime}
                   activeId={activeId}
+                  selectedId={selectedId}
                   onActiveChange={setActiveId}
                 />
               </div>
@@ -323,6 +353,8 @@ export function SearchView() {
                 center={filters.center}
                 activeId={activeId}
                 onActiveChange={setActiveId}
+                selectedId={selectedId}
+                onSelectedChange={select}
                 onSearchArea={(center) =>
                   setFilters({ ...filters, center, place: PLACE_MAP_POINT })
                 }
