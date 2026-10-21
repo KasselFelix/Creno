@@ -70,6 +70,11 @@ export default function PrivacyPage() {
           </ul>
           <p className="text-muted-foreground">
             Seuls des cookies de session sont utilisés (connexion), sans aucun traceur publicitaire.
+            Votre navigateur garde aussi, en stockage local, le thème choisi et vos 3 dernières
+            recherches en langage naturel comprises (celles où un filtre a été reconnu), pour vous
+            les reproposer. Elles restent jusqu’à ce que vous les retiriez avec leur croix, sous la
+            barre de recherche, ou que vous effaciez les données du site ; Creno ne les lit pas, et
+            elles ne repartent (vers Mistral AI, dans l’UE) que si vous les relancez.
           </p>
         </section>
 

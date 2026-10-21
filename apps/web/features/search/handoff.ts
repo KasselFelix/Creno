@@ -9,9 +9,10 @@ export interface Handoff {
   applied: SearchFilters;
 }
 
-// En mémoire seulement (module du navigateur) : la phrase ne passe ni par l'URL, ni par un stockage
-// du navigateur. Un rechargement la perd ; elle survit à une navigation (accueil → `/search`,
-// bouton « Précédent »). Jamais écrite côté serveur : `remember` n'est appelé que par un événement.
+// En mémoire seulement (module du navigateur) : le relais ne passe ni par l'URL, ni par un stockage
+// du navigateur. Un rechargement le perd ; il survit à une navigation (accueil → `/search`, bouton
+// « Précédent »). Jamais écrit côté serveur : `remember` n'est appelé que par un événement. La phrase
+// seule peut aussi figurer dans les recherches récentes (`recent-searches.ts`, ADR 0019).
 let last: Handoff | null = null;
 
 export function remember(handoff: Handoff): void {
