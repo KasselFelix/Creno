@@ -48,7 +48,7 @@ describe('isWorthRemembering', () => {
 
   it("oublie une phrase sans filtre, ou qui ne cite qu'un rayon ou une plage sans jour", () => {
     expect(isWorthRemembering(response({}))).toBe(false);
-    expect(isWorthRemembering(response({ radiusKm: 20 }))).toBe(false);
+    expect(isWorthRemembering(response({ radiusKm: 25 }))).toBe(false);
     expect(isWorthRemembering(response({ timeFrom: '18:00' }))).toBe(false);
   });
 });
