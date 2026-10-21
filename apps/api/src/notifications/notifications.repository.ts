@@ -67,6 +67,8 @@ export interface SendContext {
   providerName: string;
   providerSlug: string;
   paidCents: number | null;
+  refundDueCents: number | null;
+  rescheduledAt: Date | null;
 }
 
 const recipient = alias(users, 'recipient');
@@ -218,6 +220,8 @@ export class NotificationsRepository {
         providerName: providers.name,
         providerSlug: providers.slug,
         paidCents: payments.amountCents,
+        refundDueCents: bookings.refundDueCents,
+        rescheduledAt: bookings.rescheduledAt,
       })
       .from(notifications)
       .innerJoin(recipient, eq(recipient.id, notifications.recipientId))

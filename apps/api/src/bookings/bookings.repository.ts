@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import {
   bookings,
   type Database,
@@ -47,7 +47,11 @@ export interface BookingDetailRow extends BookingRow {
   providerStripeAccountId: string | null;
   providerChargesEnabled: boolean;
   paymentStatus: PaymentStatus | null;
+  /** Montant encaissé (`payments.amount_cents`) ; `null` sans paiement. */
+  paidCents: number | null;
   refundedCents: number | null;
+  /** Montant dû au client par l'annulation (ADR 0020) ; `null` sans paiement. */
+  refundDueCents: number | null;
   paymentIntentId: string | null;
   rescheduledAt: Date | null;
   rescheduleCount: number;
@@ -85,7 +89,9 @@ const detailColumns = {
   providerStripeAccountId: providers.stripeAccountId,
   providerChargesEnabled: providers.stripeChargesEnabled,
   paymentStatus: payments.status,
+  paidCents: payments.amountCents,
   refundedCents: payments.refundedCents,
+  refundDueCents: bookings.refundDueCents,
   paymentIntentId: payments.stripePaymentIntentId,
   rescheduledAt: bookings.rescheduledAt,
   rescheduleCount: bookings.rescheduleCount,
@@ -317,13 +323,19 @@ export class BookingsRepository {
   }
 
   /**
-   * Verrouille la réservation avant de la déplacer : une annulation concurrente attend la fin de
-   * la transaction, et le statut relu ici est celui qui sera modifié.
+   * Verrouille la réservation avant de la déplacer ou de l'annuler : un déplacement ou une
+   * annulation concurrente attend la fin de la transaction, et le statut relu ici est celui qui
+   * sera modifié. `waitMs` borne l'attente du verrou (`lock_timeout`, erreur 55P03 au-delà).
    */
-  async lockForReschedule(
+  async lockForUpdate(
     id: string,
     tx: Database,
+    waitMs?: number,
   ): Promise<{ status: BookingStatus; start: Date } | undefined> {
+    // `SET LOCAL` ne vaut que pour cette transaction ; `SET` n'accepte pas de paramètre lié.
+    if (waitMs !== undefined) {
+      await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${Math.trunc(waitMs)}ms'`));
+    }
     const [row] = await tx
       .select({
         status: bookings.status,
@@ -418,21 +430,25 @@ export class BookingsRepository {
   async confirmFree(id: string, tx: Database): Promise<boolean> {
     const rows = await tx
       .update(bookings)
-      .set({ status: 'confirmed', expiresAt: null, confirmedAt: sql`now()` })
+      .set({ status: 'confirmed', expiresAt: null, confirmedAt: sql`now()`, refundDueCents: null })
       .where(and(eq(bookings.id, id), activeHold, eq(bookings.priceCents, 0)))
       .returning({ id: bookings.id });
     return rows.length > 0;
   }
 
-  /** Annule une réservation si elle a encore le statut attendu. Renvoie vrai si la ligne a changé. */
+  /**
+   * Annule une réservation si elle a encore le statut attendu, avec le montant dû au client
+   * (`null` sans paiement). Renvoie vrai si la ligne a changé.
+   */
   async cancel(
     id: string,
     from: 'pending' | 'confirmed',
     tx: Database = this.handle.db,
+    refundDueCents: number | null = null,
   ): Promise<boolean> {
     const rows = await tx
       .update(bookings)
-      .set({ status: 'cancelled', cancelledAt: sql`now()`, expiresAt: null })
+      .set({ status: 'cancelled', cancelledAt: sql`now()`, expiresAt: null, refundDueCents })
       .where(and(eq(bookings.id, id), eq(bookings.status, from)))
       .returning({ id: bookings.id });
     return rows.length > 0;
@@ -484,8 +500,21 @@ export class BookingsRepository {
         expiresAt: null,
         stripeCheckoutSessionId: sessionId,
         confirmedAt: sql`now()`,
+        // Une réservation active n'a pas de montant dû (contrainte `bookings_refund_due_valid`).
+        refundDueCents: null,
       })
       .where(eq(bookings.id, id));
+  }
+
+  /**
+   * Paiement arrivé trop tard, déjà remboursé : il est dû en entier au client. Sans effet si la
+   * réservation n'est plus annulée ni expirée (la contrainte `bookings_refund_due_valid` l'exige).
+   */
+  async recordLateRefund(id: string, refundDueCents: number, tx: Database): Promise<void> {
+    await tx
+      .update(bookings)
+      .set({ refundDueCents })
+      .where(and(eq(bookings.id, id), inArray(bookings.status, ['cancelled', 'expired'])));
   }
 
   /** Session Checkout expirée sans paiement : le hold est libéré. Renvoie vrai si la ligne a changé. */

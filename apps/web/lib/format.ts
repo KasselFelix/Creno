@@ -41,6 +41,17 @@ export function dateTimeInZone(iso: string, timeZone: string): string {
   }).format(new Date(iso));
 }
 
+/** Jour et heure d'un instant dans le fuseau donné, sans année ni virgule : « mer. 28 oct. à 10:00 ». */
+export function dayAtTimeInZone(iso: string, timeZone: string): string {
+  const day = new Intl.DateTimeFormat('fr-FR', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone,
+  }).format(new Date(iso));
+  return `${day} à ${timeInZone(iso, timeZone)}`;
+}
+
 /** Date du jour (`YYYY-MM-DD`) dans le fuseau donné : « aujourd'hui » pour la ressource. */
 export function todayInZone(timeZone: string, now = new Date()): string {
   // Le format `en-CA` est AAAA-MM-JJ.

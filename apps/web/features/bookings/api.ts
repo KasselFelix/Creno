@@ -7,6 +7,7 @@ import {
   bookingListSchema,
   bookingSchema,
   type BookingsQuery,
+  type CancelBookingInput,
   checkoutResponseSchema,
   type CreateBookingInput,
 } from '@creno/shared';
@@ -91,12 +92,17 @@ export function useResumeCheckout() {
   });
 }
 
+/**
+ * Annulation par le client. `expectedRefundCents` est le montant affiché : si le palier a changé
+ * depuis, l'API refuse (409 `REFUND_AMOUNT_CHANGED`) et renvoie le nouveau montant.
+ */
 export function useCancelBooking() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (bookingId: string) =>
+    mutationFn: ({ bookingId, ...body }: { bookingId: string } & CancelBookingInput) =>
       apiFetch(`/v1/bookings/${bookingId}/cancel`, {
         method: 'POST',
+        body,
         schema: bookingDetailSchema,
       }),
     onSuccess: (booking) => {
@@ -106,5 +112,11 @@ export function useCancelBooking() {
         queryClient.invalidateQueries({ queryKey: ['availability', booking.resourceId] }),
       ]);
     },
+    // Refusée (créneau commencé, déjà annulée, palier changé) : la réservation a pu changer, on la relit.
+    onError: (_error, { bookingId }) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['bookings', 'list'] }),
+        queryClient.invalidateQueries({ queryKey: bookingKeys.detail(bookingId) }),
+      ]),
   });
 }

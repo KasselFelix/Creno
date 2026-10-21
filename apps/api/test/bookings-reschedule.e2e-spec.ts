@@ -180,21 +180,27 @@ describe('bookings : déplacement par le prestataire', () => {
       expect(logged('booking.rescheduled')).toMatchObject([{ expiredHoldsReleased: 1 }]);
     });
 
-    it('une réservation déplacée laisse au client 24 h pour annuler et être remboursé, sans dépasser le début', async () => {
+    /** Place le créneau `hours` heures après maintenant, et son déplacement `movedHoursAgo` avant. */
+    const moveTo = (id: string, hours: number, movedHoursAgo?: number) =>
+      db()
+        .update(bookings)
+        .set({
+          during: sql`tstzrange(now() + make_interval(hours => ${hours}), now() + make_interval(hours => ${hours + 1}), '[)')`,
+          ...(movedHoursAgo === undefined
+            ? {}
+            : { rescheduledAt: sql`now() - make_interval(hours => ${movedHoursAgo})` }),
+        })
+        .where(eq(bookings.id, id));
+    const refundedAmounts = () => gateway.refund.mock.calls.map(([input]) => input.amountCents);
+
+    it('une réservation déplacée laisse au client 24 h de remboursement intégral, sans dépasser le début', async () => {
       const { agent } = await registerAs(app, 'customer');
       const moved = await confirmedBooking(agent);
       const untouched = await confirmedBooking(agent, instantIn(DAY, '09:00'));
       await reschedule(provider.agent, moved.id, instantIn(DAY + 1, '10:00')).expect(200);
-      // Les deux créneaux commencent dans moins de 24 h : la limite habituelle est dépassée.
-      const startsIn = async (id: string, hours: number) =>
-        db()
-          .update(bookings)
-          .set({
-            during: sql`tstzrange(now() + make_interval(hours => ${hours}), now() + make_interval(hours => ${hours + 1}), '[)')`,
-          })
-          .where(eq(bookings.id, id));
-      await startsIn(moved.id, 2);
-      await startsIn(untouched.id, 3);
+      // Les deux créneaux commencent dans moins de 24 h : sans déplacement, plus de remboursement.
+      await moveTo(moved.id, 2);
+      await moveTo(untouched.id, 3);
 
       const detail = bookingDetailSchema.parse(
         (await agent.get(`/v1/bookings/${moved.id}`).expect(200)).body,
@@ -202,50 +208,41 @@ describe('bookings : déplacement par le prestataire', () => {
       expect(detail.rescheduledAt).not.toBeNull();
       expect(new Date(detail.cancellableUntil!).getTime()).toBe(new Date(detail.start).getTime());
 
-      expectCode(
-        await agent.post(`/v1/bookings/${untouched.id}/cancel`).expect(409),
-        'CANCELLATION_NOT_ALLOWED',
-      );
+      await agent.post(`/v1/bookings/${untouched.id}/cancel`).expect(200);
       await agent.post(`/v1/bookings/${moved.id}/cancel`).expect(200);
-      expect((await rowOf(moved.id)).status).toBe('cancelled');
-      expect(gateway.refund).toHaveBeenCalledTimes(1);
+      expect(refundedAmounts()).toEqual([0, 4500]);
+      expect((await rowOf(untouched.id)).refundDueCents).toBe(0);
+      expect((await rowOf(moved.id)).refundDueCents).toBe(4500);
     });
 
-    it('délai de décision écoulé (déplacée il y a 2 jours) : la règle des 24 h reprend', async () => {
+    it('délai de décision écoulé (déplacée il y a 2 jours), commence dans 3 h : annulable, sans remboursement', async () => {
       const { agent } = await registerAs(app, 'customer');
       const booking = await confirmedBooking(agent);
       await reschedule(provider.agent, booking.id, instantIn(DAY + 1, '10:00')).expect(200);
-      // Déplacée il y a 2 jours, commence dans 3 h : plus de 24 h ont passé depuis le déplacement.
-      await db()
-        .update(bookings)
-        .set({
-          rescheduledAt: sql`now() - interval '2 days'`,
-          during: sql`tstzrange(now() + interval '3 hours', now() + interval '4 hours', '[)')`,
-        })
-        .where(eq(bookings.id, booking.id));
+      await moveTo(booking.id, 3, 48);
 
       const detail = bookingDetailSchema.parse(
         (await agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
       );
-      expect(detail.cancellableUntil).toBeNull();
-      expectCode(
-        await agent.post(`/v1/bookings/${booking.id}/cancel`).expect(409),
-        'CANCELLATION_NOT_ALLOWED',
-      );
-      expect(gateway.refund).not.toHaveBeenCalled();
+      expect(detail.cancellableUntil).toBe(detail.start);
+      await agent
+        .post(`/v1/bookings/${booking.id}/cancel`)
+        .send({ expectedRefundCents: 0 })
+        .expect(200);
+      expect(refundedAmounts()).toEqual([0]);
     });
 
-    it('déplacée il y a 1 h, commence dans 3 jours : échéance = début − 24 h (la plus tardive des deux)', async () => {
+    it('déplacée il y a 1 h, commence dans 30 h : le délai de décision l’emporte sur le palier à 50 %', async () => {
       const { agent } = await registerAs(app, 'customer');
       const booking = await confirmedBooking(agent);
       await reschedule(provider.agent, booking.id, instantIn(DAY + 1, '10:00')).expect(200);
+      await moveTo(booking.id, 30, 1);
 
-      const detail = bookingDetailSchema.parse(
-        (await agent.get(`/v1/bookings/${booking.id}`).expect(200)).body,
-      );
-      expect(new Date(detail.cancellableUntil!).getTime()).toBe(
-        new Date(detail.start).getTime() - 24 * HOUR_MS,
-      );
+      await agent
+        .post(`/v1/bookings/${booking.id}/cancel`)
+        .send({ expectedRefundCents: 4500 })
+        .expect(200);
+      expect(refundedAmounts()).toEqual([4500]);
     });
   });
 

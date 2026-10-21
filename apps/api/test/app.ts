@@ -394,7 +394,10 @@ export function fakePaymentsGateway() {
       }),
     ),
     expireCheckoutSession: vi.fn<PaymentsGateway['expireCheckoutSession']>(async () => {}),
-    refund: vi.fn<PaymentsGateway['refund']>(async () => {}),
+    // Comme Stripe sans remboursement antérieur : le montant demandé est celui qui est remboursé.
+    refund: vi.fn<PaymentsGateway['refund']>(async ({ amountCents }) => ({
+      refundedCents: amountCents,
+    })),
   } satisfies PaymentsGateway;
 }
 

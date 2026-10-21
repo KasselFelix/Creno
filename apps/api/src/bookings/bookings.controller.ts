@@ -17,6 +17,8 @@ import {
   type BookingList,
   type BookingsQuery,
   bookingsQuerySchema,
+  type CancelBookingInput,
+  cancelBookingSchema,
   type CheckoutResponse,
   type CreateBookingInput,
   createBookingSchema,
@@ -75,14 +77,17 @@ export class BookingsController {
     return this.bookings.checkout(user, id);
   }
 
+  // Corps facultatif : le client y renvoie le montant de remboursement qu'on lui a annoncé.
   @Post(':id/cancel')
   @HttpCode(200)
   @OnlyThrottle('bookings')
+  @ApiZodBody(cancelBookingSchema)
   cancel(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(cancelBookingSchema)) body: CancelBookingInput,
   ): Promise<BookingDetail> {
-    return this.bookings.cancel(user, id);
+    return this.bookings.cancel(user, id, body);
   }
 
   // Chaque déplacement envoie un email au client : même limite de débit que la création d'un hold.

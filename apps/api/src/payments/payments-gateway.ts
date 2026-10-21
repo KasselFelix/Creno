@@ -26,12 +26,24 @@ export interface CheckoutSessionInput {
   destinationAccountId: string;
   productName: string;
   description: string;
+  /**
+   * Conditions d'annulation, affichées au-dessus du bouton de paiement (ADR 0020) ; `null` si le
+   * créneau a déjà commencé.
+   */
+  cancellationPolicy: string | null;
   /** Préremplit la page de paiement. */
   customerEmail: string | undefined;
   /** Fin de la session : la même que celle du hold. */
   expiresAt: Date;
   successUrl: string;
   cancelUrl: string;
+}
+
+export interface RefundInput {
+  paymentIntentId: string;
+  bookingId: string;
+  /** Montant à rembourser, calculé par le serveur ; 0 : rien à créer. */
+  amountCents: number;
 }
 
 export interface CheckoutSession {
@@ -57,8 +69,14 @@ export interface PaymentsGateway {
   retrieveCheckoutSession(sessionId: string): Promise<CheckoutSession>;
   /** Ferme une session encore ouverte ; sans effet si elle est déjà terminée. */
   expireCheckoutSession(sessionId: string): Promise<void>;
-  /** Rembourse tout le paiement, reprend le versement au prestataire et rend la commission. */
-  refund(input: { paymentIntentId: string; bookingId: string }): Promise<void>;
+  /**
+   * Porte le total remboursé du paiement à `amountCents`, en reprenant au prorata le versement au
+   * prestataire et la commission. Si un remboursement existe déjà (un essai précédent accepté par
+   * Stripe), seul le complément est créé, et rien s'il couvre déjà le montant. Renvoie le total
+   * remboursé chez Stripe : c'est lui qui est enregistré. Les appels pour une même réservation sont
+   * sérialisés par l'appelant (verrou sur la réservation).
+   */
+  refund(input: RefundInput): Promise<{ refundedCents: number }>;
 }
 
 export type PaymentsGatewayFailure =

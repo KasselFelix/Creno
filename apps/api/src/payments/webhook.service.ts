@@ -67,11 +67,21 @@ class RefundRequired extends Error {
   constructor(
     readonly bookingId: string,
     readonly paymentIntentId: string,
+    /** Le montant encaissé : un paiement arrivé trop tard est rendu en entier. */
+    readonly amountCents: number,
     readonly reason: LateRefundReason,
   ) {
     super('Remboursement requis');
     this.name = 'RefundRequired';
   }
+}
+
+/** Second passage, une fois remboursé chez Stripe un paiement arrivé trop tard. */
+interface LateRefund {
+  bookingId: string;
+  reason: LateRefundReason;
+  /** Total remboursé chez Stripe : c'est ce qui est dû au client. */
+  refundedCents: number;
 }
 
 /** L'événement arrive trop tôt : on ne l'enregistre pas et Stripe le renverra (toute réponse hors 2xx). */
@@ -107,12 +117,12 @@ export class WebhookService {
 
     // L'événement est enregistré et traité dans la même transaction : si le traitement échoue,
     // l'enregistrement est annulé lui aussi, la réponse est une 500 et Stripe renvoie l'événement.
-    const run = (refunded?: RefundRequired) =>
+    const run = (late?: LateRefund) =>
       retryOnDeadlock(() =>
         this.handle.db.transaction(async (tx) => {
           if (!(await this.payments.recordEvent(event, tx)))
             return { kind: 'duplicate' } as Outcome;
-          return this.process(event, tx, refunded);
+          return this.process(event, tx, late);
         }),
       );
 
@@ -125,11 +135,12 @@ export class WebhookService {
       // d'abord (sans verrou ni connexion tenus pendant l'appel), puis on enregistre. Si Stripe
       // échoue ici, l'erreur remonte (500) et Stripe renvoie l'événement ; la clé d'idempotence du
       // remboursement rend ce rejeu sûr.
-      await this.gateway.refund({
+      const { refundedCents } = await this.gateway.refund({
         paymentIntentId: error.paymentIntentId,
         bookingId: error.bookingId,
+        amountCents: error.amountCents,
       });
-      outcome = await run(error);
+      outcome = await run({ bookingId: error.bookingId, reason: error.reason, refundedCents });
     }
     this.report(event, outcome);
   }
@@ -137,14 +148,14 @@ export class WebhookService {
   private process(
     event: VerifiedStripeEvent,
     tx: Database,
-    refunded?: RefundRequired,
+    late?: LateRefund,
   ): Promise<Outcome> | Outcome {
     // Les paiements sont créés sur le compte de la plateforme : un événement de paiement venu d'un
     // compte connecté ne peut pas être l'un des nôtres, quelles que soient ses métadonnées.
     if (event.connect && event.type !== 'account.updated') return unmatched('connect_event');
     switch (event.type) {
       case 'checkout.session.completed':
-        return this.onCheckoutCompleted(event.object, tx, refunded);
+        return this.onCheckoutCompleted(event.object, tx, late);
       case 'checkout.session.expired':
         return this.onCheckoutExpired(event.object, tx);
       case 'charge.refunded':
@@ -170,11 +181,11 @@ export class WebhookService {
     return booking;
   }
 
-  /** `refunded` : second passage, après le remboursement d'un paiement arrivé trop tard. */
+  /** `late` : second passage, après le remboursement d'un paiement arrivé trop tard. */
   private async onCheckoutCompleted(
     object: unknown,
     tx: Database,
-    refunded?: RefundRequired,
+    late?: LateRefund,
   ): Promise<Outcome> {
     const parsed = sessionSchema.safeParse(object);
     if (!parsed.success) return unmatched('invalid_payload');
@@ -211,9 +222,10 @@ export class WebhookService {
 
     // Le remboursement est fait : il ne reste qu'à garder la trace du paiement reçu. Le statut de
     // la réservation ne bouge pas, même si le créneau s'est libéré entre-temps.
-    if (refunded?.bookingId === booking.id) {
+    if (late?.bookingId === booking.id) {
+      await this.bookings.recordLateRefund(booking.id, late.refundedCents, tx);
       await this.notifications.paymentRefundedLate(booking.id, tx);
-      return { kind: 'late_refund', bookingId: booking.id, reason: refunded.reason };
+      return { kind: 'late_refund', bookingId: booking.id, reason: late.reason };
     }
 
     const confirmed = (reactivated: boolean): Outcome => ({
@@ -240,12 +252,22 @@ export class WebhookService {
           );
         } catch (error) {
           if (sqlState(error) !== '23P01') throw error;
-          throw new RefundRequired(booking.id, session.payment_intent, 'slot_taken');
+          throw new RefundRequired(
+            booking.id,
+            session.payment_intent,
+            booking.priceCents,
+            'slot_taken',
+          );
         }
         await this.notifications.bookingConfirmed(booking.id, tx);
         return confirmed(true);
       case 'cancelled':
-        throw new RefundRequired(booking.id, session.payment_intent, 'booking_cancelled');
+        throw new RefundRequired(
+          booking.id,
+          session.payment_intent,
+          booking.priceCents,
+          'booking_cancelled',
+        );
     }
   }
 

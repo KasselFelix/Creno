@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { type BookingDetail, type BookingsQuery, FREE_CANCELLATION_HOURS } from '@creno/shared';
+import type { BookingDetail, BookingsQuery } from '@creno/shared';
 import { QueryError } from '@/components/query-error';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMyBookings } from '../api';
+import { currentRefundText } from '../refund';
 import { isPayable } from '../status';
 import { BookingStatusBadge } from './booking-status-badge';
 import { BookingSummary } from './booking-summary';
@@ -74,8 +75,8 @@ export function MyBookings() {
 
 function BookingCard({ booking }: { booking: BookingDetail }) {
   const payable = isPayable(booking);
-  const tooLateToCancel = booking.status === 'confirmed' && !booking.cancellableUntil;
-  const upcoming = new Date(booking.end) > new Date();
+  // Palier de remboursement en cours et son échéance ; rien une fois le créneau commencé.
+  const refund = booking.cancellableUntil ? currentRefundText(booking) : null;
 
   return (
     <Card>
@@ -92,11 +93,8 @@ function BookingCard({ booking }: { booking: BookingDetail }) {
             {payable && <ResumeCheckoutButton bookingId={booking.id} />}
             {booking.cancellableUntil && <CancelBookingDialog booking={booking} />}
           </div>
-          {tooLateToCancel && upcoming && (
-            <p className="text-muted-foreground text-sm sm:max-w-56 sm:text-right">
-              Annulation en ligne impossible à moins de {FREE_CANCELLATION_HOURS} h du début.
-              Contactez le prestataire.
-            </p>
+          {refund && (
+            <p className="text-muted-foreground text-sm sm:max-w-56 sm:text-right">{refund}</p>
           )}
         </div>
       </CardContent>

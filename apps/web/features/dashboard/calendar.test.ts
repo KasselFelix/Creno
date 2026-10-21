@@ -23,6 +23,8 @@ const booking = (overrides: Partial<ProviderBooking> = {}): ProviderBooking => (
   timezone: 'Europe/Paris',
   customer: { fullName: 'Camille Martin', email: 'camille@test.dev' },
   paymentStatus: 'succeeded',
+  refundedCents: 0,
+  refundDueCents: null,
   rescheduledAt: null,
   cancellableUntil: '2026-10-20T08:00:00.000Z',
   reschedulable: true,

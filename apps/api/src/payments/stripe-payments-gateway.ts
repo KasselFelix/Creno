@@ -7,6 +7,7 @@ import {
   type PaymentsGateway,
   PaymentsGatewayError,
   type PaymentsGatewayFailure,
+  type RefundInput,
 } from './payments-gateway.js';
 
 const TIMEOUT_MS = 10_000;
@@ -145,6 +146,10 @@ export class StripePaymentsGateway implements PaymentsGateway {
             metadata,
           },
           metadata,
+          // Les conditions d'annulation, juste au-dessus du bouton de paiement.
+          ...(input.cancellationPolicy
+            ? { custom_text: { submit: { message: input.cancellationPolicy } } }
+            : {}),
           expires_at: expiresAt,
           success_url: input.successUrl,
           cancel_url: input.cancelUrl,
@@ -172,24 +177,48 @@ export class StripePaymentsGateway implements PaymentsGateway {
     }
   }
 
-  async refund(input: { paymentIntentId: string; bookingId: string }): Promise<void> {
+  async refund(input: RefundInput): Promise<{ refundedCents: number }> {
+    // On part de ce que Stripe a déjà remboursé (essai précédent accepté, réponse perdue ou
+    // enregistrement local échoué) : la clé d'idempotence ne couvre que 10 min, et au-delà un rejeu
+    // d'un remboursement partiel en créerait un second. Seul le complément est créé, jamais plus.
+    const refunded = await this.refundedTotal(input.paymentIntentId);
+    const missing = input.amountCents - refunded;
+    if (missing <= 0) return { refundedCents: refunded };
+
     try {
       await this.stripe.refunds.create(
         {
           payment_intent: input.paymentIntentId,
-          // Reprend l'argent déjà versé au prestataire et rend la commission de la plateforme.
+          amount: missing,
+          // Reprend au prorata l'argent versé au prestataire et la commission de la plateforme.
           reverse_transfer: true,
           refund_application_fee: true,
           metadata: { bookingId: input.bookingId },
         },
-        { idempotencyKey: `refund-${input.bookingId}-${attemptWindow(10)}` },
+        // Le montant visé et le déjà remboursé font partie de la clé : Stripe refuse une même clé
+        // avec d'autres paramètres.
+        {
+          idempotencyKey: `refund-${input.bookingId}-${input.amountCents}-${refunded}-${attemptWindow(10)}`,
+        },
       );
     } catch (error) {
+      // Un autre appel a remboursé entre-temps (annulations simultanées) : on enregistre son montant.
       if (error instanceof Stripe.errors.StripeError && error.code === 'charge_already_refunded') {
-        return;
+        return { refundedCents: await this.refundedTotal(input.paymentIntentId) };
       }
       throw toGatewayError(error);
     }
+    return { refundedCents: input.amountCents };
+  }
+
+  /** Total des remboursements du paiement qui n'ont pas échoué (en cours ou réussis). */
+  private async refundedTotal(paymentIntentId: string): Promise<number> {
+    const refunds = await this.call(() =>
+      this.stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 }),
+    );
+    return refunds.data
+      .filter((refund) => refund.status !== 'failed' && refund.status !== 'canceled')
+      .reduce((total, refund) => total + refund.amount, 0);
   }
 
   private async call<T>(fn: () => Promise<T>): Promise<T> {

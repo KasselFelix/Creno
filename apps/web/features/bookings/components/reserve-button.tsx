@@ -9,11 +9,14 @@ import { HOLD_MINUTES } from '@creno/shared';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { ApiClientError, errorMessage } from '@/lib/api/errors';
 import { useReserve } from '../api';
+import { refundPolicyFor } from '../refund';
 
 interface Props {
   resourceId: string;
   /** Début du créneau choisi (instant ISO). */
   start: string;
+  /** Fuseau de la ressource : les échéances d'annulation s'affichent dans ce fuseau. */
+  timezone: string;
   free: boolean;
   isAuthenticated: boolean;
   /** Page à retrouver après connexion. */
@@ -26,6 +29,7 @@ interface Props {
 export function ReserveButton({
   resourceId,
   start,
+  timezone,
   free,
   isAuthenticated,
   loginNext,
@@ -79,11 +83,19 @@ export function ReserveButton({
 
   return (
     <div className="flex basis-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-muted-foreground text-sm">
-        {free
-          ? 'Réservation gratuite, confirmée immédiatement.'
-          : `Le créneau est bloqué ${HOLD_MINUTES} min, le temps de payer par carte.`}
-      </p>
+      <div className="flex flex-col gap-1">
+        <p className="text-muted-foreground text-sm">
+          {free
+            ? 'Réservation gratuite, confirmée immédiatement.'
+            : `Le créneau est bloqué ${HOLD_MINUTES} min, le temps de payer par carte.`}
+        </p>
+        {/* Les paliers du créneau choisi, avant de payer : un créneau proche rembourse moins. */}
+        {!free && (
+          <p className="text-muted-foreground text-sm">
+            {refundPolicyFor({ start, rescheduledAt: null, timezone })}
+          </p>
+        )}
+      </div>
       <Button className="h-11 w-full sm:w-auto" onClick={submit} disabled={busy}>
         {busy ? (
           <LoaderCircle aria-hidden className="size-4 animate-spin" />
