@@ -12,6 +12,8 @@ import {
   wantsScreen,
 } from '@/lib/api/wake';
 
+/** Délai sans aucune attente déclarée avant que l'écran de chargement ne joue sa fin. */
+const SCREEN_RELEASE_MS = 300;
 /** Activités qui montrent un visiteur présent : de quoi garder l'API éveillée pour lui. */
 const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart'] as const;
 
@@ -55,7 +57,13 @@ export function ApiWakeUp() {
   const [screen, setScreen] = useState<'off' | 'on' | 'finishing'>('off');
   const holding = state.pageWaits + state.serverWaits > 0;
   if (screen === 'off' && watching && wantsScreen(state, now)) setScreen('on');
-  if (screen === 'on' && !holding) setScreen('finishing');
+  // La fin attend un court moment sans aucune attente : entre l'accueil et /search, une page peut
+  // lever la sienne un rendu avant que la suivante ne déclare la sienne (géolocalisation, navigation).
+  useEffect(() => {
+    if (screen !== 'on' || holding) return;
+    const timer = setTimeout(() => setScreen('finishing'), SCREEN_RELEASE_MS);
+    return () => clearTimeout(timer);
+  }, [screen, holding]);
 
   const bar = screen === 'off' && state.wakingSince !== null && isWaking(state, now);
   return (

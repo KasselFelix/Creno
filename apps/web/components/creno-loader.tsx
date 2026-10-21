@@ -2,6 +2,7 @@
 
 import { cn } from 'cn';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import styles from './creno-loader.module.css';
 
 /** Rythme choisi sur le prototype : 0,85 s par tour de page, 0,35 s sur chaque jour. */
@@ -44,12 +45,33 @@ export function CrenoLoader({ finishing, onDone }: { finishing: boolean; onDone:
   const nextRef = useRef<HTMLSpanElement>(null);
   const finishingRef = useRef(finishing);
   const onDoneRef = useRef(onDone);
+  const screenRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<'turning' | 'named' | 'gone'>('turning');
+  // Rempli juste après l'ouverture : une région annoncée déjà pleine au montage n'est pas toujours lue.
+  const [announced, setAnnounced] = useState(false);
 
   useEffect(() => {
     finishingRef.current = finishing;
     onDoneRef.current = onDone;
   }, [finishing, onDone]);
+
+  // La page dessous devient inerte (ni clavier ni lecteur d'écran) tant que l'écran la couvre :
+  // Entrée dans le champ de recherche ne relance rien.
+  useEffect(() => {
+    const screen = screenRef.current;
+    if (!screen) return;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const covered = [...document.body.children].filter(
+      (element): element is HTMLElement =>
+        element instanceof HTMLElement && element !== screen && !element.inert,
+    );
+    for (const element of covered) element.inert = true;
+    const timer = setTimeout(() => setAnnounced(true), 100);
+    return () => {
+      clearTimeout(timer);
+      for (const element of covered) element.inert = false;
+    };
+  }, []);
 
   useEffect(() => {
     const flipper = flipperRef.current;
@@ -118,9 +140,14 @@ export function CrenoLoader({ finishing, onDone }: { finishing: boolean; onDone:
     };
   }, []);
 
-  return (
-    <div role="status" className={cn(styles.screen, phase === 'gone' && styles.gone)}>
-      <span className="sr-only">Chargement…</span>
+  // Rendu directement dans <body> : tout le reste de la page peut devenir inerte.
+  return createPortal(
+    <div
+      ref={screenRef}
+      role="status"
+      className={cn(styles.screen, phase === 'gone' && styles.gone)}
+    >
+      <span className="sr-only">{announced ? 'Chargement…' : ''}</span>
       <div className={styles.lockup} aria-hidden>
         <div className={styles.calendar}>
           <div className={styles.stack}>
@@ -158,6 +185,7 @@ export function CrenoLoader({ finishing, onDone }: { finishing: boolean; onDone:
           ))}
         </span>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
