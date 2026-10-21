@@ -70,6 +70,9 @@ export default function PrivacyPage() {
           </ul>
           <p className="text-muted-foreground">
             Seuls des cookies de session sont utilisés (connexion), sans aucun traceur publicitaire.
+            Votre navigateur garde aussi, en stockage local, le thème choisi et vos 3 dernières
+            recherches en langage naturel, pour vous les reproposer : elles ne sont envoyées que si
+            vous les relancez, et la croix de chacune, sous la barre de recherche, la retire.
           </p>
         </section>
 
