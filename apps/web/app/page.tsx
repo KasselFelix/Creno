@@ -17,7 +17,7 @@ export default function HomePage() {
             créneau libre, réservez et payez en ligne.
           </p>
         </div>
-        <div className="max-w-3xl">
+        <div className="mx-auto w-full max-w-3xl">
           <HomeAiSearch />
         </div>
         {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API. */}
