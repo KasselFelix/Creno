@@ -11,7 +11,8 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2">
+      {/* Pleine largeur : logo et actions aux extrémités de l'écran, quelle que soit sa taille. */}
+      <div className="flex items-center justify-between gap-4 px-4 py-2 sm:px-6 lg:px-8">
         <Link
           href="/"
           className="inline-flex h-11 min-w-11 items-center gap-2 text-lg font-semibold tracking-tight"
@@ -33,6 +34,7 @@ export async function SiteHeader() {
           </Link>
         </nav>
         <nav aria-label="Compte" className="flex min-w-0 items-center gap-1 sm:gap-2">
+          <ThemeToggle />
           {user ? (
             <UserMenu user={user} />
           ) : (
@@ -57,7 +59,6 @@ export async function SiteHeader() {
               </Link>
             </>
           )}
-          <ThemeToggle />
         </nav>
       </div>
     </header>

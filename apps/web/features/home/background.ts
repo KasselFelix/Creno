@@ -27,14 +27,14 @@ export type SlotGrid = {
 const TAKEN_SHARE = { week: 0.15, weekend: 0.55 };
 
 /**
- * Grille décorative à partir du lundi de la semaine de `today` (date locale `YYYY-MM-DD`). Une même
- * graine donne toujours la même grille.
+ * Grille décorative à partir du lundi de la semaine de `today` (date locale `YYYY-MM-DD`), sur
+ * `dayCount` jours (deux semaines par défaut). Une même graine donne toujours la même grille.
  */
-export function buildSlotGrid(today: string, seed: number): SlotGrid {
+export function buildSlotGrid(today: string, seed: number, dayCount = GRID_DAYS): SlotGrid {
   const random = seededRandom(seed);
   const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
   const monday = addDays(today, -((weekday + 6) % 7));
-  const days = Array.from({ length: GRID_DAYS }, (_, index) => {
+  const days = Array.from({ length: dayCount }, (_, index) => {
     const date = addDays(monday, index);
     return { date, label: formatLocalDate(date, { weekday: 'short', day: 'numeric' }) };
   });

@@ -76,12 +76,12 @@
 }
 
 .aiField:focus-within::after {
-  opacity: 0.22;
+  opacity: 0.32;
 }
 
 /* Sur fond sombre, la lueur a besoin d'un peu plus d'intensité pour se voir. */
 :global(.dark) .aiField:focus-within::after {
-  opacity: 0.32;
+  opacity: 0.45;
 }
 
 .aiField:focus-within {
@@ -93,7 +93,11 @@
 }
 
 .aiField:has([aria-busy='true'])::after {
-  opacity: 0.4;
+  opacity: 0.45;
+}
+
+:global(.dark) .aiField:has([aria-busy='true'])::after {
+  opacity: 0.6;
 }
 
 .aiField:has([aria-busy='true']) {

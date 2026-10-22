@@ -24,15 +24,24 @@ function frontFreeCells(grid: SlotGrid): string[] {
 }
 
 /**
- * Grille de créneaux en perspective : deux semaines à partir du lundi courant, des créneaux pris et
- * des créneaux libres qui s'allument tour à tour. À l'arrêt, les cases allumées restent.
+ * Grille de créneaux en perspective : une ou deux semaines à partir du lundi courant, des créneaux
+ * pris et des créneaux libres qui s'allument tour à tour. À l'arrêt, les cases allumées restent.
  */
-export function HomeSlotGrid({ running, reduced }: { running: boolean; reduced: boolean }) {
+export function HomeSlotGrid({
+  dayCount,
+  running,
+  reduced,
+}: {
+  dayCount: 7 | 14;
+  running: boolean;
+  reduced: boolean;
+}) {
   // Navigateur seulement (`ssr: false`) : la date du jour est celle du visiteur.
   const [{ grid, free, still }] = useState(() => {
     const grid = buildSlotGrid(
       todayInZone(Intl.DateTimeFormat().resolvedOptions().timeZone),
       GRID_SEED,
+      dayCount,
     );
     const free = frontFreeCells(grid);
     // Mouvement réduit : quelques créneaux libres allumés, toujours les mêmes.
@@ -60,7 +69,7 @@ export function HomeSlotGrid({ running, reduced }: { running: boolean; reduced: 
 
   return (
     <div className={styles.grid}>
-      <div className={styles.plane}>
+      <div className={cn(styles.plane, dayCount === 7 && styles.planeWeek)}>
         <span />
         {grid.days.map((day) => (
           <span key={day.date} className={styles.day}>

@@ -8,7 +8,7 @@ import { pickHomeBackground } from '../background';
 import { useAnimationRunning } from '../use-animation-running';
 import { HomeSlotGrid } from './home-slot-grid';
 
-/** En dessous, la place libre sous la recherche est trop basse : rien n'est affiché. */
+/** Bande masquée (mobile) ou trop basse : rien n'est affiché, ni téléchargé. */
 const MIN_HEIGHT_PX = 96;
 
 /** `cobe` n'est téléchargé que si le tirage tombe sur le globe. */
@@ -18,9 +18,9 @@ const HomeGlobe = dynamic(() => import('./home-globe').then((module) => module.H
 
 /**
  * Globe ou grille, tiré à chaque affichage de l'accueil (navigateur seulement, chargé avec
- * `ssr: false`) ; `?fond=globe|grille` force le fond pour les captures. Le bouton pause arrête
- * l'animation (WCAG 2.2.2) ; il disparaît quand le système demande moins de mouvement. Le bloc ne
- * prend que l'espace libre de la page : trop bas (mobile, petit écran), le fond n'est pas affiché.
+ * `ssr: false`) ; `?fond=globe|grille` force le fond pour les captures. Le bouton pause, qui flotte
+ * en bas à droite par-dessus l'animation, l'arrête (WCAG 2.2.2) ; il disparaît quand le système
+ * demande moins de mouvement.
  */
 export function RandomBackground() {
   const [background] = useState(() =>
@@ -53,18 +53,22 @@ export function RandomBackground() {
             {background === 'globe' ? (
               <HomeGlobe running={running} reduced={reduced} />
             ) : (
-              <HomeSlotGrid running={running} reduced={reduced} />
+              <HomeSlotGrid dayCount={14} running={running} reduced={reduced} />
             )}
           </div>
           {!reduced && (
             <Button
-              variant="ghost"
+              variant="secondary"
               size="icon"
-              className="text-foreground absolute top-2 right-4 size-11"
+              className="absolute right-4 bottom-4 size-11 rounded-full shadow-md sm:right-6 lg:right-8"
               aria-label={paused ? "Relancer l'animation" : "Mettre l'animation en pause"}
               onClick={() => setPaused((value) => !value)}
             >
-              {paused ? <Play aria-hidden /> : <Pause aria-hidden />}
+              {paused ? (
+                <Play aria-hidden fill="currentColor" />
+              ) : (
+                <Pause aria-hidden fill="currentColor" />
+              )}
             </Button>
           )}
         </>
