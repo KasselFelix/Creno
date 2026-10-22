@@ -81,6 +81,25 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* Toggle jour/nuit : une seule valeur, le toggle montre lui-même le jour ou la nuit. Ciel de nuit
+     bleu nuit, pas noir : il se détache du fond sombre. */
+  --toggle-sky-day: oklch(0.658 0.169 248.8);
+  --toggle-sky-night: oklch(0.28 0.06 265);
+  --toggle-sun: oklch(0.9 0.17 95);
+  --toggle-moon: oklch(1 0 0);
+  --toggle-crater: oklch(0.6 0 0);
+  --toggle-cloud: oklch(0.949 0 0);
+  --toggle-cloud-back: oklch(0.845 0 0);
+  /* Signature des éléments IA (seul multicolore du site). Contraste ≥ 3:1 avec --background tout le
+     long du dégradé : c'est l'indicateur de focus du champ de recherche IA. */
+  --ai-1: oklch(0.55 0.24 293);
+  --ai-2: oklch(0.56 0.17 255);
+  --ai-3: oklch(0.6 0.22 350);
+  --ai-4: oklch(0.64 0.17 45);
+  /* Globe de l'accueil (WebGL) : lus en JS et convertis en RVB par lib/color.ts. */
+  --globe-base: oklch(1 0 0);
+  --globe-glow: oklch(0.922 0 0);
+  --globe-marker: oklch(0.205 0 0);
 }
 
 .dark {
@@ -115,6 +134,13 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --ai-1: oklch(0.7 0.16 293);
+  --ai-2: oklch(0.72 0.14 245);
+  --ai-3: oklch(0.72 0.18 350);
+  --ai-4: oklch(0.78 0.15 60);
+  --globe-base: oklch(0.45 0 0);
+  --globe-glow: oklch(0.269 0 0);
+  --globe-marker: oklch(0.922 0 0);
 }
 
 @layer base {

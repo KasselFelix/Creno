@@ -4,7 +4,8 @@ import Link from 'next/link';
 export function SiteFooter() {
   return (
     <footer className="text-muted-foreground mt-auto border-t text-sm">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">
+      {/* Pleine largeur, comme l'en-tête : les liens aux extrémités de l'écran. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:px-6 lg:px-8">
         <span>Creno — kassel.F</span>
         <div className="ml-auto flex flex-wrap items-center gap-x-4">
           <Link
