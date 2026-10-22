@@ -10,12 +10,12 @@ const RandomBackground = dynamic(
 
 /**
  * Bande de l'animation sous la recherche, pleine largeur, réservée dès le rendu serveur (rien ne
- * bouge quand elle arrive) : 384 px au moins, elle grandit jusqu'au pied de page sur un grand écran.
- * Sur un petit écran, on la découvre en faisant défiler. Masquée sur mobile : rien n'y est téléchargé.
+ * bouge quand elle arrive) : 256 px sur mobile, où son haut dépasse au bas du premier écran ; 384 px
+ * au moins sur desktop, jusqu'au pied de page. Sur un petit écran, on la découvre en faisant défiler.
  */
 export function HomeBackground() {
   return (
-    <div className="relative hidden min-h-96 flex-1 overflow-hidden md:block">
+    <div className="relative h-64 overflow-hidden md:h-auto md:min-h-96 md:flex-1">
       <RandomBackground />
     </div>
   );

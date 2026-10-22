@@ -11,17 +11,20 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b">
-      {/* Pleine largeur : logo et actions aux extrémités de l'écran, quelle que soit sa taille. */}
-      <div className="flex items-center justify-between gap-4 px-4 py-2 sm:px-6 lg:px-8">
+      {/* Pleine largeur : logo et actions aux extrémités de l'écran, quelle que soit sa taille.
+          Sous 640 px, logo, recherche et thème groupés à gauche, compte à droite ; au-delà, le thème
+          rejoint le compte à droite. */}
+      <div className="flex items-center gap-1 px-4 py-2 sm:gap-2 sm:px-6 lg:px-8">
+        {/* Sous 640 px, icône centrée dans sa zone tactile, décalée pour s'aligner sur le contenu. */}
         <Link
           href="/"
-          className="inline-flex h-11 min-w-11 items-center gap-2 text-lg font-semibold tracking-tight"
+          className="-ml-2.5 inline-flex h-11 min-w-11 items-center justify-center gap-2 text-lg font-semibold tracking-tight sm:mr-2 sm:ml-0 sm:justify-start"
         >
           <CrenoLogo className="size-6 shrink-0" />
           {/* Sous 640 px, le logo seul : le nom ferait déborder l'en-tête à 375 px. */}
           <span className="max-sm:sr-only">Creno</span>
         </Link>
-        <nav aria-label="Principale" className="mr-auto">
+        <nav aria-label="Principale">
           <Link
             href="/search"
             className={buttonVariants({
@@ -33,8 +36,11 @@ export async function SiteHeader() {
             <span className="sr-only sm:not-sr-only">Rechercher</span>
           </Link>
         </nav>
-        <nav aria-label="Compte" className="flex min-w-0 items-center gap-1 sm:gap-2">
-          <ThemeToggle />
+        <ThemeToggle className="sm:ml-auto" />
+        <nav
+          aria-label="Compte"
+          className="ml-auto flex min-w-0 items-center gap-1 sm:ml-0 sm:gap-2"
+        >
           {user ? (
             <UserMenu user={user} />
           ) : (

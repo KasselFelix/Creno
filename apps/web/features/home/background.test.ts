@@ -31,6 +31,20 @@ describe('buildSlotGrid', () => {
     expect(grid.days[13]).toEqual({ date: '2026-11-01', label: 'dim. 1' });
   });
 
+  it('couvre une seule semaine sur demande (écran étroit), du lundi au dimanche', () => {
+    const grid = buildSlotGrid('2026-10-21', 1, 7);
+    expect(grid.days.map((day) => day.label)).toEqual([
+      'lun. 19',
+      'mar. 20',
+      'mer. 21',
+      'jeu. 22',
+      'ven. 23',
+      'sam. 24',
+      'dim. 25',
+    ]);
+    for (const row of grid.rows) expect(row.cells).toHaveLength(7);
+  });
+
   it("part du jour même quand c'est un lundi, et de la veille du dimanche suivant", () => {
     expect(buildSlotGrid('2026-10-26', 1).days[0]!.date).toBe('2026-10-26');
     expect(buildSlotGrid('2026-11-01', 1).days[0]!.date).toBe('2026-10-26');

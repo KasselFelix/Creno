@@ -15,7 +15,7 @@ const subscribeNothing = () => () => {};
  * lecteurs d'écran (`role="switch"`, `aria-checked`) n'est posé qu'une fois monté, le serveur ne
  * connaissant pas le thème.
  */
-export function ThemeToggle() {
+export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
   const mounted = useSyncExternalStore(
     subscribeNothing,
@@ -34,7 +34,7 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
-      className={styles.toggle}
+      className={cn(styles.toggle, className)}
       aria-label="Thème sombre"
       role={mounted ? 'switch' : undefined}
       aria-checked={mounted ? resolvedTheme === 'dark' : undefined}

@@ -52,7 +52,7 @@
   transform-origin: 50% 100%;
 }
 
-/* Une semaine, dans une colonne étroite. */
+/* Une semaine, sur un écran étroit (mobile) : les cases restent lisibles. */
 .planeWeek {
   grid-template-columns: 2.75rem repeat(7, 1fr);
   gap: 0.375rem;
