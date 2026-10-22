@@ -18,7 +18,7 @@
 
 /*
  * Grille : sol de calendrier incliné. Le fondu au loin (en haut) et sur les côtés donne la profondeur ;
- * dates et heures, dans ces fondus, se devinent sans être nettes.
+ * les dates s’y perdent presque, les heures se devinent.
  */
 .grid {
   position: absolute;
@@ -26,14 +26,8 @@
   perspective: 1000px;
   perspective-origin: 50% 0;
   mask-image:
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, black 30%, transparent),
-      black 32%,
-      black 85%,
-      transparent
-    ),
-    linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+    linear-gradient(to bottom, transparent, black 30%, black 75%, transparent),
+    linear-gradient(to right, transparent, black 12%, black 88%, transparent);
   mask-composite: intersect;
 }
 
