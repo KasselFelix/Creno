@@ -9,7 +9,7 @@ import { useAnimationRunning } from '../use-animation-running';
 import { HomeSlotGrid } from './home-slot-grid';
 
 /** En dessous, la place libre sous la recherche est trop basse : rien n'est affiché. */
-const MIN_HEIGHT_PX = 160;
+const MIN_HEIGHT_PX = 96;
 
 /** `cobe` n'est téléchargé que si le tirage tombe sur le globe. */
 const HomeGlobe = dynamic(() => import('./home-globe').then((module) => module.HomeGlobe), {
