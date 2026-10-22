@@ -25,7 +25,7 @@ export async function SiteHeader() {
             href="/search"
             className={buttonVariants({
               variant: 'ghost',
-              className: 'h-11 min-w-11 px-2 sm:px-2.5',
+              className: 'h-11 min-w-11 px-2 sm:px-2.5 md:h-9',
             })}
           >
             <Search aria-hidden className="size-5" />
@@ -40,14 +40,17 @@ export async function SiteHeader() {
               {/* Libellés courts sous 640px : les deux actions tiennent sans débordement à 375px. */}
               <Link
                 href="/login"
-                className={buttonVariants({ variant: 'ghost', className: 'h-11 px-2 sm:px-2.5' })}
+                className={buttonVariants({
+                  variant: 'ghost',
+                  className: 'h-11 px-2 sm:px-2.5 md:h-9',
+                })}
               >
                 <span className="sm:hidden">Connexion</span>
                 <span className="hidden sm:inline">Se connecter</span>
               </Link>
               <Link
                 href="/register"
-                className={buttonVariants({ className: 'h-11 px-2 sm:px-2.5' })}
+                className={buttonVariants({ className: 'h-11 px-2 sm:px-2.5 md:h-9' })}
               >
                 <span className="sm:hidden">S&apos;inscrire</span>
                 <span className="hidden sm:inline">Créer un compte</span>

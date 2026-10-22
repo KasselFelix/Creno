@@ -19,13 +19,14 @@ const PHI_FRANCE = Math.PI - ((2.35 * Math.PI) / 180 - Math.PI / 2);
 const THETA = 0.05;
 const SWAY = 0.45;
 const SWAY_SPEED = 0.12;
-/** Diamètre du globe : 880 px au plus, 125 % de la largeur du bloc sur mobile. */
+/** Diamètre du globe : 880 px au plus, 125 % de la largeur du bloc, 3,2 fois sa hauteur. */
 const MAX_DIAMETER = 880;
 const TOP_MARGIN = 24;
 
 /** Mise à l'échelle du globe dans un canvas limité au bloc visible : seule la calotte est calculée. */
 function frame(width: number, height: number) {
-  const diameter = Math.min(MAX_DIAMETER, width * 1.25);
+  // Bloc bas : globe plus petit, pour que la France (à un tiers du rayon sous le haut) reste visible.
+  const diameter = Math.min(MAX_DIAMETER, width * 1.25, height * 3.2);
   // cobe dessine une sphère de rayon 0,8 (demi-hauteur du canvas = 1), agrandie par `scale`.
   const scale = diameter / (0.8 * height);
   // Centre du globe (en partant du bas, comme WebGL) : sous le bloc, le haut à TOP_MARGIN du bord.

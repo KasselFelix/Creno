@@ -23,10 +23,13 @@ Sous la recherche, l'accueil laissait un grand vide. On voulait un fond animé q
 
 **Accessibilité.** Une animation qui démarre seule, dure plus de 5 s et s'affiche à côté d'autre contenu doit pouvoir être arrêtée (WCAG 2.2.2). Le fond a donc un bouton pause. Le réglage système « réduire les animations » donne une image fixe. Le fond se met aussi en pause hors écran et onglet caché. Il est `aria-hidden` : c'est une décoration.
 
+**Seulement l'espace libre.** Le bloc prend la place restante entre la recherche et le pied de page. Il n'allonge jamais la page et ne passe sous aucun élément. Sous 160 px de place libre (mobile, petits écrans), le fond n'est pas affiché, et `cobe` n'est alors pas téléchargé.
+
 ## Conséquences
 
 - Une dépendance de plus (`cobe`), petite et isolée dans le chunk du globe.
-- Le fond apparaît après l'hydratation, en fondu. Sa place est réservée, donc rien ne bouge.
+- Le fond apparaît après l'hydratation, en fondu, dans un espace qui existe déjà : rien ne bouge.
+- Sur mobile, la recherche occupe tout l'écran : le fond n'y apparaît pas.
 - Si le globe échoue (pas de WebGL, couleur illisible), rien n'est dessiné et l'accueil reste celui d'avant.
 
 ## Alternatives écartées

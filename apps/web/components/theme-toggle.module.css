@@ -26,7 +26,7 @@
 
 @media (min-width: 640px) {
   .toggle {
-    --u: 1px;
+    --u: 0.8px;
   }
 }
 
@@ -257,43 +257,58 @@
   translate: 0 0;
 }
 
-/* Bascule, seulement quand l'attribut posé au clic concorde avec la classe de <html>. */
-:global(.dark) .toggle[data-switching='to-dark'] .track,
+/*
+ * Bascule, seulement quand l'attribut posé au clic concorde avec la classe de <html>. Chaque sens a
+ * ses propres @keyframes : une animation qui garde le même nom n'est pas relancée par le navigateur,
+ * la bascule suivante sauterait directement à l'état final.
+ */
+
+:global(.dark) .toggle[data-switching='to-dark'] .track {
+  animation: sky-to-night 0.4s ease-in-out both;
+}
+
 :global(html:not(.dark)) .toggle[data-switching='to-light'] .track {
-  animation: sky-night 0.4s ease-in-out both;
+  animation: sky-to-day 0.4s ease-in-out both;
 }
 
-:global(.dark) .toggle[data-switching='to-dark'] .thumb,
+:global(.dark) .toggle[data-switching='to-dark'] .thumb {
+  animation: thumb-to-night 0.6s ease-in-out both;
+}
+
 :global(html:not(.dark)) .toggle[data-switching='to-light'] .thumb {
-  animation: thumb-night 0.6s ease-in-out both;
+  animation: thumb-to-day 0.6s ease-in-out both;
 }
 
-:global(.dark) .toggle[data-switching='to-dark'] .thumb::before,
+:global(.dark) .toggle[data-switching='to-dark'] .thumb::before {
+  animation: disk-to-night 0.6s ease-in-out both;
+}
+
 :global(html:not(.dark)) .toggle[data-switching='to-light'] .thumb::before {
-  animation: disk-night 0.6s ease-in-out both;
+  animation: disk-to-day 0.6s ease-in-out both;
 }
 
-:global(.dark) .toggle[data-switching='to-dark'] .clouds,
+:global(.dark) .toggle[data-switching='to-dark'] .clouds {
+  animation: clouds-out 0.4s ease-in-out both;
+}
+
 :global(html:not(.dark)) .toggle[data-switching='to-light'] .clouds {
-  animation: fade-out 0.4s ease-in-out both;
+  animation: clouds-in 0.4s ease-in-out both;
 }
 
-:global(.dark) .toggle[data-switching='to-dark'] .crater,
+:global(.dark) .toggle[data-switching='to-dark'] .crater {
+  animation: craters-in 0.4s ease-in-out both;
+}
+
 :global(html:not(.dark)) .toggle[data-switching='to-light'] .crater {
-  animation: fade-in 0.4s ease-in-out both;
+  animation: craters-out 0.4s ease-in-out both;
 }
 
-:global(.dark) .toggle[data-switching='to-dark'] .stars,
+:global(.dark) .toggle[data-switching='to-dark'] .stars {
+  animation: stars-in 0.4s ease-in-out both;
+}
+
 :global(html:not(.dark)) .toggle[data-switching='to-light'] .stars {
-  animation: stars-drop 0.4s ease-in-out both;
-}
-
-/* Vers le jour : les mêmes animations, jouées à l'envers. */
-:global(html:not(.dark))
-  .toggle[data-switching='to-light']
-  :is(.track, .thumb, .crater, .clouds, .stars),
-:global(html:not(.dark)) .toggle[data-switching='to-light'] .thumb::before {
-  animation-direction: reverse;
+  animation: stars-out 0.4s ease-in-out both;
 }
 
 /* Ambiance au survol ou au focus seulement : au repos, rien ne bouge (WCAG 2.2.2). */
@@ -307,7 +322,7 @@
   animation-play-state: running;
 }
 
-@keyframes sky-night {
+@keyframes sky-to-night {
   from {
     background: var(--toggle-sky-day);
   }
@@ -316,8 +331,17 @@
   }
 }
 
+@keyframes sky-to-day {
+  from {
+    background: var(--toggle-sky-night);
+  }
+  to {
+    background: var(--toggle-sky-day);
+  }
+}
+
 /* `rotate-center` du modèle (appelée mais jamais définie) : un tour complet pendant le glissement. */
-@keyframes thumb-night {
+@keyframes thumb-to-night {
   from {
     translate: 0 0;
     rotate: 0deg;
@@ -328,7 +352,18 @@
   }
 }
 
-@keyframes disk-night {
+@keyframes thumb-to-day {
+  from {
+    translate: var(--thumb-shift) 0;
+    rotate: 0deg;
+  }
+  to {
+    translate: 0 0;
+    rotate: -360deg;
+  }
+}
+
+@keyframes disk-to-night {
   from {
     background: var(--toggle-sun);
   }
@@ -337,7 +372,16 @@
   }
 }
 
-@keyframes fade-out {
+@keyframes disk-to-day {
+  from {
+    background: var(--toggle-moon);
+  }
+  to {
+    background: var(--toggle-sun);
+  }
+}
+
+@keyframes clouds-out {
   from {
     opacity: 1;
   }
@@ -346,7 +390,7 @@
   }
 }
 
-@keyframes fade-in {
+@keyframes clouds-in {
   from {
     opacity: 0;
   }
@@ -355,7 +399,25 @@
   }
 }
 
-@keyframes stars-drop {
+@keyframes craters-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes craters-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes stars-in {
   from {
     opacity: 0;
     translate: 0 calc(var(--u) * -32);
@@ -363,6 +425,17 @@
   to {
     opacity: 1;
     translate: 0 0;
+  }
+}
+
+@keyframes stars-out {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: 0 calc(var(--u) * -32);
   }
 }
 

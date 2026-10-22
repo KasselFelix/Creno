@@ -21,13 +21,13 @@ export default function HomePage() {
         <div className="mx-auto w-full max-w-3xl">
           <HomeAiSearch />
         </div>
-        <HomeBackground />
         {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API. */}
         {process.env.NODE_ENV === 'development' && (
           <Suspense fallback={<ApiStatusCardSkeleton />}>
             <ApiStatusCard />
           </Suspense>
         )}
+        <HomeBackground />
       </main>
     </>
   );

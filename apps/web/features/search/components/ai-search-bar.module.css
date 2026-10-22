@@ -11,9 +11,17 @@
   initial-value: 0deg;
 }
 
-/* `isolation` : le halo (z-index -1) passe derrière le champ sans glisser sous ses ancêtres. */
+/*
+ * Fond opaque, identique au rendu habituel du champ (transparent sur le fond de page en clair, 4,5 %
+ * de blanc en sombre) : le halo passe derrière le champ, seule sa lueur autour reste visible.
+ * Le parent porte `isolation: isolate`, pour que le halo (z-index -1) ne glisse pas sous ses ancêtres.
+ */
 .aiField {
-  isolation: isolate;
+  background-color: var(--background);
+}
+
+:global(.dark) .aiField {
+  background-color: color-mix(in srgb, var(--foreground) 4.5%, var(--background));
 }
 
 .aiField::before,
@@ -30,27 +38,27 @@
     var(--ai-4),
     var(--ai-1)
   );
-  /* Seul l'alpha du masque compte : il garde le contour et retire l'intérieur du champ. */
-  mask:
-    linear-gradient(black 0 0) content-box exclude,
-    linear-gradient(black 0 0);
   transition: opacity 300ms ease;
 }
 
-/* Anneau de 2 px qui recouvre la bordure de 1 px : aucun décalage de mise en page. */
+/* Anneau de 2 px qui recouvre la bordure de 1 px : aucun décalage de mise en page. Seul l'alpha du
+   masque compte : il garde le contour et retire l'intérieur. */
 .aiField::before {
   inset: -1px;
   padding: 2px;
   border-radius: calc(var(--radius) + 1px);
+  mask:
+    linear-gradient(black 0 0) content-box exclude,
+    linear-gradient(black 0 0);
 }
 
-/* Halo : le même dégradé, flouté, autour du champ seulement. */
+/* Halo : le même dégradé, très flouté et léger, derrière le champ. Sans masque, la lueur s'estompe
+   d'elle-même au lieu d'être coupée net. */
 .aiField::after {
   z-index: -1;
-  inset: -10px;
-  padding: 10px;
-  border-radius: calc(var(--radius) + 10px);
-  filter: blur(8px);
+  inset: 2px;
+  border-radius: var(--radius);
+  filter: blur(18px);
 }
 
 @media (hover: hover) {
@@ -68,7 +76,12 @@
 }
 
 .aiField:focus-within::after {
-  opacity: 0.35;
+  opacity: 0.22;
+}
+
+/* Sur fond sombre, la lueur a besoin d'un peu plus d'intensité pour se voir. */
+:global(.dark) .aiField:focus-within::after {
+  opacity: 0.32;
 }
 
 .aiField:focus-within {
@@ -80,7 +93,7 @@
 }
 
 .aiField:has([aria-busy='true'])::after {
-  opacity: 0.6;
+  opacity: 0.4;
 }
 
 .aiField:has([aria-busy='true']) {
