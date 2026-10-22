@@ -48,7 +48,7 @@ export function UserMenu({ user }: { user: PublicUser }) {
         render={
           <Button
             variant="ghost"
-            className="h-11 gap-2 px-2"
+            className="h-11 gap-2 px-2 md:h-9"
             aria-label={`Menu du compte de ${user.fullName}`}
           />
         }

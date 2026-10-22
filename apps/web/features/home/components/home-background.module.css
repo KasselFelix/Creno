@@ -59,6 +59,11 @@
   width: calc(100% - 1rem);
 }
 
+/* Cases plus basses sur mobile : la plaque entière, dates comprises, tient dans la bande de 256 px. */
+.planeWeek .slot {
+  height: 2.5rem;
+}
+
 .day,
 .hour {
   display: flex;

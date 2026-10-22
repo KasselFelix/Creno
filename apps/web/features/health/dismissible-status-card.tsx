@@ -32,7 +32,7 @@ export function DismissibleStatusCard({
       <Button
         variant="ghost"
         size="icon"
-        className="absolute top-2 right-2"
+        className="absolute top-1 right-1 size-11"
         aria-label="Fermer l'état de l'API"
         onClick={() => {
           setClosedNow(true);

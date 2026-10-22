@@ -131,8 +131,17 @@ export function HomeGlobe({ running, reduced }: { running: boolean; reduced: boo
       });
     };
     if (!running) {
-      draw();
-      return;
+      // Image fixe (mouvement réduit, pause, hors écran). cobe décode sa carte des terres en différé,
+      // après la création du globe : on redessine la même image pendant une seconde, sans aucun
+      // mouvement, pour que les continents apparaissent même si elle arrive après le premier dessin.
+      let raf = 0;
+      const until = performance.now() + 1000;
+      const still = (now: number) => {
+        draw();
+        if (now < until) raf = requestAnimationFrame(still);
+      };
+      raf = requestAnimationFrame(still);
+      return () => cancelAnimationFrame(raf);
     }
     let raf = 0;
     let last = performance.now();

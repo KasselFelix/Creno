@@ -27,9 +27,10 @@ export default function HomePage() {
         <HomeBackground />
       </main>
       {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API.
-          Elle flotte par-dessus la page et se ferme d'une croix. */}
+          Elle flotte par-dessus la page, à gauche du bouton pause de l'animation (`sm:right-20`),
+          et se ferme d'une croix. */}
       {process.env.NODE_ENV === 'development' && (
-        <div className="fixed right-4 bottom-4 left-4 z-20 sm:left-auto sm:w-sm">
+        <div className="fixed right-4 bottom-4 left-4 z-20 sm:right-20 sm:left-auto sm:w-sm">
           <Suspense fallback={null}>
             <ApiStatusCard />
           </Suspense>
