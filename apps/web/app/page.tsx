@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { SiteHeader } from '@/components/site-header';
-import { ApiStatusCard, ApiStatusCardSkeleton } from '@/features/health/api-status-card';
+import { ApiStatusCard } from '@/features/health/api-status-card';
 import { HomeBackground } from '@/features/home/components/home-background';
 import { HomeAiSearch } from '@/features/search/components/home-ai-search';
 
@@ -21,11 +21,14 @@ export default function HomePage() {
         <div className="mx-auto w-full max-w-3xl">
           <HomeAiSearch />
         </div>
-        {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API. */}
+        {/* Aide au développement (stack docker compose) : un visiteur n'a pas à voir l'état de l'API.
+            Elle flotte par-dessus la page (le fond animé garde sa place) et se ferme d'une croix. */}
         {process.env.NODE_ENV === 'development' && (
-          <Suspense fallback={<ApiStatusCardSkeleton />}>
-            <ApiStatusCard />
-          </Suspense>
+          <div className="fixed right-4 bottom-4 left-4 z-20 sm:left-auto sm:w-sm">
+            <Suspense fallback={null}>
+              <ApiStatusCard />
+            </Suspense>
+          </div>
         )}
         <HomeBackground />
       </main>
